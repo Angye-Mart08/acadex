@@ -1,0 +1,23 @@
+# Dependencias instaladas localmente
+node_modules/
+**/node_modules/
+
+# Variables y secretos locales
+.env
+.env.*
+!.env.example
+
+# Salidas y archivos temporales
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+coverage/
+
+# Sistema operativo y editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

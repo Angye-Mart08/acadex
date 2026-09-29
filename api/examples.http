@@ -1,5 +1,5 @@
 ### 1. Login
-POST http://localhost:4010/api/v1/auth/login
+POST http://localhost:4010/auth/login
 Content-Type: application/json
 
 {
@@ -8,7 +8,7 @@ Content-Type: application/json
 }
 
 ### 2. Seleccionar rol y obtener tokens
-POST http://localhost:4010/api/v1/auth/select-role
+POST http://localhost:4010/auth/select-role
 Content-Type: application/json
 
 {
@@ -17,14 +17,15 @@ Content-Type: application/json
 }
 
 ### 3. Usuario actual
-GET http://localhost:4010/api/v1/auth/me
+GET http://localhost:4010/auth/me
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.demo
 
 ### 4. Crear solicitud como estudiante
-POST http://localhost:4010/api/v1/requests
+POST http://localhost:4010/requests
 Content-Type: application/json
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.demo
 Idempotency-Key: request-901-demo
+Prefer: code=201
 
 {
   "tipo": "MONITORIA",
@@ -36,14 +37,15 @@ Idempotency-Key: request-901-demo
 }
 
 ### 5. Consultar disponibilidad
-GET http://localhost:4010/api/v1/availability?fecha=2026-10-01&asignaturaId=18&rol=MONITOR
+GET http://localhost:4010/availability?fecha=2026-10-01&asignaturaId=18&rol=MONITOR
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.demo
 
 ### 6. Programar sesión como administrador
-POST http://localhost:4010/api/v1/sessions
+POST http://localhost:4010/sessions
 Content-Type: application/json
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.demo
 Idempotency-Key: session-1401-demo
+Prefer: code=201
 
 {
   "solicitudId": 901,
@@ -56,7 +58,7 @@ Idempotency-Key: session-1401-demo
 }
 
 ### 7. Registrar asistencia y seguimiento
-PUT http://localhost:4010/api/v1/sessions/1401/attendance
+PUT http://localhost:4010/sessions/1401/attendance
 Content-Type: application/json
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.demo
 
@@ -68,7 +70,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.demo
 }
 
 ### 8. Cargar evidencia
-POST http://localhost:4010/api/v1/sessions/1401/evidences
+POST http://localhost:4010/sessions/1401/evidences
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.demo
 Content-Type: multipart/form-data; boundary=----UnitropicoBoundary
 

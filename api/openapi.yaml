@@ -16,8 +16,8 @@ info:
 servers:
   - url: http://localhost:3000/api/v1
     description: API local de desarrollo
-  - url: http://localhost:4010/api/v1
-    description: Mock local generado con Prism
+  - url: http://localhost:4010
+    description: Mock local generado con Prism; Prism expone las rutas desde la raíz
   - url: https://api.tutorias.unitropico.edu.co/api/v1
     description: Producción
 tags:
@@ -302,6 +302,35 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AcademicRequest' }
+              example:
+                idSolicitud: 901
+                estudiante:
+                  idUsuario: 25
+                  codigo: EST20260125
+                  nombreCompleto: Laura Hernández Rojas
+                tipo: MONITORIA
+                asignatura:
+                  idAsignatura: 18
+                  codigo: MATB-101
+                  nombre: Matemáticas Básicas
+                  creditos: 3
+                  semestre: 1
+                  programa:
+                    idPrograma: 1
+                    codigo: IS
+                    nombre: Ingeniería de Sistemas
+                    nivel: PREGRADO
+                    estado: ACTIVO
+                  estado: ACTIVO
+                motivo: Necesito reforzar integrales antes del segundo parcial
+                fechaPreferida: '2026-10-01'
+                horaPreferida: '14:00'
+                modalidadPreferida: PRESENCIAL
+                responsable: null
+                estado: PENDIENTE
+                comentarioEstado: null
+                createdAt: '2026-09-28T09:15:00-05:00'
+                updatedAt: '2026-09-28T09:15:00-05:00'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationError' }
@@ -492,6 +521,40 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Session' }
+              example:
+                idSesion: 1401
+                solicitudId: 901
+                estudiante:
+                  idUsuario: 25
+                  codigo: EST20260125
+                  nombreCompleto: Laura Hernández Rojas
+                responsable:
+                  idUsuario: 33
+                  codigo: MON20260133
+                  nombreCompleto: Carlos Pérez Gómez
+                tipo: MONITORIA
+                asignatura:
+                  idAsignatura: 18
+                  codigo: MATB-101
+                  nombre: Matemáticas Básicas
+                  creditos: 3
+                  semestre: 1
+                  programa:
+                    idPrograma: 1
+                    codigo: IS
+                    nombre: Ingeniería de Sistemas
+                    nivel: PREGRADO
+                    estado: ACTIVO
+                  estado: ACTIVO
+                espacio: null
+                fecha: '2026-10-01'
+                horaInicio: '14:00'
+                horaFin: '16:00'
+                modalidad: PRESENCIAL
+                enlaceVirtual: null
+                estado: PROGRAMADA
+                createdAt: '2026-09-28T09:20:00-05:00'
+                updatedAt: '2026-09-28T09:20:00-05:00'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -988,7 +1051,7 @@ components:
             status: 422
             code: VALIDATION_ERROR
             message: Uno o más campos no cumplen las reglas de validación.
-            path: /api/v1/users
+            path: /api/v1/resource
             timestamp: '2026-09-28T17:03:00-05:00'
             requestId: req_01J8YQ9Z8N
             details:
