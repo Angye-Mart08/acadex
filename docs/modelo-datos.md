@@ -51,7 +51,7 @@ Disponibilidad ──< AsignacionEspacio >── Espacio
 ## Correspondencia con el frontend
 
 | Pantalla | Entidades principales |
-|---|---|
+| --- | --- |
 | Inicio de sesión | `Usuario`, `Credencial`, `UsuarioRol` |
 | Gestión de usuarios | `Usuario`, `Rol`, `UsuarioRol` |
 | Gestión de espacios | `Espacio` |

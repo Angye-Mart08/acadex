@@ -83,7 +83,7 @@ Todos están excluidos mediante `.gitignore`. Para instalar las dependencias se 
 El login utiliza correo institucional y documento de identidad:
 
 | Rol | Correo | Documento |
-|---|---|---|
+| --- | --- | --- |
 | Administrador | `jaysonquintero@unitropico.edu.co` | `1000000010` |
 | Tutor | `tutormatematica@unitropico.edu.co` | `1007418843` |
 | Monitor + Estudiante | `brayhamlindarte.es@unitropico.edu.co` | `1093432540` |

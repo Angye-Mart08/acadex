@@ -122,7 +122,7 @@ npm run build
 ## 6. Estado técnico del avance
 
 | Área | Estado |
-|---|---|
+| --- | --- |
 | Frontend React + TypeScript | Implementado en modo navegable |
 | Vite | Configurado |
 | Diseño responsive | Implementado para escritorio, tablet y móvil |
@@ -187,7 +187,7 @@ Estudiante:    mariaamezquita.es@unitropico.edu.co / 1029663952
 Se añadieron portales navegables con menús diferenciados:
 
 | Rol | Información disponible en este avance |
-|---|---|
+| --- | --- |
 | Administrador | Usuarios, espacios, solicitudes y resumen administrativo |
 | Tutor | Resumen, disponibilidad, sesiones e informes |
 | Monitor | Resumen, horarios, solicitudes asignadas y sesiones |
@@ -229,7 +229,7 @@ npm run validate
 ## 11. Estado actualizado
 
 | Área | Estado |
-|---|---|
+| --- | --- |
 | Login por correo + documento | Implementado en demo local |
 | Selección y cambio de rol | Implementado en demo local |
 | Portal administrador | Implementado |

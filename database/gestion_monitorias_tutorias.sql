@@ -1554,7 +1554,7 @@ CREATE TABLE Informe(
 
     CONSTRAINT fk_informe_revisor
         FOREIGN KEY(revisado_por) REFERENCES Usuario(id_usuario)
-        ON UPDATE CASCADE ON DELETE RESTRICT
+        ON UPDATE CASCADE ON DELETE SET NULL
 
 ) ENGINE=InnoDB;
 
@@ -1587,110 +1587,33 @@ CREATE TABLE HistorialInforme(
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- ÍNDICES
+-- ÍNDICES OPTIMIZADOS
+-- Nota: En InnoDB, las columnas UNIQUE y las FOREIGN KEY
+-- ya generan índices automáticos en el motor.
+-- A continuación se definen los índices complementarios
+-- de alto valor para consultas frecuentes y filtros operativos.
 -- =====================================================
 
-CREATE INDEX idx_usuario_codigo
-ON Usuario(codigo);
-
-CREATE INDEX idx_usuario_documento
-ON Usuario(documento);
-
-CREATE INDEX idx_usuario_correo
-ON Usuario(correo);
-
-CREATE INDEX idx_credencial_usuario
-ON Credencial(usuario);
-
-CREATE INDEX idx_usuario_rol_usuario
-ON UsuarioRol(id_usuario);
-
-CREATE INDEX idx_usuario_rol_rol
-ON UsuarioRol(id_rol);
-
-CREATE INDEX idx_programa_facultad
-ON Programa(id_facultad);
-
-CREATE INDEX idx_programa_asignatura_programa
-ON ProgramaAsignatura(id_programa);
-
-CREATE INDEX idx_programa_asignatura_asignatura
-ON ProgramaAsignatura(id_asignatura);
-
-CREATE INDEX idx_estudiante_programa
-ON EstudiantePrograma(id_estudiante);
-
-CREATE INDEX idx_asignacion_usuario
-ON AsignacionAcademica(id_usuario);
-
-CREATE INDEX idx_asignacion_asignatura
-ON AsignacionAcademica(id_asignatura);
-
-CREATE INDEX idx_asignacion_periodo
-ON AsignacionAcademica(id_periodo);
-
-CREATE INDEX idx_disponibilidad_asignacion
-ON Disponibilidad(id_asignacion);
-
-CREATE INDEX idx_asignacion_espacio_disponibilidad
-ON AsignacionEspacio(id_disponibilidad);
-
-CREATE INDEX idx_asignacion_espacio
-ON AsignacionEspacio(id_espacio);
-
-CREATE INDEX idx_solicitud_estudiante
-ON Solicitud(id_estudiante);
-
-CREATE INDEX idx_solicitud_asignatura
-ON Solicitud(id_asignatura);
-
+-- Filtros operativos para Sesiones
 CREATE INDEX idx_sesion_fecha
 ON Sesion(fecha);
 
-CREATE INDEX idx_sesion_asignacion
-ON Sesion(id_asignacion);
+CREATE INDEX idx_sesion_estado
+ON Sesion(estado);
 
-CREATE INDEX idx_sesion_solicitud
-ON Sesion(id_solicitud);
+CREATE INDEX idx_sesion_fecha_estado
+ON Sesion(fecha, estado);
 
-CREATE INDEX idx_asistencia_sesion
-ON Asistencia(id_sesion);
+-- Filtros operativos para Solicitudes
+CREATE INDEX idx_solicitud_estado_prioridad
+ON Solicitud(estado, prioridad);
 
-CREATE INDEX idx_asistencia_estudiante
-ON Asistencia(id_estudiante);
+CREATE INDEX idx_solicitud_fecha
+ON Solicitud(fecha_solicitud);
 
-CREATE INDEX idx_historial_sesion
-ON HistorialSesion(id_sesion);
-
-CREATE INDEX idx_clasificacion_solicitud
-ON Clasificacion(id_solicitud);
-
-CREATE INDEX idx_clasificacion_usuario
-ON Clasificacion(id_usuario);
-
-CREATE INDEX idx_seguimiento_estudiante
-ON Seguimiento(id_estudiante);
-
-CREATE INDEX idx_seguimiento_sesion
-ON Seguimiento(id_sesion);
-
-CREATE INDEX idx_compromiso_seguimiento
-ON Compromiso(id_seguimiento);
-
-CREATE INDEX idx_evidencia_seguimiento
-ON Evidencia(id_seguimiento);
-
-CREATE INDEX idx_periodo_nombre
-ON PeriodoAcademico(nombre);
-
-CREATE INDEX idx_tutor_usuario
-ON Tutor(id_usuario);
-
-CREATE INDEX idx_monitor_usuario
-ON Monitor(id_usuario);
-
-CREATE INDEX idx_administrador_usuario
-ON Administrador(id_usuario);
+-- Filtros para disponibilidad y espacios
+CREATE INDEX idx_disponibilidad_dia
+ON Disponibilidad(dia_semana);
 
 CREATE INDEX idx_espacio_estado
 ON Espacio(estado);
@@ -1698,32 +1621,12 @@ ON Espacio(estado);
 CREATE INDEX idx_espacio_ubicacion
 ON Espacio(edificio, bloque, salon);
 
-CREATE INDEX idx_solicitud_estado
-ON Solicitud(estado);
+-- Filtros para compromisos pedagógicos e informes
+CREATE INDEX idx_compromiso_estado
+ON Compromiso(estado);
 
-CREATE INDEX idx_sesion_estado
-ON Sesion(estado);
-
-CREATE INDEX idx_disponibilidad_dia
-ON Disponibilidad(dia_semana);
-
-CREATE INDEX idx_cancelacion_monitoria_sesion
-ON CancelacionMonitoria(id_sesion);
-
-CREATE INDEX idx_cancelacion_monitoria_usuario
-ON CancelacionMonitoria(id_usuario);
-
-CREATE INDEX idx_reporte_monitoria_sesion
-ON ReporteMonitoria(id_sesion);
-
-CREATE INDEX idx_reporte_monitoria_usuario
-ON ReporteMonitoria(id_usuario);
-
-CREATE INDEX idx_recuperacion_monitoria_sesion
-ON RecuperacionMonitoria(id_sesion_original);
-
-CREATE INDEX idx_recuperacion_monitoria_usuario
-ON RecuperacionMonitoria(id_usuario);
+CREATE INDEX idx_informe_estado
+ON Informe(estado);
 
 -- =====================================================
 -- DATOS DE PRUEBA

@@ -17,5 +17,7 @@
     "**/node_modules": true,
     "**/dist": true,
     "**/.git": true
-  }
+  },
+  "mssql.intelliSense.enableErrorChecking": false,
+  "mssql.format.showParseErrorNotification": false
 }
