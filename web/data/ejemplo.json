@@ -1,0 +1,43 @@
+{
+  "description": "Datos de referencia para revisar el caso académico en el frontend",
+  "period": "2026-2",
+  "users": [
+    {
+      "code": "ADM001",
+      "name": "Jayson Eric Quintero",
+      "role": "Administrador",
+      "status": "Activo"
+    },
+    {
+      "code": "TUT001",
+      "name": "Raúl Fernando Robayo",
+      "role": "Tutor",
+      "status": "Activo"
+    },
+    {
+      "code": "MON001",
+      "name": "Brayham Orlando Lindarte",
+      "role": "Monitor",
+      "status": "Activo"
+    },
+    {
+      "code": "EST001",
+      "name": "María Valentina Amezquita",
+      "role": "Estudiante",
+      "status": "Activo"
+    }
+  ],
+  "spaces": [
+    { "code": "101A", "name": "Salón 101A", "type": "Aula", "capacity": 20 },
+    { "code": "BIB01", "name": "Biblioteca central", "type": "Biblioteca", "capacity": 40 }
+  ],
+  "requests": [
+    {
+      "id": 1,
+      "subject": "Pensamiento matemático",
+      "type": "Monitoría",
+      "priority": "Alta",
+      "status": "Pendiente"
+    }
+  ]
+}

@@ -1,13 +1,15 @@
 {
-  "name": "contrato-api-proyecto-web",
+  "name": "gestion-tutorias-api",
   "private": true,
-  "version": "2.0.0",
+  "version": "0.1.0",
+  "type": "module",
   "scripts": {
-    "validate": "prism validate openapi.yaml",
-    "mock": "prism mock openapi.yaml -p 4010",
-    "mock:dynamic": "prism mock openapi.yaml -p 4010 --dynamic"
+    "validate": "node scripts/validate-openapi.mjs",
+    "mock": "prism mock openapi.yaml -p 4010"
   },
   "devDependencies": {
-    "@stoplight/prism-cli": "^5.15.1"
+    "@stoplight/prism-cli": "^5.15.1",
+    "eslint": "^10.11.0",
+    "yaml": "^2.9.1"
   }
 }
