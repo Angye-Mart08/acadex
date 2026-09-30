@@ -1,4 +1,4 @@
-# README_PROYECTO — Gestión de Tutorías y Monitorías
+# BITACORA_PROYECTO — Gestión de Tutorías y Monitorías
 
 ## 1. Identificación
 
