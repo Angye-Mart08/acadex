@@ -1,897 +1,524 @@
 openapi: 3.1.0
 info:
-  title: API de Tutorías y Monitorías Académicas - Unitrópico
-  version: 2.0.0
-  summary: Contrato REST para la plataforma web de acompañamiento académico
+  title: API de Gestión de Tutorías y Monitorías — Unitrópico
+  version: 0.1.0
+  summary: Contrato REST inicial alineado con el primer avance del frontend
   description: |
-    Contrato de API para la plataforma web de gestión de tutorías y monitorías
-    académicas de la Fundación Universitaria Internacional del Trópico Americano
-    (Unitrópico). Arquitectura: React + TypeScript -> Node.js + TypeScript -> MariaDB.
-    Fechas ISO 8601 y zona horaria institucional America/Bogota.
+    Contrato de la API REST para la plataforma web de gestión de tutorías y
+    monitorías académicas de Unitrópico.
+
+    Arquitectura prevista: React + TypeScript → Node.js + TypeScript → MariaDB.
+    Las fechas y horas utilizan la zona horaria institucional America/Bogota.
   contact:
-    name: Equipo de desarrollo Unitrópico
+    name: Equipo de desarrollo de Unitrópico
     email: soporte.tutorias@unitropico.edu.co
-  license:
-    name: Uso institucional Unitrópico
 servers:
   - url: http://localhost:3000/api/v1
     description: API local de desarrollo
-  - url: http://localhost:4010/api/v1
-    description: Mock local generado con Prism
-  - url: https://api.tutorias.unitropico.edu.co/api/v1
-    description: Producción
 tags:
   - name: Autenticación
-  - name: Usuarios y roles
-  - name: Dashboard
+  - name: Portal personal
+  - name: Usuarios
+  - name: Espacios
   - name: Solicitudes
-  - name: Disponibilidad
-  - name: Sesiones
-  - name: Asistencia y seguimiento
-  - name: Evidencias
-  - name: Catálogos académicos
-  - name: Reportes
-  - name: Informes mensuales
-security:
-  - bearerAuth: []
-
 paths:
   /auth/login:
     post:
       tags: [Autenticación]
-      summary: Iniciar sesión
+      summary: Iniciar sesión con correo institucional y documento
       operationId: login
       security: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/LoginRequest' }
-            example: { codigo: EST20260125, password: ClaveSegura123 }
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: jaysonquintero@unitropico.edu.co
+              document: '1000000010'
       responses:
         '200':
           description: Credenciales válidas.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/LoginResponse' }
-              example:
-                preAuthToken: pre_eyJhbGciOiJub25l
-                requiresRoleSelection: true
-                user:
-                  idUsuario: 25
-                  codigo: EST20260125
-                  nombres: Laura
-                  apellidos: Hernández Rojas
-                  correo: laura.hernandez@unitropico.edu.co
-                  roles: [ESTUDIANTE, MONITOR]
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-        '429': { $ref: '#/components/responses/TooManyRequests' }
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /auth/select-role:
     post:
       tags: [Autenticación]
-      summary: Seleccionar el rol activo
+      summary: Seleccionar el rol activo de la sesión
       operationId: selectRole
       security: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/SelectRoleRequest' }
-            example: { preAuthToken: pre_eyJhbGciOiJub25l, idRol: 2 }
+            schema:
+              $ref: '#/components/schemas/RoleSelectionRequest'
       responses:
         '200':
-          description: Sesión creada.
+          description: Rol seleccionado y sesión emitida.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/TokenResponse' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /auth/refresh:
-    post:
-      tags: [Autenticación]
-      summary: Renovar tokens
-      operationId: refreshToken
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RefreshTokenRequest' }
-      responses:
-        '200':
-          description: Tokens renovados.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TokenResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-  /auth/logout:
-    post:
-      tags: [Autenticación]
-      summary: Cerrar sesión
-      operationId: logout
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RefreshTokenRequest' }
-      responses:
-        '204': { description: Sesión cerrada correctamente. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /auth/me:
     get:
       tags: [Autenticación]
-      summary: Consultar usuario autenticado
+      summary: Consultar el usuario autenticado
       operationId: getCurrentUser
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: Perfil y rol activo.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/CurrentUser' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-
-  /roles:
-    get:
-      tags: [Usuarios y roles]
-      summary: Listar roles
-      operationId: listRoles
-      x-roles: [ADMINISTRADOR]
-      responses:
-        '200':
-          description: Catálogo de roles.
+          description: Perfil del usuario autenticado.
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Role' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-  /users:
-    get:
-      tags: [Usuarios y roles]
-      summary: Consultar usuarios
-      operationId: listUsers
-      x-roles: [ADMINISTRADOR]
-      parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
-        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
-        - { name: role, in: query, schema: { $ref: '#/components/schemas/RoleName' } }
-        - { name: estado, in: query, schema: { $ref: '#/components/schemas/EstadoUsuario' } }
-      responses:
-        '200':
-          description: Lista paginada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PaginatedUsers' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-    post:
-      tags: [Usuarios y roles]
-      summary: Crear usuario
-      operationId: createUser
-      x-roles: [ADMINISTRADOR]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateUserRequest' }
-            example:
-              codigo: MON20260125
-              documento: '1009123456'
-              nombres: Laura
-              apellidos: Hernández Rojas
-              correo: laura.hernandez@unitropico.edu.co
-              telefono: '3185550123'
-              roleIds: [2]
-      responses:
-        '201':
-          description: Usuario creado.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/User' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /users/{idUsuario}:
-    parameters: [{ $ref: '#/components/parameters/UserId' }]
-    get:
-      tags: [Usuarios y roles]
-      summary: Consultar usuario por ID
-      operationId: getUser
-      x-roles: [ADMINISTRADOR]
-      responses:
-        '200':
-          description: Usuario encontrado.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/User' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    patch:
-      tags: [Usuarios y roles]
-      summary: Actualizar usuario
-      operationId: updateUser
-      x-roles: [ADMINISTRADOR]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/UpdateUserRequest' }
-      responses:
-        '200':
-          description: Usuario actualizado.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/User' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
-  /admin/dashboard:
-    get:
-      tags: [Dashboard]
-      summary: Consultar indicadores administrativos
-      operationId: getAdminDashboard
-      x-roles: [ADMINISTRADOR]
-      parameters:
-        - { name: fecha, in: query, schema: { type: string, format: date } }
-        - { name: desde, in: query, schema: { type: string, format: date } }
-        - { name: hasta, in: query, schema: { type: string, format: date } }
+  /auth/logout:
+    post:
+      tags: [Autenticación]
+      summary: Cerrar la sesión actual
+      operationId: logout
+      security:
+        - bearerAuth: []
       responses:
-        '200':
-          description: Indicadores del periodo.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AdminDashboard' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '204':
+          description: Sesión cerrada correctamente.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
-  /requests:
+  /portal/dashboard:
     get:
-      tags: [Solicitudes]
-      summary: Consultar solicitudes
-      operationId: listRequests
-      parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
-        - { name: estado, in: query, schema: { $ref: '#/components/schemas/EstadoSolicitud' } }
-        - { name: tipo, in: query, schema: { $ref: '#/components/schemas/TipoAcompanamiento' } }
-        - { name: estudianteId, in: query, schema: { type: integer, minimum: 1 } }
-        - { name: asignaturaId, in: query, schema: { type: integer, minimum: 1 } }
-        - { name: desde, in: query, schema: { type: string, format: date } }
-        - { name: hasta, in: query, schema: { type: string, format: date } }
+      tags: [Portal personal]
+      summary: Obtener el resumen del portal según el rol
+      operationId: getPortalDashboard
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: Solicitudes paginadas.
+          description: Indicadores y próximos compromisos del usuario.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PaginatedRequests' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-    post:
-      tags: [Solicitudes]
-      summary: Crear solicitud de tutoría o monitoría
-      operationId: createRequest
-      x-roles: [ESTUDIANTE]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateRequest' }
-            example:
-              tipo: MONITORIA
-              asignaturaId: 18
-              motivo: Necesito reforzar integrales antes del segundo parcial
-              fechaPreferida: '2026-10-01'
-              horaPreferida: '14:00'
-              modalidadPreferida: PRESENCIAL
-      responses:
-        '201':
-          description: Solicitud registrada como PENDIENTE.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AcademicRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /requests/{idSolicitud}:
-    parameters: [{ $ref: '#/components/parameters/RequestId' }]
-    get:
-      tags: [Solicitudes]
-      summary: Consultar solicitud
-      operationId: getRequest
-      responses:
-        '200':
-          description: Solicitud encontrada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AcademicRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    patch:
-      tags: [Solicitudes]
-      summary: Actualizar estado de solicitud
-      operationId: updateRequest
-      x-roles: [ADMINISTRADOR, MONITOR, TUTOR]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/UpdateRequestStatus' }
-            example: { estado: APROBADA, comentario: Solicitud aprobada para asignación. }
-      responses:
-        '200':
-          description: Estado actualizado según transiciones permitidas.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AcademicRequest' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /requests/{idSolicitud}/cancel:
-    post:
-      tags: [Solicitudes]
-      summary: Cancelar solicitud
-      operationId: cancelRequest
-      parameters: [{ $ref: '#/components/parameters/RequestId' }]
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CancelRequest' }
-      responses:
-        '200':
-          description: Solicitud cancelada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AcademicRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-  /requests/{idSolicitud}/assign:
-    post:
-      tags: [Solicitudes]
-      summary: Asignar monitor o tutor
-      operationId: assignRequest
-      x-roles: [ADMINISTRADOR]
-      parameters: [{ $ref: '#/components/parameters/RequestId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/AssignRequest' }
-            example: { responsableId: 33, observacion: Asignación realizada por coordinación. }
-      responses:
-        '200':
-          description: Solicitud asignada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AcademicRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+              schema:
+                $ref: '#/components/schemas/PortalDashboard'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /availability:
     get:
-      tags: [Disponibilidad]
-      summary: Consultar bloques disponibles
+      tags: [Portal personal]
+      summary: Consultar disponibilidad propia
       operationId: listAvailability
-      parameters:
-        - { name: fecha, in: query, required: true, schema: { type: string, format: date } }
-        - { name: asignaturaId, in: query, schema: { type: integer, minimum: 1 } }
-        - { name: rol, in: query, schema: { type: string, enum: [MONITOR, TUTOR] } }
-        - { name: modalidad, in: query, schema: { $ref: '#/components/schemas/Modalidad' } }
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: Bloques disponibles.
+          description: Bloques de disponibilidad del tutor o monitor.
           content:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/Availability' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+                items:
+                  $ref: '#/components/schemas/Availability'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
-      tags: [Disponibilidad]
-      summary: Registrar disponibilidad propia
+      tags: [Portal personal]
+      summary: Registrar un bloque de disponibilidad
       operationId: createAvailability
-      x-roles: [MONITOR, TUTOR]
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CreateAvailability' }
-            example:
-              fecha: '2026-10-01'
-              horaInicio: '14:00'
-              horaFin: '16:00'
-              modalidad: PRESENCIAL
-              espacioSugeridoId: 12
+            schema:
+              $ref: '#/components/schemas/AvailabilityInput'
       responses:
         '201':
           description: Disponibilidad registrada.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Availability' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /availability/{idDisponibilidad}:
-    delete:
-      tags: [Disponibilidad]
-      summary: Eliminar bloque de disponibilidad
-      operationId: deleteAvailability
-      x-roles: [MONITOR, TUTOR]
-      parameters: [{ $ref: '#/components/parameters/AvailabilityId' }]
-      responses:
-        '204': { description: Bloque eliminado. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
+              schema:
+                $ref: '#/components/schemas/Availability'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /sessions:
     get:
-      tags: [Sesiones]
-      summary: Consultar sesiones
+      tags: [Portal personal]
+      summary: Consultar sesiones visibles para el usuario
       operationId: listSessions
-      parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
-        - { name: fecha, in: query, schema: { type: string, format: date } }
-        - { name: desde, in: query, schema: { type: string, format: date } }
-        - { name: hasta, in: query, schema: { type: string, format: date } }
-        - { name: estado, in: query, schema: { $ref: '#/components/schemas/EstadoSesion' } }
-        - { name: responsableId, in: query, schema: { type: integer, minimum: 1 } }
-        - { name: estudianteId, in: query, schema: { type: integer, minimum: 1 } }
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: Sesiones paginadas.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PaginatedSessions' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-    post:
-      tags: [Sesiones]
-      summary: Programar sesión
-      operationId: createSession
-      x-roles: [ADMINISTRADOR]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateSession' }
-            example:
-              solicitudId: 901
-              responsableId: 33
-              espacioId: 12
-              fecha: '2026-10-01'
-              horaInicio: '14:00'
-              horaFin: '16:00'
-              modalidad: PRESENCIAL
-      responses:
-        '201':
-          description: Sesión programada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Session' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /sessions/{idSesion}:
-    parameters: [{ $ref: '#/components/parameters/SessionId' }]
-    get:
-      tags: [Sesiones]
-      summary: Consultar sesión
-      operationId: getSession
-      responses:
-        '200':
-          description: Sesión encontrada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Session' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    patch:
-      tags: [Sesiones]
-      summary: Actualizar sesión
-      operationId: updateSession
-      x-roles: [ADMINISTRADOR]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/UpdateSession' }
-      responses:
-        '200':
-          description: Sesión actualizada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Session' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /sessions/{idSesion}/cancel:
-    post:
-      tags: [Sesiones]
-      summary: Cancelar sesión
-      operationId: cancelSession
-      parameters: [{ $ref: '#/components/parameters/SessionId' }]
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CancelRequest' }
-      responses:
-        '200':
-          description: Sesión cancelada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Session' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-  /sessions/{idSesion}/attendance:
-    parameters: [{ $ref: '#/components/parameters/SessionId' }]
-    get:
-      tags: [Asistencia y seguimiento]
-      summary: Consultar asistencia
-      operationId: listAttendance
-      responses:
-        '200':
-          description: Registros de asistencia.
+          description: Sesiones filtradas por permisos del usuario autenticado.
           content:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/Attendance' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    put:
-      tags: [Asistencia y seguimiento]
-      summary: Registrar o actualizar asistencia
-      operationId: upsertAttendance
-      x-roles: [MONITOR, TUTOR, ADMINISTRADOR]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/AttendanceRequest' }
-            example:
-              estudianteId: 25
-              asistencia: true
-              observacion: Participó en los ejercicios de integración.
-              progreso: 80
-      responses:
-        '200':
-          description: Registro guardado.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Attendance' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /sessions/{idSesion}/evidences:
-    parameters: [{ $ref: '#/components/parameters/SessionId' }]
-    get:
-      tags: [Evidencias]
-      summary: Listar evidencias
-      operationId: listEvidences
-      responses:
-        '200':
-          description: Evidencias de la sesión.
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Evidence' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    post:
-      tags: [Evidencias]
-      summary: Cargar evidencia
-      operationId: createEvidence
-      x-roles: [MONITOR, TUTOR, ADMINISTRADOR]
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema: { $ref: '#/components/schemas/EvidenceUpload' }
-      responses:
-        '201':
-          description: Evidencia almacenada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Evidence' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '413': { $ref: '#/components/responses/PayloadTooLarge' }
-        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /sessions/{idSesion}/evidences/{idEvidencia}:
-    delete:
-      tags: [Evidencias]
-      summary: Eliminar evidencia
-      operationId: deleteEvidence
-      x-roles: [MONITOR, TUTOR, ADMINISTRADOR]
-      parameters:
-        - { $ref: '#/components/parameters/SessionId' }
-        - { $ref: '#/components/parameters/EvidenceId' }
-      responses:
-        '204': { description: Evidencia eliminada. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
+                items:
+                  $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
-  /programs:
-    get:
-      tags: [Catálogos académicos]
-      summary: Listar programas académicos
-      operationId: listPrograms
-      parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
-        - { name: estado, in: query, schema: { $ref: '#/components/schemas/EstadoCatalogo' } }
-      responses:
-        '200':
-          description: Programas paginados.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PaginatedPrograms' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-    post:
-      tags: [Catálogos académicos]
-      summary: Crear programa académico
-      operationId: createProgram
-      x-roles: [ADMINISTRADOR]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateProgram' }
-      responses:
-        '201':
-          description: Programa creado.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Program' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /subjects:
-    get:
-      tags: [Catálogos académicos]
-      summary: Listar asignaturas
-      operationId: listSubjects
-      parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
-        - { name: programaId, in: query, schema: { type: integer, minimum: 1 } }
-        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
-        - { name: estado, in: query, schema: { $ref: '#/components/schemas/EstadoCatalogo' } }
-      responses:
-        '200':
-          description: Asignaturas paginadas.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PaginatedSubjects' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-    post:
-      tags: [Catálogos académicos]
-      summary: Crear asignatura
-      operationId: createSubject
-      x-roles: [ADMINISTRADOR]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateSubject' }
-      responses:
-        '201':
-          description: Asignatura creada.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Subject' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /spaces:
-    get:
-      tags: [Catálogos académicos]
-      summary: Listar espacios físicos
-      operationId: listSpaces
-      parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
-        - { name: estado, in: query, schema: { $ref: '#/components/schemas/EstadoEspacio' } }
-        - { name: capacidadMinima, in: query, schema: { type: integer, minimum: 1 } }
-      responses:
-        '200':
-          description: Espacios paginados.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PaginatedSpaces' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-    post:
-      tags: [Catálogos académicos]
-      summary: Crear espacio físico
-      operationId: createSpace
-      x-roles: [ADMINISTRADOR]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateSpace' }
-      responses:
-        '201':
-          description: Espacio creado.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Space' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-
-  /admin/reports:
-    get:
-      tags: [Reportes]
-      summary: Generar reporte administrativo
-      operationId: generateAdminReport
-      x-roles: [ADMINISTRADOR]
-      parameters:
-        - { name: tipo, in: query, required: true, schema: { type: string, enum: [SESIONES, SOLICITUDES, ASISTENCIA, USUARIOS] } }
-        - { name: formato, in: query, required: true, schema: { type: string, enum: [PDF, XLSX, CSV] } }
-        - { name: fechaInicio, in: query, required: true, schema: { type: string, format: date } }
-        - { name: fechaFin, in: query, required: true, schema: { type: string, format: date } }
-      responses:
-        '200':
-          description: Reporte disponible.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ReportResponse' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationError' }
   /monthly-reports:
     get:
-      tags: [Informes mensuales]
-      summary: Consultar informes mensuales
+      tags: [Portal personal]
+      summary: Consultar informes del tutor
       operationId: listMonthlyReports
-      parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PageSize' }
-        - { name: periodo, in: query, schema: { type: string, pattern: '^\\d{4}-(0[1-9]|1[0-2])$' } }
-        - { name: estado, in: query, schema: { $ref: '#/components/schemas/EstadoInforme' } }
-        - { name: usuarioId, in: query, schema: { type: integer, minimum: 1 } }
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: Informes paginados.
+          description: Informes visibles para el usuario autenticado.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PaginatedMonthlyReports' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MonthlyReport'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
-      tags: [Informes mensuales]
-      summary: Crear borrador de informe mensual
+      tags: [Portal personal]
+      summary: Crear un informe mensual
       operationId: createMonthlyReport
-      x-roles: [MONITOR, TUTOR]
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CreateMonthlyReport' }
+            schema:
+              $ref: '#/components/schemas/MonthlyReportInput'
       responses:
         '201':
-          description: Borrador creado.
+          description: Informe creado como borrador.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MonthlyReport' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /monthly-reports/{idInforme}:
-    parameters: [{ $ref: '#/components/parameters/ReportId' }]
+              schema:
+                $ref: '#/components/schemas/MonthlyReport'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /users:
     get:
-      tags: [Informes mensuales]
-      summary: Consultar informe mensual
-      operationId: getMonthlyReport
+      tags: [Usuarios]
+      summary: Listar usuarios para administración
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Search'
+        - name: role
+          in: query
+          schema:
+            $ref: '#/components/schemas/Role'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
       responses:
         '200':
-          description: Informe encontrado.
+          description: Usuarios paginados.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MonthlyReport' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+              schema:
+                $ref: '#/components/schemas/PaginatedUsers'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Usuarios]
+      summary: Crear un usuario con uno o varios roles
+      operationId: createUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserInput'
+      responses:
+        '201':
+          description: Usuario creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /users/{id}:
     patch:
-      tags: [Informes mensuales]
-      summary: Editar borrador
-      operationId: updateMonthlyReport
-      x-roles: [MONITOR, TUTOR]
+      tags: [Usuarios]
+      summary: Actualizar datos o estado de un usuario
+      operationId: updateUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserId'
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/UpdateMonthlyReport' }
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
       responses:
         '200':
-          description: Informe actualizado.
+          description: Usuario actualizado.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MonthlyReport' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
-  /monthly-reports/{idInforme}/submit:
-    post:
-      tags: [Informes mensuales]
-      summary: Enviar informe a revisión
-      operationId: submitMonthlyReport
-      x-roles: [MONITOR, TUTOR]
-      parameters: [{ $ref: '#/components/parameters/ReportId' }]
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Usuarios]
+      summary: Eliminar un usuario
+      operationId: deleteUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204':
+          description: Usuario eliminado correctamente.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /spaces:
+    get:
+      tags: [Espacios]
+      summary: Listar espacios disponibles
+      operationId: listSpaces
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Search'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/Status'
       responses:
         '200':
-          description: Informe enviado.
+          description: Espacios registrados.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MonthlyReport' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-  /monthly-reports/{idInforme}/review:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Space'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     post:
-      tags: [Informes mensuales]
-      summary: Aprobar o rechazar informe
-      operationId: reviewMonthlyReport
-      x-roles: [ADMINISTRADOR]
-      parameters: [{ $ref: '#/components/parameters/ReportId' }]
+      tags: [Espacios]
+      summary: Registrar un espacio
+      operationId: createSpace
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ReviewMonthlyReport' }
-            example: { decision: APROBADO, comentario: Informe validado por coordinación. }
+            schema:
+              $ref: '#/components/schemas/SpaceInput'
       responses:
-        '200':
-          description: Revisión registrada.
+        '201':
+          description: Espacio registrado.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MonthlyReport' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+              schema:
+                $ref: '#/components/schemas/Space'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /spaces/{id}:
+    patch:
+      tags: [Espacios]
+      summary: Actualizar datos o estado de un espacio
+      operationId: updateSpace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpaceUpdate'
+      responses:
+        '200':
+          description: Espacio actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Space'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Espacios]
+      summary: Eliminar un espacio
+      operationId: deleteSpace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+      responses:
+        '204':
+          description: Espacio eliminado correctamente.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /requests:
+    get:
+      tags: [Solicitudes]
+      summary: Listar solicitudes visibles para el rol autenticado
+      operationId: listRequests
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Search'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/RequestStatus'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Solicitudes filtradas según permisos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRequests'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Solicitudes]
+      summary: Crear una solicitud de acompañamiento como estudiante
+      operationId: createRequest
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestInput'
+      responses:
+        '201':
+          description: Solicitud creada en estado Pendiente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Request'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /requests/{id}:
+    patch:
+      tags: [Solicitudes]
+      summary: Aprobar, rechazar o asignar una solicitud
+      operationId: updateRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestUpdate'
+      responses:
+        '200':
+          description: Solicitud actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Request'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
 components:
   securitySchemes:
@@ -899,139 +526,299 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: JWT emitido por /auth/select-role.
   parameters:
+    Search:
+      name: search
+      in: query
+      description: Texto para buscar por nombre, código, correo o asignatura.
+      schema:
+        type: string
+        maxLength: 120
     Page:
       name: page
       in: query
-      schema: { type: integer, minimum: 1, default: 1 }
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
     PageSize:
       name: pageSize
       in: query
-      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
     UserId:
-      name: idUsuario
+      name: id
       in: path
       required: true
-      schema: { type: integer, minimum: 1 }
+      schema:
+        type: integer
+        minimum: 1
+    SpaceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
     RequestId:
-      name: idSolicitud
+      name: id
       in: path
       required: true
-      schema: { type: integer, minimum: 1 }
-    AvailabilityId:
-      name: idDisponibilidad
-      in: path
-      required: true
-      schema: { type: integer, minimum: 1 }
-    SessionId:
-      name: idSesion
-      in: path
-      required: true
-      schema: { type: integer, minimum: 1 }
-    EvidenceId:
-      name: idEvidencia
-      in: path
-      required: true
-      schema: { type: integer, minimum: 1 }
-    ReportId:
-      name: idInforme
-      in: path
-      required: true
-      schema: { type: integer, minimum: 1 }
+      schema:
+        type: integer
+        minimum: 1
   responses:
-    BadRequest:
-      description: Solicitud incorrecta.
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
-          example:
-            status: 400
-            code: BAD_REQUEST
-            message: La solicitud no puede ser procesada.
-            path: /api/v1/requests
-            timestamp: '2026-09-28T17:00:00-05:00'
-            requestId: req_01J8YQ9Z8J
     Unauthorized:
-      description: Autenticación requerida o token inválido.
+      description: Token ausente, inválido o expirado.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
-          example:
-            status: 401
-            code: UNAUTHORIZED
-            message: El token de acceso es inválido o ha expirado.
-            path: /api/v1/auth/me
-            timestamp: '2026-09-28T17:01:00-05:00'
-            requestId: req_01J8YQ9Z8K
+          schema:
+            $ref: '#/components/schemas/ApiError'
     Forbidden:
-      description: El rol activo no tiene permisos.
+      description: El rol autenticado no tiene permiso para la operación.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
+          schema:
+            $ref: '#/components/schemas/ApiError'
     NotFound:
       description: Recurso no encontrado.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
+          schema:
+            $ref: '#/components/schemas/ApiError'
     Conflict:
-      description: Conflicto con el estado actual o una restricción única.
+      description: Conflicto con un registro existente o una transición de estado.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
+          schema:
+            $ref: '#/components/schemas/ApiError'
     ValidationError:
-      description: Error de validación.
+      description: Los datos recibidos no cumplen las reglas de validación.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
-          example:
-            status: 422
-            code: VALIDATION_ERROR
-            message: Uno o más campos no cumplen las reglas de validación.
-            path: /api/v1/users
-            timestamp: '2026-09-28T17:03:00-05:00'
-            requestId: req_01J8YQ9Z8N
-            details:
-              - { field: correo, issue: Debe ser un correo institucional válido. }
-    TooManyRequests:
-      description: Demasiados intentos.
-      headers:
-        Retry-After: { schema: { type: integer, minimum: 1 } }
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
-    PayloadTooLarge:
-      description: El archivo excede el límite permitido.
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
-    UnsupportedMediaType:
-      description: Tipo de archivo no permitido.
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
+          schema:
+            $ref: '#/components/schemas/ApiError'
   schemas:
-    ApiError:
+    Role:
+      type: string
+      enum: [Administrador, Tutor, Monitor, Estudiante]
+    Status:
+      type: string
+      enum: [Activo, Inactivo]
+    RequestStatus:
+      type: string
+      enum: [Pendiente, Aprobada, Asignada, Rechazada, Cancelada, Atendida, Finalizada]
+    Priority:
+      type: string
+      enum: [Alta, Media, Baja]
+    Modality:
+      type: string
+      enum: [Presencial, Virtual, Híbrida]
+    User:
       type: object
-      additionalProperties: false
-      required: [status, code, message, path, timestamp, requestId]
+      required: [id, code, name, email, roles, status, initials]
       properties:
-        status: { type: integer, minimum: 400, maximum: 599 }
-        code: { type: string, pattern: '^[A-Z0-9_]+$' }
-        message: { type: string, minLength: 1, maxLength: 500 }
-        path: { type: string }
-        timestamp: { type: string, format: date-time }
-        requestId: { type: string, minLength: 8, maxLength: 64 }
-        details:
+        id: { type: integer, minimum: 1 }
+        code: { type: string, maxLength: 20 }
+        name: { type: string, minLength: 2, maxLength: 160 }
+        email: { type: string, format: email, maxLength: 120 }
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Role' }
+        status: { $ref: '#/components/schemas/Status' }
+        initials: { type: string, minLength: 1, maxLength: 3 }
+    LoginRequest:
+      type: object
+      required: [email, document]
+      properties:
+        email: { type: string, format: email, maxLength: 120 }
+        document: { type: string, minLength: 5, maxLength: 20, pattern: '^[0-9A-Za-z-]+$' }
+    LoginResponse:
+      type: object
+      required: [roles, requiresRoleSelection, user]
+      properties:
+        preAuthToken:
+          type: string
+          description: Token temporal emitido mientras el usuario selecciona un rol.
+        accessToken: { type: string }
+        tokenType: { type: string, const: Bearer }
+        expiresIn: { type: integer, minimum: 60 }
+        requiresRoleSelection: { type: boolean }
+        activeRole:
+          allOf:
+            - $ref: '#/components/schemas/Role'
+          description: Rol actualmente seleccionado para la sesión.
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Role' }
+        user: { $ref: '#/components/schemas/User' }
+    RoleSelectionRequest:
+      type: object
+      required: [preAuthToken, role]
+      properties:
+        preAuthToken: { type: string, minLength: 1 }
+        role: { $ref: '#/components/schemas/Role' }
+    UserInput:
+      type: object
+      required: [code, document, name, email, roles]
+      properties:
+        code: { type: string, minLength: 2, maxLength: 20 }
+        document: { type: string, minLength: 5, maxLength: 20 }
+        name: { type: string, minLength: 2, maxLength: 160 }
+        email: { type: string, format: email, maxLength: 120 }
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Role' }
+    UserUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 2, maxLength: 160 }
+        email: { type: string, format: email, maxLength: 120 }
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Role' }
+        status: { $ref: '#/components/schemas/Status' }
+    Space:
+      type: object
+      required: [id, code, name, type, location, capacity, status]
+      properties:
+        id: { type: integer, minimum: 1 }
+        code: { type: string, maxLength: 20 }
+        name: { type: string, maxLength: 120 }
+        type: { type: string, enum: [Aula, Laboratorio, Sala, Biblioteca, Virtual, Otro] }
+        location: { type: string, maxLength: 200 }
+        capacity: { type: integer, minimum: 1, maximum: 1000 }
+        status: { $ref: '#/components/schemas/Status' }
+    SpaceInput:
+      type: object
+      required: [code, name, type, location, capacity]
+      properties:
+        code: { type: string, minLength: 2, maxLength: 20 }
+        name: { type: string, minLength: 2, maxLength: 120 }
+        type: { type: string, enum: [Aula, Laboratorio, Sala, Biblioteca, Virtual, Otro] }
+        location: { type: string, minLength: 2, maxLength: 200 }
+        capacity: { type: integer, minimum: 1, maximum: 1000 }
+    SpaceUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        type: { type: string, enum: [Aula, Laboratorio, Sala, Biblioteca, Virtual, Otro] }
+        location: { type: string, minLength: 2, maxLength: 200 }
+        capacity: { type: integer, minimum: 1, maximum: 1000 }
+        status: { $ref: '#/components/schemas/Status' }
+    Request:
+      type: object
+      required: [id, student, subject, type, priority, status, date]
+      properties:
+        id: { type: integer, minimum: 1 }
+        student: { type: string, maxLength: 160 }
+        subject: { type: string, maxLength: 150 }
+        type: { type: string, enum: [Monitoría, Tutoría] }
+        priority: { $ref: '#/components/schemas/Priority' }
+        status: { $ref: '#/components/schemas/RequestStatus' }
+        date: { type: string, format: date }
+    RequestInput:
+      type: object
+      required: [subject, type, priority, reason]
+      properties:
+        subject: { type: string, minLength: 2, maxLength: 150 }
+        type: { type: string, enum: [Monitoría, Tutoría] }
+        priority: { $ref: '#/components/schemas/Priority' }
+        reason: { type: string, minLength: 5, maxLength: 500 }
+        preferredDate: { type: string, format: date }
+        preferredModality: { $ref: '#/components/schemas/Modality' }
+    RequestUpdate:
+      type: object
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/RequestStatus' }
+        assignedUserId: { type: integer, minimum: 1 }
+        observation: { type: string, maxLength: 500 }
+    Availability:
+      type: object
+      required: [id, day, startTime, endTime, subject, place, status]
+      properties:
+        id: { type: integer, minimum: 1 }
+        day: { type: string, enum: [Lunes, Martes, Miércoles, Jueves, Viernes, Sábado] }
+        startTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        endTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        subject: { type: string, maxLength: 150 }
+        place: { type: string, maxLength: 200 }
+        modality: { $ref: '#/components/schemas/Modality' }
+        status: { $ref: '#/components/schemas/Status' }
+    AvailabilityInput:
+      type: object
+      required: [day, startTime, endTime, subject, modality]
+      properties:
+        day: { type: string, enum: [Lunes, Martes, Miércoles, Jueves, Viernes, Sábado] }
+        startTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        endTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        subject: { type: string, minLength: 2, maxLength: 150 }
+        place: { type: string, maxLength: 200 }
+        modality: { $ref: '#/components/schemas/Modality' }
+    Session:
+      type: object
+      required: [id, subject, date, startTime, endTime, modality, status]
+      properties:
+        id: { type: integer, minimum: 1 }
+        subject: { type: string, maxLength: 150 }
+        date: { type: string, format: date }
+        startTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        endTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        modality: { $ref: '#/components/schemas/Modality' }
+        place: { type: string, maxLength: 200 }
+        status: { type: string, enum: [Programada, EnCurso, Finalizada, Cancelada] }
+    MonthlyReport:
+      type: object
+      required: [id, title, period, status]
+      properties:
+        id: { type: integer, minimum: 1 }
+        title: { type: string, maxLength: 200 }
+        period: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' }
+        status: { type: string, enum: [Borrador, EnRevision, Aprobado, Rechazado] }
+        summary: { type: string, maxLength: 1000 }
+    MonthlyReportInput:
+      type: object
+      required: [title, period, summary]
+      properties:
+        title: { type: string, minLength: 2, maxLength: 200 }
+        period: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' }
+        summary: { type: string, minLength: 10, maxLength: 1000 }
+        achievements: { type: string, maxLength: 1000 }
+        difficulties: { type: string, maxLength: 1000 }
+        recommendations: { type: string, maxLength: 1000 }
+    PortalDashboard:
+      type: object
+      required: [role, metrics, upcoming]
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+        metrics:
           type: array
           items:
             type: object
-            additionalProperties: false
-            required: [field, issue]
+            required: [label, value, detail]
             properties:
-              field: { type: string }
-              issue: { type: string }
-    PageMeta:
+              label: { type: string }
+              value: { type: string }
+              detail: { type: string }
+        upcoming:
+          type: array
+          items:
+            $ref: '#/components/schemas/Session'
+    Pagination:
       type: object
       required: [page, pageSize, total, totalPages]
       properties:
@@ -1039,507 +826,32 @@ components:
         pageSize: { type: integer, minimum: 1, maximum: 100 }
         total: { type: integer, minimum: 0 }
         totalPages: { type: integer, minimum: 0 }
-    RoleName:
-      type: string
-      enum: [ADMINISTRADOR, MONITOR, TUTOR, ESTUDIANTE]
-    EstadoUsuario:
-      type: string
-      enum: [ACTIVO, INACTIVO, BLOQUEADO]
-    EstadoCatalogo:
-      type: string
-      enum: [ACTIVO, INACTIVO]
-    EstadoSolicitud:
-      type: string
-      enum: [PENDIENTE, APROBADA, RECHAZADA, ASIGNADA, ATENDIDA, CANCELADA]
-    EstadoSesion:
-      type: string
-      enum: [PROGRAMADA, EN_CURSO, COMPLETADA, CANCELADA]
-    EstadoDisponibilidad:
-      type: string
-      enum: [DISPONIBLE, RESERVADA, BLOQUEADA]
-    EstadoInforme:
-      type: string
-      enum: [BORRADOR, EN_REVISION, APROBADO, RECHAZADO]
-    EstadoEspacio:
-      type: string
-      enum: [ACTIVO, INACTIVO, MANTENIMIENTO]
-    TipoAcompanamiento:
-      type: string
-      enum: [MONITORIA, TUTORIA]
-    Modalidad:
-      type: string
-      enum: [PRESENCIAL, VIRTUAL, HIBRIDA]
-    Role:
-      type: object
-      required: [idRol, nombre, nombreDisplay]
-      properties:
-        idRol: { type: integer, minimum: 1, example: 2 }
-        nombre: { $ref: '#/components/schemas/RoleName' }
-        nombreDisplay: { type: string, example: Monitor }
-    UserSummary:
-      type: object
-      required: [idUsuario, codigo, nombreCompleto]
-      properties:
-        idUsuario: { type: integer, minimum: 1 }
-        codigo: { type: string, example: MON20260125 }
-        nombreCompleto: { type: string, example: Laura Hernández Rojas }
-    User:
-      type: object
-      required: [idUsuario, codigo, documento, nombres, apellidos, correo, estado, roles, createdAt, updatedAt]
-      properties:
-        idUsuario: { type: integer, minimum: 1, example: 25 }
-        codigo: { type: string, minLength: 4, maxLength: 30, example: MON20260125 }
-        documento: { type: string, minLength: 5, maxLength: 20, example: '1009123456' }
-        nombres: { type: string, minLength: 2, maxLength: 80, example: Laura }
-        apellidos: { type: string, minLength: 2, maxLength: 80, example: Hernández Rojas }
-        nombreCompleto: { type: string, example: Laura Hernández Rojas }
-        correo: { type: string, format: email, example: laura.hernandez@unitropico.edu.co }
-        telefono: { type: [string, 'null'], minLength: 7, maxLength: 20, example: '3185550123' }
-        estado: { $ref: '#/components/schemas/EstadoUsuario' }
-        roles:
-          type: array
-          minItems: 1
-          items: { $ref: '#/components/schemas/RoleName' }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
-    LoginRequest:
-      type: object
-      additionalProperties: false
-      required: [codigo, password]
-      properties:
-        codigo: { type: string, minLength: 4, maxLength: 30 }
-        password: { type: string, minLength: 8, maxLength: 100, format: password }
-    LoginResponse:
-      type: object
-      required: [preAuthToken, requiresRoleSelection, user]
-      properties:
-        preAuthToken: { type: string, minLength: 10 }
-        requiresRoleSelection: { type: boolean }
-        user:
-          type: object
-          required: [idUsuario, codigo, nombres, apellidos, correo, roles]
-          properties:
-            idUsuario: { type: integer, minimum: 1 }
-            codigo: { type: string }
-            nombres: { type: string }
-            apellidos: { type: string }
-            correo: { type: string, format: email }
-            roles:
-              type: array
-              minItems: 1
-              items: { $ref: '#/components/schemas/RoleName' }
-    SelectRoleRequest:
-      type: object
-      required: [preAuthToken, idRol]
-      properties:
-        preAuthToken: { type: string, minLength: 10 }
-        idRol: { type: integer, minimum: 1 }
-    RefreshTokenRequest:
-      type: object
-      required: [refreshToken]
-      properties:
-        refreshToken: { type: string, minLength: 20 }
-    TokenResponse:
-      type: object
-      required: [accessToken, refreshToken, tokenType, expiresIn, refreshExpiresIn, activeRole]
-      properties:
-        accessToken: { type: string }
-        refreshToken: { type: string }
-        tokenType: { type: string, enum: [Bearer] }
-        expiresIn: { type: integer, minimum: 1, example: 3600 }
-        refreshExpiresIn: { type: integer, minimum: 1, example: 2592000 }
-        activeRole: { $ref: '#/components/schemas/RoleName' }
-    CurrentUser:
-      allOf:
-        - { $ref: '#/components/schemas/User' }
-        - type: object
-          required: [activeRole]
-          properties:
-            activeRole: { $ref: '#/components/schemas/RoleName' }
-    CreateUserRequest:
-      type: object
-      required: [codigo, documento, nombres, apellidos, correo, roleIds]
-      properties:
-        codigo: { type: string, minLength: 4, maxLength: 30 }
-        documento: { type: string, minLength: 5, maxLength: 20 }
-        nombres: { type: string, minLength: 2, maxLength: 80 }
-        apellidos: { type: string, minLength: 2, maxLength: 80 }
-        correo: { type: string, format: email }
-        telefono: { type: string, minLength: 7, maxLength: 20 }
-        estado: { $ref: '#/components/schemas/EstadoUsuario' }
-        roleIds:
-          type: array
-          minItems: 1
-          maxItems: 4
-          uniqueItems: true
-          items: { type: integer, minimum: 1 }
-    UpdateUserRequest:
-      type: object
-      minProperties: 1
-      properties:
-        nombres: { type: string, minLength: 2, maxLength: 80 }
-        apellidos: { type: string, minLength: 2, maxLength: 80 }
-        correo: { type: string, format: email }
-        telefono: { type: [string, 'null'], minLength: 7, maxLength: 20 }
-        estado: { $ref: '#/components/schemas/EstadoUsuario' }
-        roleIds:
-          type: array
-          minItems: 1
-          maxItems: 4
-          uniqueItems: true
-          items: { type: integer, minimum: 1 }
-    CreateRequest:
-      type: object
-      required: [tipo, asignaturaId, motivo]
-      properties:
-        tipo: { $ref: '#/components/schemas/TipoAcompanamiento' }
-        asignaturaId: { type: integer, minimum: 1 }
-        motivo: { type: string, minLength: 10, maxLength: 1000 }
-        fechaPreferida: { type: string, format: date }
-        horaPreferida: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
-        modalidadPreferida: { $ref: '#/components/schemas/Modalidad' }
-    AcademicRequest:
-      type: object
-      required: [idSolicitud, estudiante, tipo, asignatura, motivo, estado, createdAt, updatedAt]
-      properties:
-        idSolicitud: { type: integer, minimum: 1, example: 901 }
-        estudiante: { $ref: '#/components/schemas/UserSummary' }
-        tipo: { $ref: '#/components/schemas/TipoAcompanamiento' }
-        asignatura: { $ref: '#/components/schemas/Subject' }
-        motivo: { type: string }
-        fechaPreferida: { type: [string, 'null'], format: date }
-        horaPreferida: { type: [string, 'null'] }
-        modalidadPreferida: { $ref: '#/components/schemas/Modalidad' }
-        responsable:
-          oneOf:
-            - { $ref: '#/components/schemas/UserSummary' }
-            - { type: 'null' }
-        estado: { $ref: '#/components/schemas/EstadoSolicitud' }
-        comentarioEstado: { type: [string, 'null'] }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
-    UpdateRequestStatus:
-      type: object
-      required: [estado]
-      properties:
-        estado: { $ref: '#/components/schemas/EstadoSolicitud' }
-        comentario: { type: string, maxLength: 1000 }
-    CancelRequest:
-      type: object
-      properties:
-        motivo: { type: string, minLength: 5, maxLength: 500 }
-    AssignRequest:
-      type: object
-      required: [responsableId]
-      properties:
-        responsableId: { type: integer, minimum: 1 }
-        observacion: { type: string, maxLength: 1000 }
-    CreateAvailability:
-      type: object
-      required: [fecha, horaInicio, horaFin, modalidad]
-      properties:
-        fecha: { type: string, format: date }
-        horaInicio: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
-        horaFin: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
-        modalidad: { $ref: '#/components/schemas/Modalidad' }
-        espacioSugeridoId: { type: integer, minimum: 1 }
-    Availability:
-      type: object
-      required: [idDisponibilidad, usuario, fecha, horaInicio, horaFin, modalidad, estado]
-      properties:
-        idDisponibilidad: { type: integer, minimum: 1 }
-        usuario: { $ref: '#/components/schemas/UserSummary' }
-        rol: { type: string, enum: [MONITOR, TUTOR] }
-        fecha: { type: string, format: date }
-        horaInicio: { type: string }
-        horaFin: { type: string }
-        modalidad: { $ref: '#/components/schemas/Modalidad' }
-        espacioSugerido:
-          oneOf:
-            - { $ref: '#/components/schemas/Space' }
-            - { type: 'null' }
-        estado: { $ref: '#/components/schemas/EstadoDisponibilidad' }
-    CreateSession:
-      type: object
-      required: [solicitudId, responsableId, fecha, horaInicio, horaFin, modalidad]
-      properties:
-        solicitudId: { type: integer, minimum: 1 }
-        responsableId: { type: integer, minimum: 1 }
-        espacioId: { type: integer, minimum: 1 }
-        fecha: { type: string, format: date }
-        horaInicio: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
-        horaFin: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
-        modalidad: { $ref: '#/components/schemas/Modalidad' }
-        enlaceVirtual: { type: [string, 'null'], format: uri }
-    UpdateSession:
-      type: object
-      minProperties: 1
-      properties:
-        fecha: { type: string, format: date }
-        horaInicio: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
-        horaFin: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
-        espacioId: { type: [integer, 'null'], minimum: 1 }
-        modalidad: { $ref: '#/components/schemas/Modalidad' }
-        estado: { $ref: '#/components/schemas/EstadoSesion' }
-        enlaceVirtual: { type: [string, 'null'], format: uri }
-    Session:
-      type: object
-      required: [idSesion, solicitudId, estudiante, responsable, tipo, asignatura, fecha, horaInicio, horaFin, modalidad, estado, createdAt, updatedAt]
-      properties:
-        idSesion: { type: integer, minimum: 1, example: 1401 }
-        solicitudId: { type: integer, minimum: 1 }
-        estudiante: { $ref: '#/components/schemas/UserSummary' }
-        responsable: { $ref: '#/components/schemas/UserSummary' }
-        tipo: { $ref: '#/components/schemas/TipoAcompanamiento' }
-        asignatura: { $ref: '#/components/schemas/Subject' }
-        espacio:
-          oneOf:
-            - { $ref: '#/components/schemas/Space' }
-            - { type: 'null' }
-        fecha: { type: string, format: date }
-        horaInicio: { type: string }
-        horaFin: { type: string }
-        modalidad: { $ref: '#/components/schemas/Modalidad' }
-        enlaceVirtual: { type: [string, 'null'], format: uri }
-        estado: { $ref: '#/components/schemas/EstadoSesion' }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
-    AttendanceRequest:
-      type: object
-      required: [estudianteId, asistencia]
-      properties:
-        estudianteId: { type: integer, minimum: 1 }
-        asistencia: { type: boolean }
-        observacion: { type: string, maxLength: 2000 }
-        progreso: { type: integer, minimum: 0, maximum: 100 }
-    Attendance:
-      type: object
-      required: [idAsistencia, sesionId, estudianteId, asistencia, registradoAt]
-      properties:
-        idAsistencia: { type: integer, minimum: 1 }
-        sesionId: { type: integer, minimum: 1 }
-        estudianteId: { type: integer, minimum: 1 }
-        asistencia: { type: boolean }
-        observacion: { type: [string, 'null'] }
-        progreso: { type: [integer, 'null'], minimum: 0, maximum: 100 }
-        registradoPor: { $ref: '#/components/schemas/UserSummary' }
-        registradoAt: { type: string, format: date-time }
-    EvidenceUpload:
-      type: object
-      required: [archivo]
-      properties:
-        archivo:
-          type: string
-          format: binary
-          description: PDF, JPG, PNG o DOCX de máximo 10 MB.
-        observacion: { type: string, maxLength: 1000 }
-    Evidence:
-      type: object
-      required: [idEvidencia, sesionId, nombreArchivo, tipoMime, tamanoBytes, url, createdAt]
-      properties:
-        idEvidencia: { type: integer, minimum: 1 }
-        sesionId: { type: integer, minimum: 1 }
-        nombreArchivo: { type: string, maxLength: 255 }
-        tipoMime:
-          type: string
-          enum: [application/pdf, image/jpeg, image/png, application/vnd.openxmlformats-officedocument.wordprocessingml.document]
-        tamanoBytes: { type: integer, minimum: 1 }
-        observacion: { type: [string, 'null'] }
-        url: { type: string, format: uri }
-        uploadedBy: { $ref: '#/components/schemas/UserSummary' }
-        createdAt: { type: string, format: date-time }
-    Program:
-      type: object
-      required: [idPrograma, codigo, nombre, nivel, estado]
-      properties:
-        idPrograma: { type: integer, minimum: 1 }
-        codigo: { type: string, minLength: 2, maxLength: 20, example: IS }
-        nombre: { type: string, minLength: 3, maxLength: 150, example: Ingeniería de Sistemas }
-        nivel: { type: string, enum: [PREGRADO, POSGRADO] }
-        estado: { $ref: '#/components/schemas/EstadoCatalogo' }
-    CreateProgram:
-      type: object
-      required: [codigo, nombre, nivel]
-      properties:
-        codigo: { type: string, minLength: 2, maxLength: 20 }
-        nombre: { type: string, minLength: 3, maxLength: 150 }
-        nivel: { type: string, enum: [PREGRADO, POSGRADO] }
-    Subject:
-      type: object
-      required: [idAsignatura, codigo, nombre, creditos, semestre, programa, estado]
-      properties:
-        idAsignatura: { type: integer, minimum: 1, example: 18 }
-        codigo: { type: string, minLength: 2, maxLength: 20, example: MATB-101 }
-        nombre: { type: string, example: Matemáticas Básicas }
-        creditos: { type: integer, minimum: 1, maximum: 10 }
-        semestre: { type: integer, minimum: 1, maximum: 20 }
-        programa: { $ref: '#/components/schemas/Program' }
-        estado: { $ref: '#/components/schemas/EstadoCatalogo' }
-    CreateSubject:
-      type: object
-      required: [codigo, nombre, creditos, semestre, programaId]
-      properties:
-        codigo: { type: string, minLength: 2, maxLength: 20 }
-        nombre: { type: string, minLength: 3, maxLength: 150 }
-        creditos: { type: integer, minimum: 1, maximum: 10 }
-        semestre: { type: integer, minimum: 1, maximum: 20 }
-        programaId: { type: integer, minimum: 1 }
-    Space:
-      type: object
-      required: [idEspacio, codigo, nombre, edificio, capacidad, tipo, estado]
-      properties:
-        idEspacio: { type: integer, minimum: 1 }
-        codigo: { type: string, example: A-204 }
-        nombre: { type: string, example: Salón 204 }
-        edificio: { type: string, example: Bloque A }
-        bloque: { type: [string, 'null'], example: A }
-        salon: { type: [string, 'null'], example: '204' }
-        capacidad: { type: integer, minimum: 1 }
-        tipo: { type: string, enum: [AULA, LABORATORIO, AUDITORIO, BIBLIOTECA, OTRO] }
-        estado: { $ref: '#/components/schemas/EstadoEspacio' }
-        piso: { type: [integer, 'null'], minimum: 0 }
-        ubicacion: { type: [string, 'null'] }
-        recursos: { type: array, items: { type: string } }
-        observaciones: { type: [string, 'null'] }
-    CreateSpace:
-      type: object
-      required: [codigo, nombre, edificio, capacidad, tipo]
-      properties:
-        codigo: { type: string, minLength: 2, maxLength: 30 }
-        nombre: { type: string, minLength: 2, maxLength: 100 }
-        edificio: { type: string, minLength: 2, maxLength: 100 }
-        capacidad: { type: integer, minimum: 1, maximum: 1000 }
-        tipo: { type: string, enum: [AULA, LABORATORIO, AUDITORIO, BIBLIOTECA, OTRO] }
-        piso: { type: integer, minimum: 0 }
-        recursos: { type: array, items: { type: string, maxLength: 100 } }
-        observaciones: { type: string, maxLength: 1000 }
-    AdminDashboard:
-      type: object
-      required: [desde, hasta, usuariosActivos, solicitudesPendientes, sesionesProgramadas, espaciosDisponibles]
-      properties:
-        desde: { type: string, format: date }
-        hasta: { type: string, format: date }
-        usuariosActivos: { type: integer, minimum: 0 }
-        solicitudesPendientes: { type: integer, minimum: 0 }
-        sesionesProgramadas: { type: integer, minimum: 0 }
-        espaciosDisponibles: { type: integer, minimum: 0 }
-        asistenciasRegistradas: { type: integer, minimum: 0 }
-        sesionesCompletadas: { type: integer, minimum: 0 }
-        horasAcompanamiento: { type: number, minimum: 0 }
-    ReportResponse:
-      type: object
-      required: [reporteId, tipo, formato, fechaInicio, fechaFin, totalRegistros, downloadUrl, expiresAt]
-      properties:
-        reporteId: { type: string }
-        tipo: { type: string, enum: [SESIONES, SOLICITUDES, ASISTENCIA, USUARIOS] }
-        formato: { type: string, enum: [PDF, XLSX, CSV] }
-        fechaInicio: { type: string, format: date }
-        fechaFin: { type: string, format: date }
-        totalRegistros: { type: integer, minimum: 0 }
-        downloadUrl: { type: string, format: uri }
-        expiresAt: { type: string, format: date-time }
-    CreateMonthlyReport:
-      type: object
-      required: [periodo, plantillaVersion, actividadesRealizadas, sesionesAtendidas, estudiantesAtendidos, horasAcompanamiento, logros, dificultades, compromisos]
-      properties:
-        periodo: { type: string, pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }
-        plantillaVersion: { type: string, minLength: 1, maxLength: 20 }
-        actividadesRealizadas: { type: integer, minimum: 0 }
-        sesionesAtendidas: { type: integer, minimum: 0 }
-        estudiantesAtendidos: { type: integer, minimum: 0 }
-        horasAcompanamiento: { type: number, minimum: 0, maximum: 744 }
-        logros: { type: string, minLength: 10, maxLength: 3000 }
-        dificultades: { type: string, minLength: 10, maxLength: 3000 }
-        compromisos: { type: string, minLength: 10, maxLength: 3000 }
-    UpdateMonthlyReport:
-      type: object
-      minProperties: 1
-      properties:
-        actividadesRealizadas: { type: integer, minimum: 0 }
-        sesionesAtendidas: { type: integer, minimum: 0 }
-        estudiantesAtendidos: { type: integer, minimum: 0 }
-        horasAcompanamiento: { type: number, minimum: 0, maximum: 744 }
-        logros: { type: string, minLength: 10, maxLength: 3000 }
-        dificultades: { type: string, minLength: 10, maxLength: 3000 }
-        compromisos: { type: string, minLength: 10, maxLength: 3000 }
-    ReviewMonthlyReport:
-      type: object
-      required: [decision, comentario]
-      properties:
-        decision: { type: string, enum: [APROBADO, RECHAZADO] }
-        comentario: { type: string, minLength: 5, maxLength: 2000 }
-    MonthlyReport:
-      allOf:
-        - { $ref: '#/components/schemas/CreateMonthlyReport' }
-        - type: object
-          required: [idInforme, usuario, estado, createdAt, updatedAt]
-          properties:
-            idInforme: { type: integer, minimum: 1, example: 5001 }
-            usuario: { $ref: '#/components/schemas/UserSummary' }
-            rol: { type: string, enum: [MONITOR, TUTOR] }
-            estado: { $ref: '#/components/schemas/EstadoInforme' }
-            comentarioRevision: { type: [string, 'null'] }
-            createdAt: { type: string, format: date-time }
-            updatedAt: { type: string, format: date-time }
     PaginatedUsers:
       type: object
-      required: [data, meta]
+      required: [data, pagination]
       properties:
-        data: { type: array, items: { $ref: '#/components/schemas/User' } }
-        meta: { $ref: '#/components/schemas/PageMeta' }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/User' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
     PaginatedRequests:
       type: object
-      required: [data, meta]
+      required: [data, pagination]
       properties:
-        data: { type: array, items: { $ref: '#/components/schemas/AcademicRequest' } }
-        meta: { $ref: '#/components/schemas/PageMeta' }
-    PaginatedSessions:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Request' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+    ApiError:
       type: object
-      required: [data, meta]
+      required: [status, code, message, path, timestamp]
       properties:
-        data: { type: array, items: { $ref: '#/components/schemas/Session' } }
-        meta: { $ref: '#/components/schemas/PageMeta' }
-    PaginatedPrograms:
-      type: object
-      required: [data, meta]
-      properties:
-        data: { type: array, items: { $ref: '#/components/schemas/Program' } }
-        meta: { $ref: '#/components/schemas/PageMeta' }
-    PaginatedSubjects:
-      type: object
-      required: [data, meta]
-      properties:
-        data: { type: array, items: { $ref: '#/components/schemas/Subject' } }
-        meta: { $ref: '#/components/schemas/PageMeta' }
-    PaginatedSpaces:
-      type: object
-      required: [data, meta]
-      properties:
-        data: { type: array, items: { $ref: '#/components/schemas/Space' } }
-        meta: { $ref: '#/components/schemas/PageMeta' }
-    PaginatedMonthlyReports:
-      type: object
-      required: [data, meta]
-      properties:
-        data: { type: array, items: { $ref: '#/components/schemas/MonthlyReport' } }
-        meta: { $ref: '#/components/schemas/PageMeta' }
-
-x-contract:
-  apiVersion: v1
-  timezone: America/Bogota
-  idempotency:
-    recommendedFor:
-      - 'POST /requests'
-      - 'POST /sessions'
-      - 'POST /sessions/{idSesion}/evidences'
-    header: Idempotency-Key
-  conventions:
-    date: ISO 8601 date (YYYY-MM-DD)
-    dateTime: ISO 8601 date-time with timezone offset
-    time: 24-hour format (HH:mm)
-    pagination: page and pageSize with data/meta response
-    errors: ApiError with requestId for traceability
-  stateTransitions:
-    solicitud: 'PENDIENTE -> [APROBADA, RECHAZADA, CANCELADA]; APROBADA -> [ASIGNADA, CANCELADA]; ASIGNADA -> [ATENDIDA, CANCELADA]'
-    sesion: 'PROGRAMADA -> [EN_CURSO, CANCELADA]; EN_CURSO -> [COMPLETADA, CANCELADA]'
-    informe: 'BORRADOR -> EN_REVISION; EN_REVISION -> [APROBADO, RECHAZADO]; RECHAZADO -> BORRADOR'
+        status: { type: integer, minimum: 400, maximum: 599 }
+        code: { type: string }
+        message: { type: string }
+        path: { type: string }
+        timestamp: { type: string, format: date-time }
+        requestId: { type: string }
+        details:
+          type: array
+          items: { type: object, additionalProperties: true }
