@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useState } from 'react'
+import { FormEvent, ReactNode, useEffect, useState } from 'react'
 import {
   Activity,
   ArrowRight,
@@ -88,6 +88,21 @@ const initialRequests: Request[] = [
   { id: 4, student: 'Daniel Andrés Pérez', subject: 'Cálculo diferencial', type: 'Tutoría', priority: 'Baja', status: 'Rechazada', date: '26 sep 2026' },
 ]
 
+const usersStorageKey = 'acadex:users'
+
+function loadUsers(): User[] {
+  try {
+    const savedUsers = window.localStorage.getItem(usersStorageKey)
+    if (savedUsers) {
+      const parsedUsers: unknown = JSON.parse(savedUsers)
+      if (Array.isArray(parsedUsers)) return parsedUsers as User[]
+    }
+  } catch {
+    // If browser storage is unavailable or malformed, start with the demo users.
+  }
+  return initialUsers
+}
+
 function App() {
   const [authenticated, setAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
@@ -96,9 +111,17 @@ function App() {
   const [portalView, setPortalView] = useState<PortalView>('inicio')
   const [loginError, setLoginError] = useState('')
   const [mobileNav, setMobileNav] = useState(false)
-  const [users, setUsers] = useState(initialUsers)
+  const [users, setUsers] = useState<User[]>(loadUsers)
   const [spaces, setSpaces] = useState(initialSpaces)
   const [requests, setRequests] = useState(initialRequests)
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(usersStorageKey, JSON.stringify(users))
+    } catch {
+      // Keep the interface usable if browser storage is disabled or full.
+    }
+  }, [users])
 
   const handleLogin = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -411,7 +434,7 @@ function UsersView({ users, onChange }: { users: User[]; onChange: (users: User[
     setEditingUser(null)
   }
   const deleteUser = (user: User) => { if (window.confirm(`¿Eliminar a ${user.name}?`)) onChange(users.filter((item) => item.id !== user.id)) }
-  return <><PageHeader eyebrow="Administración / Usuarios" title="Gestión de usuarios" description="Administra los accesos y roles de las personas vinculadas al programa." action={<button className="primary-button" onClick={openCreate}><Plus size={18} /> Nuevo usuario</button>} /><section className="panel table-panel"><div className="table-toolbar"><div className="search-input"><Search size={17} /><input placeholder="Buscar por nombre, código o correo..." value={query} onChange={(event) => setQuery(event.target.value)} /></div><select value={role} onChange={(event) => setRole(event.target.value)}><option>Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Monitor</option><option>Tutor</option></select><button className="secondary-button filter-button"><Settings2 size={16} /> Filtros</button></div><div className="table-meta"><span><strong>{filtered.length}</strong> usuarios encontrados</span><span>Última actualización: hace 5 min</span></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CONTACTO</th><th>ESTADO</th><th className="align-right">ACCIONES</th></tr></thead><tbody>{filtered.map((user) => <tr key={user.id}><td><div className="person-cell"><div className="mini-avatar">{user.initials}</div><div><strong>{user.name}</strong><span>{user.code}</span></div></div></td><td><div className="user-roles">{user.roles.map((userRole) => <span className="role-pill" key={userRole}>{userRole}</span>)}</div></td><td><span className="muted-cell">{user.email}</span></td><td><StatusPill status={user.status} /></td><td className="align-right"><div className="action-group"><button className="row-action" onClick={() => openEdit(user)}>Editar</button><button className="row-action" onClick={() => onChange(users.map((item) => item.id === user.id ? { ...item, status: item.status === 'Activo' ? 'Inactivo' : 'Activo' } : item))}>{user.status === 'Activo' ? 'Desactivar' : 'Activar'}</button><button className="row-action danger-action" onClick={() => deleteUser(user)}>Eliminar</button></div></td></tr>)}</tbody></table></div></section>{modal && <Modal title={editingUser ? 'Editar usuario' : 'Nuevo usuario'} subtitle="Asigna uno o varios roles al usuario." onClose={() => setModal(false)}><form className="modal-form" onSubmit={saveUser} key={editingUser?.id ?? 'new'}><label>Nombre completo<input name="name" required defaultValue={editingUser?.name ?? ''} placeholder="Ej. Ana María López" /></label><label>Correo institucional<input type="email" name="email" required defaultValue={editingUser?.email ?? ''} placeholder="correo@unitropico.edu.co" /></label><label>Documento de identidad<input name="document" required defaultValue={editingUser?.document ?? ''} placeholder="Ej. 1093432540" /></label><fieldset className="role-options"><legend>Roles de acceso</legend>{(['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as Role[]).map((availableRole) => <label className="role-option" key={availableRole}><input type="checkbox" name="roles" value={availableRole} defaultChecked={editingUser?.roles.includes(availableRole) ?? availableRole === 'Estudiante'} /><span>{availableRole}</span></label>)}</fieldset><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setModal(false)}>Cancelar</button><button className="primary-button" type="submit">{editingUser ? 'Guardar cambios' : 'Crear usuario'}</button></div></form></Modal>}</>
+  return <><PageHeader eyebrow="Administración / Usuarios" title="Gestión de usuarios" description="Administra los accesos y roles de las personas vinculadas al programa." action={<button className="primary-button" onClick={openCreate}><Plus size={18} /> Nuevo usuario</button>} /><section className="panel table-panel"><div className="table-toolbar"><div className="search-input"><Search size={17} /><input placeholder="Buscar por nombre, código o correo..." value={query} onChange={(event) => setQuery(event.target.value)} /></div><select value={role} onChange={(event) => setRole(event.target.value)}><option>Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Monitor</option><option>Tutor</option></select><button className="secondary-button filter-button"><Settings2 size={16} /> Filtros</button></div><div className="table-meta"><span><strong>{filtered.length}</strong> usuarios encontrados</span><span>Guardado en este navegador</span></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CONTACTO</th><th>ESTADO</th><th className="align-right">ACCIONES</th></tr></thead><tbody>{filtered.map((user) => <tr key={user.id}><td><div className="person-cell"><div className="mini-avatar">{user.initials}</div><div><strong>{user.name}</strong><span>{user.code}</span></div></div></td><td><div className="user-roles">{user.roles.map((userRole) => <span className="role-pill" key={userRole}>{userRole}</span>)}</div></td><td><span className="muted-cell">{user.email}</span></td><td><StatusPill status={user.status} /></td><td className="align-right"><div className="action-group"><button className="row-action" onClick={() => openEdit(user)}>Editar</button><button className="row-action" onClick={() => onChange(users.map((item) => item.id === user.id ? { ...item, status: item.status === 'Activo' ? 'Inactivo' : 'Activo' } : item))}>{user.status === 'Activo' ? 'Desactivar' : 'Activar'}</button><button className="row-action danger-action" onClick={() => deleteUser(user)}>Eliminar</button></div></td></tr>)}</tbody></table></div></section>{modal && <Modal title={editingUser ? 'Editar usuario' : 'Nuevo usuario'} subtitle="Asigna uno o varios roles al usuario." onClose={() => setModal(false)}><form className="modal-form" onSubmit={saveUser} key={editingUser?.id ?? 'new'}><label>Nombre completo<input name="name" required defaultValue={editingUser?.name ?? ''} placeholder="Ej. Ana María López" /></label><label>Correo institucional<input type="email" name="email" required defaultValue={editingUser?.email ?? ''} placeholder="correo@unitropico.edu.co" /></label><label>Documento de identidad<input name="document" required defaultValue={editingUser?.document ?? ''} placeholder="Ej. 1093432540" /></label><fieldset className="role-options"><legend>Roles de acceso</legend>{(['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as Role[]).map((availableRole) => <label className="role-option" key={availableRole}><input type="checkbox" name="roles" value={availableRole} defaultChecked={editingUser?.roles.includes(availableRole) ?? availableRole === 'Estudiante'} /><span>{availableRole}</span></label>)}</fieldset><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setModal(false)}>Cancelar</button><button className="primary-button" type="submit">{editingUser ? 'Guardar cambios' : 'Crear usuario'}</button></div></form></Modal>}</>
 }
 
 function SpacesView({ spaces, onChange }: { spaces: Space[]; onChange: (spaces: Space[]) => void }) {
