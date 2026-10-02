@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useState } from 'react'
+import { FormEvent, ReactNode, useEffect, useState } from 'react'
 import {
   Activity,
   ArrowRight,
@@ -10,10 +10,14 @@ import {
   ChevronDown,
   CircleAlert,
   Clock3,
+  Eye,
+  EyeOff,
   LayoutDashboard,
   FileText,
   GraduationCap,
+  LockKeyhole,
   LogOut,
+  Mail,
   Menu,
   Plus,
   Search,
@@ -84,6 +88,21 @@ const initialRequests: Request[] = [
   { id: 4, student: 'Daniel Andrés Pérez', subject: 'Cálculo diferencial', type: 'Tutoría', priority: 'Baja', status: 'Rechazada', date: '26 sep 2026' },
 ]
 
+const usersStorageKey = 'acadex:users'
+
+function loadUsers(): User[] {
+  try {
+    const savedUsers = window.localStorage.getItem(usersStorageKey)
+    if (savedUsers) {
+      const parsedUsers: unknown = JSON.parse(savedUsers)
+      if (Array.isArray(parsedUsers)) return parsedUsers as User[]
+    }
+  } catch {
+    // If browser storage is unavailable or malformed, start with the demo users.
+  }
+  return initialUsers
+}
+
 function App() {
   const [authenticated, setAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
@@ -92,15 +111,23 @@ function App() {
   const [portalView, setPortalView] = useState<PortalView>('inicio')
   const [loginError, setLoginError] = useState('')
   const [mobileNav, setMobileNav] = useState(false)
-  const [users, setUsers] = useState(initialUsers)
+  const [users, setUsers] = useState<User[]>(loadUsers)
   const [spaces, setSpaces] = useState(initialSpaces)
   const [requests, setRequests] = useState(initialRequests)
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(usersStorageKey, JSON.stringify(users))
+    } catch {
+      // Keep the interface usable if browser storage is disabled or full.
+    }
+  }, [users])
 
   const handleLogin = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const email = String(form.get('email') ?? '').trim().toLowerCase()
-    const document = String(form.get('document') ?? '').trim()
+    const document = String(form.get('password') ?? '').trim()
     const user = users.find((candidate) => candidate.email.toLowerCase() === email && candidate.document === document && candidate.status === 'Activo')
 
     if (user) {
@@ -152,40 +179,61 @@ function App() {
   )
 }
 
+function AcadexBrand({ light = false, compact = false, className = '' }: { light?: boolean; compact?: boolean; className?: string }) {
+  return <div className={`acadex-brand ${light ? 'light' : ''} ${compact ? 'compact' : ''} ${className}`}><span className="acadex-symbol"><GraduationCap size={32} strokeWidth={2.25} /></span><span className="acadex-wordmark"><strong>Acadex</strong><small>Monitorías y Tutorías</small></span></div>
+}
+
+function UniversitySignature({ onGreen = false }: { onGreen?: boolean }) {
+  return <div className={`university-signature ${onGreen ? 'on-green' : ''}`}><img src={onGreen ? '/marca/unitropico-logotipo-oscuro.png' : '/marca/unitropico-logotipo.png'} alt="Unitrópico · Universidad Internacional del Trópico Americano" /></div>
+}
+
 function LoginPage({ onSubmit, error }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; error: string }) {
+  const [showDocument, setShowDocument] = useState(false)
+  const [email, setEmail] = useState(() => window.localStorage.getItem('acadex:remembered-email') ?? '')
+  const [rememberEmail, setRememberEmail] = useState(() => Boolean(window.localStorage.getItem('acadex:remembered-email')))
+
+  const submitLogin = (event: FormEvent<HTMLFormElement>) => {
+    const submittedEmail = String(new FormData(event.currentTarget).get('email') ?? '').trim()
+    if (rememberEmail && submittedEmail) window.localStorage.setItem('acadex:remembered-email', submittedEmail)
+    else window.localStorage.removeItem('acadex:remembered-email')
+    onSubmit(event)
+  }
+
   return (
     <main className="login-page">
       <section className="login-hero">
-        <div className="brand-lockup light">
-          <div className="brand-mark"><ShieldCheck size={22} strokeWidth={2.5} /></div>
-          <div><strong>UNITRÓPICO</strong><span>Gestión académica</span></div>
-        </div>
+        <div className="hero-brand-row"><AcadexBrand light /><UniversitySignature onGreen /></div>
         <div className="hero-copy">
-          <span className="eyebrow">Acompañamiento que transforma</span>
-          <h1>Conectamos el talento académico con nuevas oportunidades.</h1>
-          <p>Administra tutorías, monitorías y espacios de aprendizaje desde un solo lugar.</p>
+          <span className="eyebrow">Acompañamiento que impulsa tu futuro</span>
+          <h1>Conocimiento que te acompaña.</h1>
+          <p>Un espacio para conectar estudiantes, tutores y monitores, fortaleciendo el aprendizaje y el desarrollo académico en Unitrópico.</p>
+          <div className="hero-benefits">
+            <div><span><UsersRound size={19} /></span><p><strong>Aprende</strong><small>Con el apoyo de tutores y monitores.</small></p></div>
+            <div><span><Activity size={19} /></span><p><strong>Crece</strong><small>Avanza en tu desarrollo académico.</small></p></div>
+            <div><span><BookOpen size={19} /></span><p><strong>Comparte</strong><small>Construye una comunidad universitaria.</small></p></div>
+          </div>
         </div>
         <div className="hero-orbit orbit-one" />
         <div className="hero-orbit orbit-two" />
-        <div className="hero-stat"><Activity size={18} /><span><b>+120</b> acompañamientos activos</span></div>
+        <div className="hero-footer"><span>Educación para un territorio posible</span></div>
       </section>
 
       <section className="login-panel">
         <div className="login-panel-inner">
-          <div className="mobile-brand brand-lockup"><div className="brand-mark"><ShieldCheck size={22} /></div><div><strong>UNITRÓPICO</strong><span>Gestión académica</span></div></div>
           <div className="login-heading">
-            <span className="eyebrow">Portal administrativo</span>
-            <h2>Bienvenido de nuevo</h2>
-            <p>Ingresa tus credenciales para continuar.</p>
+            <span className="eyebrow">Acceso institucional</span>
+            <h2>Bienvenido a Acadex</h2>
+            <p>Sistema de Gestión de Monitorías y Tutorías Académicas.</p>
           </div>
-          <form className="login-form" onSubmit={onSubmit}>
-            <label>Correo institucional<input name="email" type="email" placeholder="nombre@unitropico.edu.co" autoComplete="username" required /></label>
-            <label>Documento de identidad<div className="password-field"><input name="document" type="password" placeholder="Ingresa tu documento" autoComplete="current-password" required /><button type="button" aria-label="Mostrar documento"><ChevronDown size={17} /></button></div></label>
-            <div className="form-row"><label className="check-label"><input type="checkbox" /> <span>Recordarme</span></label><a href="#recuperar">¿Olvidaste tu contraseña?</a></div>
+          <form className="login-form" onSubmit={submitLogin}>
+            <label>Correo institucional<div className="login-input"><Mail size={18} /><input name="email" type="email" placeholder="nombre@unitropico.edu.co" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></label>
+            <label>Documento de identidad<div className="password-field login-input"><LockKeyhole size={18} /><input name="password" type={showDocument ? 'text' : 'password'} placeholder="Ingresa tu documento" autoComplete="current-password" required /><button type="button" aria-label={showDocument ? 'Ocultar documento' : 'Mostrar documento'} onClick={() => setShowDocument((visible) => !visible)}>{showDocument ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
+            <div className="form-row"><label className="check-label"><input type="checkbox" checked={rememberEmail} onChange={(event) => setRememberEmail(event.target.checked)} /> <span>Recordarme</span></label><a href="#recuperar">¿Olvidaste tu contraseña?</a></div>
             {error && <div className="form-error"><CircleAlert size={16} />{error}</div>}
             <button className="primary-button login-button" type="submit">Iniciar sesión <ArrowRight size={18} /></button>
           </form>
-          <p className="login-note">Usa tu correo institucional y documento de identidad para ingresar.</p>
+          <p className="login-note">Al continuar, accederás con tus credenciales institucionales.</p>
+          <div className="login-footer-quote">“Juntos construimos más oportunidades”</div>
         </div>
       </section>
     </main>
@@ -221,20 +269,25 @@ function AdminShell({ user, activeRole, children, view, onNavigate, onLogout, on
     <div className="app-shell">
       <aside className={`sidebar ${mobileNav ? 'mobile-open' : ''}`}>
         <div className="sidebar-top">
-          <div className="brand-lockup"><div className="brand-mark"><ShieldCheck size={21} /></div><div><strong>UNITRÓPICO</strong><span>Gestión académica</span></div></div>
+          <AcadexBrand className="sidebar-brand" />
           <button className="sidebar-close" onClick={onToggleMobileNav}><X size={18} /></button>
           <div className="workspace-card"><div className="workspace-icon"><Settings2 size={16} /></div><div><span>Espacio de trabajo</span><strong>Administración</strong></div><ChevronDown size={16} /></div>
           <nav className="main-nav"><span className="nav-label">MENÚ PRINCIPAL</span>{navItems.map((item) => <button key={item.id} className={view === item.id ? 'nav-item active' : 'nav-item'} onClick={() => onNavigate(item.id)}>{item.icon}<span>{item.label}</span>{item.id === 'solicitudes' && <span className="nav-count">4</span>}</button>)}</nav>
         </div>
-        <div className="sidebar-bottom"><div className="help-card"><CircleAlert size={17} /><div><strong>¿Necesitas ayuda?</strong><span>Consulta el centro de soporte</span></div><ArrowRight size={15} /></div><button className="nav-item" onClick={onLogout}><LogOut size={19} /><span>Cerrar sesión</span></button></div>
+        <div className="sidebar-bottom"><UniversitySignature onGreen /><div className="help-card"><CircleAlert size={17} /><div><strong>¿Necesitas ayuda?</strong><span>Consulta el centro de soporte</span></div><ArrowRight size={15} /></div><button className="nav-item" onClick={onLogout}><LogOut size={19} /><span>Cerrar sesión</span></button></div>
       </aside>
       {mobileNav && <button className="mobile-overlay" aria-label="Cerrar menú" onClick={onToggleMobileNav} />}
       <div className="main-area">
-        <header className="topbar"><button className="mobile-menu" onClick={onToggleMobileNav} aria-label="Abrir menú"><Menu size={22} /></button><div className="breadcrumb"><span>Administración</span><span>/</span><strong>{navItems.find((item) => item.id === view)?.label ?? 'Resumen general'}</strong></div><div className="topbar-actions"><span className="period-chip"><span className="status-dot" />Periodo 2026-2</span><button className="icon-button" aria-label="Notificaciones"><Activity size={19} /><i>3</i></button>{user.roles.length > 1 && <button className="role-switcher" onClick={onChangeRole}><UsersRound size={15} /> Cambiar rol</button>}<div className="profile"><div className="avatar">{user.initials}</div><div><strong>{user.name}</strong><span>{activeRole}</span></div><ChevronDown size={16} /></div></div></header>
+        <header className="topbar"><button className="mobile-menu" onClick={onToggleMobileNav} aria-label="Abrir menú"><Menu size={22} /></button><div className="breadcrumb"><span>Administración</span><span>/</span><strong>{navItems.find((item) => item.id === view)?.label ?? 'Resumen general'}</strong></div><div className="topbar-actions"><span className="period-chip"><span className="status-dot" />Periodo 2026-2</span><button className="icon-button" aria-label="Notificaciones"><Activity size={19} /><i>3</i></button>{user.roles.length > 1 && <button className="role-switcher" onClick={onChangeRole}><UsersRound size={15} /> Cambiar rol</button>}<ProfileMenu user={user} activeRole={activeRole} onLogout={onLogout} /></div></header>
         <main className="page-content">{children}</main>
       </div>
     </div>
   )
+}
+
+function ProfileMenu({ user, activeRole, onLogout }: { user: User; activeRole: Role; onLogout: () => void }) {
+  const [open, setOpen] = useState(false)
+  return <div className={`profile profile-menu ${open ? 'menu-open' : ''}`}><button className="profile-trigger" type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((current) => !current)}><span className="avatar"><img src="/marca/avatar-default.svg" alt="" /></span><span className="profile-details"><strong>{user.name}</strong><span>{activeRole}</span></span><ChevronDown size={16} /></button>{open && <div className="profile-dropdown" role="menu"><button type="button" role="menuitem" onClick={onLogout}><LogOut size={17} />Cerrar sesión</button></div>}</div>
 }
 
 function RoleShell({ user, activeRole, view, onNavigate, onLogout, onChangeRole, requests, onRequestsChange }: { user: User; activeRole: PortalRole; view: PortalView; onNavigate: (view: PortalView) => void; onLogout: () => void; onChangeRole: () => void; requests: Request[]; onRequestsChange: (requests: Request[]) => void }) {
@@ -266,16 +319,16 @@ function RoleShell({ user, activeRole, view, onNavigate, onLogout, onChangeRole,
   return <div className="app-shell">
     <aside className={`sidebar ${mobileNav ? 'mobile-open' : ''}`}>
       <div className="sidebar-top">
-        <div className="brand-lockup"><div className="brand-mark"><ShieldCheck size={21} /></div><div><strong>UNITRÓPICO</strong><span>Gestión académica</span></div></div>
+        <AcadexBrand className="sidebar-brand" />
         <button className="sidebar-close" onClick={() => setMobileNav(false)}><X size={18} /></button>
         <div className="workspace-card"><div className="workspace-icon"><GraduationCap size={16} /></div><div><span>Portal personal</span><strong>{activeRole}</strong></div><ChevronDown size={16} /></div>
         <nav className="main-nav"><span className="nav-label">MI ESPACIO</span>{navItems.map((item) => <button key={item.id} className={view === item.id ? 'nav-item active' : 'nav-item'} onClick={() => go(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
       </div>
-      <div className="sidebar-bottom"><div className="help-card"><CircleAlert size={17} /><div><strong>¿Necesitas ayuda?</strong><span>Consulta el centro de soporte</span></div><ArrowRight size={15} /></div><button className="nav-item" onClick={onLogout}><LogOut size={19} /><span>Cerrar sesión</span></button></div>
+      <div className="sidebar-bottom"><UniversitySignature onGreen /><div className="help-card"><CircleAlert size={17} /><div><strong>¿Necesitas ayuda?</strong><span>Consulta el centro de soporte</span></div><ArrowRight size={15} /></div><button className="nav-item" onClick={onLogout}><LogOut size={19} /><span>Cerrar sesión</span></button></div>
     </aside>
     {mobileNav && <button className="mobile-overlay" aria-label="Cerrar menú" onClick={() => setMobileNav(false)} />}
     <div className="main-area">
-      <header className="topbar"><button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="Abrir menú"><Menu size={22} /></button><div className="breadcrumb"><span>{activeRole}</span><span>/</span><strong>{navItems.find((item) => item.id === view)?.label ?? 'Mi resumen'}</strong></div><div className="topbar-actions"><span className="period-chip"><span className="status-dot" />Periodo 2026-2</span><button className="icon-button" aria-label="Notificaciones"><Activity size={19} /><i>2</i></button>{user.roles.length > 1 && <button className="role-switcher" onClick={onChangeRole}><UsersRound size={15} /> Cambiar rol</button>}<div className="profile"><div className="avatar">{user.initials}</div><div><strong>{user.name}</strong><span>{activeRole}</span></div><ChevronDown size={16} /></div></div></header>
+      <header className="topbar"><button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="Abrir menú"><Menu size={22} /></button><div className="breadcrumb"><span>{activeRole}</span><span>/</span><strong>{navItems.find((item) => item.id === view)?.label ?? 'Mi resumen'}</strong></div><div className="topbar-actions"><span className="period-chip"><span className="status-dot" />Periodo 2026-2</span><button className="icon-button" aria-label="Notificaciones"><Activity size={19} /><i>2</i></button>{user.roles.length > 1 && <button className="role-switcher" onClick={onChangeRole}><UsersRound size={15} /> Cambiar rol</button>}<ProfileMenu user={user} activeRole={activeRole} onLogout={onLogout} /></div></header>
       <main className="page-content">
         {view === 'inicio' && <PortalHome user={user} activeRole={activeRole} onNavigate={go} />}
         {view === 'disponibilidad' && <AvailabilityView user={user} activeRole={activeRole} />}
@@ -381,7 +434,7 @@ function UsersView({ users, onChange }: { users: User[]; onChange: (users: User[
     setEditingUser(null)
   }
   const deleteUser = (user: User) => { if (window.confirm(`¿Eliminar a ${user.name}?`)) onChange(users.filter((item) => item.id !== user.id)) }
-  return <><PageHeader eyebrow="Administración / Usuarios" title="Gestión de usuarios" description="Administra los accesos y roles de las personas vinculadas al programa." action={<button className="primary-button" onClick={openCreate}><Plus size={18} /> Nuevo usuario</button>} /><section className="panel table-panel"><div className="table-toolbar"><div className="search-input"><Search size={17} /><input placeholder="Buscar por nombre, código o correo..." value={query} onChange={(event) => setQuery(event.target.value)} /></div><select value={role} onChange={(event) => setRole(event.target.value)}><option>Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Monitor</option><option>Tutor</option></select><button className="secondary-button filter-button"><Settings2 size={16} /> Filtros</button></div><div className="table-meta"><span><strong>{filtered.length}</strong> usuarios encontrados</span><span>Última actualización: hace 5 min</span></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CONTACTO</th><th>ESTADO</th><th className="align-right">ACCIONES</th></tr></thead><tbody>{filtered.map((user) => <tr key={user.id}><td><div className="person-cell"><div className="mini-avatar">{user.initials}</div><div><strong>{user.name}</strong><span>{user.code}</span></div></div></td><td><div className="user-roles">{user.roles.map((userRole) => <span className="role-pill" key={userRole}>{userRole}</span>)}</div></td><td><span className="muted-cell">{user.email}</span></td><td><StatusPill status={user.status} /></td><td className="align-right"><div className="action-group"><button className="row-action" onClick={() => openEdit(user)}>Editar</button><button className="row-action" onClick={() => onChange(users.map((item) => item.id === user.id ? { ...item, status: item.status === 'Activo' ? 'Inactivo' : 'Activo' } : item))}>{user.status === 'Activo' ? 'Desactivar' : 'Activar'}</button><button className="row-action danger-action" onClick={() => deleteUser(user)}>Eliminar</button></div></td></tr>)}</tbody></table></div></section>{modal && <Modal title={editingUser ? 'Editar usuario' : 'Nuevo usuario'} subtitle="Asigna uno o varios roles al usuario." onClose={() => setModal(false)}><form className="modal-form" onSubmit={saveUser} key={editingUser?.id ?? 'new'}><label>Nombre completo<input name="name" required defaultValue={editingUser?.name ?? ''} placeholder="Ej. Ana María López" /></label><label>Correo institucional<input type="email" name="email" required defaultValue={editingUser?.email ?? ''} placeholder="correo@unitropico.edu.co" /></label><label>Documento de identidad<input name="document" required defaultValue={editingUser?.document ?? ''} placeholder="Ej. 1093432540" /></label><fieldset className="role-options"><legend>Roles de acceso</legend>{(['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as Role[]).map((availableRole) => <label className="role-option" key={availableRole}><input type="checkbox" name="roles" value={availableRole} defaultChecked={editingUser?.roles.includes(availableRole) ?? availableRole === 'Estudiante'} /><span>{availableRole}</span></label>)}</fieldset><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setModal(false)}>Cancelar</button><button className="primary-button" type="submit">{editingUser ? 'Guardar cambios' : 'Crear usuario'}</button></div></form></Modal>}</>
+  return <><PageHeader eyebrow="Administración / Usuarios" title="Gestión de usuarios" description="Administra los accesos y roles de las personas vinculadas al programa." action={<button className="primary-button" onClick={openCreate}><Plus size={18} /> Nuevo usuario</button>} /><section className="panel table-panel"><div className="table-toolbar"><div className="search-input"><Search size={17} /><input placeholder="Buscar por nombre, código o correo..." value={query} onChange={(event) => setQuery(event.target.value)} /></div><select value={role} onChange={(event) => setRole(event.target.value)}><option>Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Monitor</option><option>Tutor</option></select><button className="secondary-button filter-button"><Settings2 size={16} /> Filtros</button></div><div className="table-meta"><span><strong>{filtered.length}</strong> usuarios encontrados</span><span>Guardado en este navegador</span></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CONTACTO</th><th>ESTADO</th><th className="align-right">ACCIONES</th></tr></thead><tbody>{filtered.map((user) => <tr key={user.id}><td><div className="person-cell"><div className="mini-avatar">{user.initials}</div><div><strong>{user.name}</strong><span>{user.code}</span></div></div></td><td><div className="user-roles">{user.roles.map((userRole) => <span className="role-pill" key={userRole}>{userRole}</span>)}</div></td><td><span className="muted-cell">{user.email}</span></td><td><StatusPill status={user.status} /></td><td className="align-right"><div className="action-group"><button className="row-action" onClick={() => openEdit(user)}>Editar</button><button className="row-action" onClick={() => onChange(users.map((item) => item.id === user.id ? { ...item, status: item.status === 'Activo' ? 'Inactivo' : 'Activo' } : item))}>{user.status === 'Activo' ? 'Desactivar' : 'Activar'}</button><button className="row-action danger-action" onClick={() => deleteUser(user)}>Eliminar</button></div></td></tr>)}</tbody></table></div></section>{modal && <Modal title={editingUser ? 'Editar usuario' : 'Nuevo usuario'} subtitle="Asigna uno o varios roles al usuario." onClose={() => setModal(false)}><form className="modal-form" onSubmit={saveUser} key={editingUser?.id ?? 'new'}><label>Nombre completo<input name="name" required defaultValue={editingUser?.name ?? ''} placeholder="Ej. Ana María López" /></label><label>Correo institucional<input type="email" name="email" required defaultValue={editingUser?.email ?? ''} placeholder="correo@unitropico.edu.co" /></label><label>Documento de identidad<input name="document" required defaultValue={editingUser?.document ?? ''} placeholder="Ej. 1093432540" /></label><fieldset className="role-options"><legend>Roles de acceso</legend>{(['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as Role[]).map((availableRole) => <label className="role-option" key={availableRole}><input type="checkbox" name="roles" value={availableRole} defaultChecked={editingUser?.roles.includes(availableRole) ?? availableRole === 'Estudiante'} /><span>{availableRole}</span></label>)}</fieldset><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setModal(false)}>Cancelar</button><button className="primary-button" type="submit">{editingUser ? 'Guardar cambios' : 'Crear usuario'}</button></div></form></Modal>}</>
 }
 
 function SpacesView({ spaces, onChange }: { spaces: Space[]; onChange: (spaces: Space[]) => void }) {
