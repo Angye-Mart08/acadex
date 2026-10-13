@@ -30,9 +30,10 @@ visibilidad de los menús no sustituye esa autorización del servidor.
 ## 5. Persistencia y datos de demostración
 
 MariaDB es la fuente de verdad para autenticación, usuarios, espacios,
-solicitudes y catálogos. `web/data/ejemplo.json` y los valores iniciales del
-frontend sirven como estado visual de respaldo mientras se completa la carga
-inicial, pero no deben utilizarse para confirmar una operación persistida.
+solicitudes, catálogos, horarios y sesiones consultadas. El frontend inicia sus
+colecciones vacías y presenta un estado de carga; los datos de
+`web/data/ejemplo.json` no se usan como respaldo de pantalla ni para confirmar
+operaciones persistidas.
 
 Las eliminaciones administrativas se implementan como desactivaciones lógicas
 para conservar las relaciones históricas de sesiones y solicitudes.
@@ -46,9 +47,10 @@ para conservar las relaciones históricas de sesiones y solicitudes.
 1. Integrado: login, selección de rol y autorización JWT.
 2. Integrado: operaciones administrativas de usuarios, espacios y solicitudes.
 3. Integrado: catálogos administrativos, dashboard y generación de reportes.
-4. Pendiente: persistencia API para disponibilidad, horarios, sesiones,
-   asistencia, seguimiento, compromisos, evidencias e informes individuales.
-5. Pendiente: pruebas automatizadas de integración y despliegue.
+4. Integrado en lectura: disponibilidad, horarios y sesiones filtradas por rol.
+5. Pendiente: escritura de disponibilidad/sesiones, asistencia, seguimiento,
+   compromisos, evidencias e informes individuales.
+6. Pendiente: pruebas automatizadas de integración y despliegue.
 
 La comprobación de contrato usa `npm run validate`; la compilación de la web
 usa `npm run build`. El `typecheck` de API no comprueba los módulos que aún
@@ -62,3 +64,19 @@ Los componentes de portal comparten tokens y ajustes visuales en
 duplicar el shell ni cambiar la fuente de datos. Los diseños de dos columnas se
 convierten en una columna en móvil, y los contenedores de tablas y modales deben
 controlar su propio desbordamiento para evitar scroll horizontal de página.
+
+## 9. Entrada y HMR de React
+
+`web/src/bootstrap.ts` contiene los efectos laterales de montaje y conserva la
+instancia `Root` en `import.meta.hot.data` para reutilizarla durante HMR.
+`web/src/main.tsx` exporta únicamente el componente `AppRoot`, que es el límite
+compatible con React Fast Refresh. Esta separación evita llamar dos veces a
+`createRoot()` sobre el mismo contenedor cuando Vite actualiza el módulo.
+
+## 10. CRUD completo (desactivación lógica vs. eliminación definitiva) y códigos institucionales autogenerados
+
+Se diferencian de manera formal dos operaciones en la administración del sistema:
+- **Desactivación / Activación lógica**: Permite inhabilitar temporalmente a un usuario o espacio preservando su historial operativo.
+- **Eliminación definitiva en cascada (DELETE)**: Permite remover de forma irreversible registros de prueba o inconsistentes mediante una limpieza atómica y ordenada de claves foráneas en MariaDB, con una salvaguarda que impide que un administrador elimine su propia cuenta activa.
+
+Asimismo, se establece que ningún código institucional (usuarios, espacios o radicados) puede ser digitado manualmente en los formularios. Estos se generan de forma determinística en su prefijo pero aleatoria en sus dígitos numéricos (`ADM###`, `TUT###`, `MON###`, `EST###`, `AUL-###`, `LAB-###`, etc.), manteniendo el atributo `readOnly` y ofreciendo un botón de regeneración aleatoria en la interfaz.

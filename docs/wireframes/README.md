@@ -1,8 +1,8 @@
 # Wireframes y referencias visuales
 
-Las imágenes de esta carpeta son capturas de referencia de los flujos por rol.
-La implementación vigente puede diferir en contenido y comportamiento; el
-estado funcional se registra en [BITACORA_PROYECTO.md](../../BITACORA_PROYECTO.md).
+Las imágenes de esta carpeta son capturas de referencia de los flujos por rol,
+no especificaciones del estado actual. Para el funcionamiento implementado,
+consulta el [README principal](../../README.md) y la [guía de API](../../api/README_API.md).
 
 | Imagen | Referencia |
 | --- | --- |

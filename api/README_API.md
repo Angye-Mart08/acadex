@@ -165,3 +165,11 @@ y trazabilidad histórica.
 - El backend debe aplicar autorización por rol, además de validar el JWT.
 - Los cambios de estado de solicitudes deben respetar las transiciones del dominio.
 - Los módulos integrados del frontend deben consumir estas rutas y no confirmar cambios usando datos locales.
+
+## Operaciones de Eliminación Definitiva en Cascada (DELETE)
+
+La API cuenta con endpoints de eliminación física real (`DELETE`) protegidos con sesión y rol de Administrador:
+
+- `DELETE /api/v1/users/:id`: Elimina definitivamente el usuario en cascada sobre todas las entidades asociadas en MariaDB (`EntregaActividad`, `Seguimiento`, `Solicitud`, `SesionAcompanamiento`, `HistorialSesion`, `Informe`, `EstudiantePrograma`, `Estudiante`, `Disponibilidad`, `AsignacionAcademica`, `HorarioMonitor`, `Tutor`, `Monitor`, `Administrador`, `Credencial`, `UsuarioRol` y `Usuario`). Impide la autoeliminación de la cuenta en sesión (HTTP 400).
+- `DELETE /api/v1/spaces/:id`: Elimina permanentemente el espacio tras limpiar sus dependencias en `HorarioMonitor` y `AsignacionEspacio`.
+- `DELETE /api/v1/requests/:id`: Elimina la solicitud tras limpiar en cascada sus dependencias en `HistorialSesion`, `Informe` y `SesionAcompanamiento`.

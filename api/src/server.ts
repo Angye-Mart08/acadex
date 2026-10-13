@@ -7,27 +7,16 @@ import { AuthError, currentUserFromToken, login, selectRole } from './auth.js'
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
 import { DataError, createRequest, createSpace, createUser, dashboard, deleteSpace, deleteUser, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSpaces, listSubjects, listUsers, updateRequest, updateSpace, updateUser } from './data.js'
-import { adminCatalogs, adminDashboard, adminReport, changePassword, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminSpace, deleteAdminUser, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminRequest, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
+import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, changePassword, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminRequest, deleteAdminSpace, deleteAdminUser, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminRequest, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
 
 const app = express()
 app.disable('x-powered-by')
 const allowedOrigins = new Set(config.corsOrigin.split(',').map((origin) => origin.trim()))
 function isAllowedOrigin(origin: string) {
-  if (allowedOrigins.has(origin)) return true
-  if (process.env.NODE_ENV === 'production') return false
-
-  try {
-    const requested = new URL(origin)
-    if (!['localhost', '127.0.0.1'].includes(requested.hostname)) return false
-    return [...allowedOrigins].some((allowedOrigin) => {
-      const allowed = new URL(allowedOrigin)
-      return ['localhost', '127.0.0.1'].includes(allowed.hostname)
-        && requested.protocol === allowed.protocol
-        && requested.port === allowed.port
-    })
-  } catch {
-    return false
-  }
+  if (!origin) return true
+  // En desarrollo permitir cualquier origen (localhost, 127.0.0.1, diferentes puertos de Vite, etc.)
+  if (process.env.NODE_ENV !== 'production') return true
+  return allowedOrigins.has(origin)
 }
 
 app.use(cors({ origin: (origin, callback) => callback(null, !origin || isAllowedOrigin(origin)) }))
@@ -70,6 +59,15 @@ app.get('/health', async (_req, res, next) => {
 })
 
 const router = express.Router()
+
+router.get('/health', async (_req, res, next) => {
+  try {
+    await checkDatabaseConnection()
+    res.json({ status: 'ok', database: 'connected' })
+  } catch (error) {
+    next(error)
+  }
+})
 
 router.post('/auth/login', async (req, res, next) => {
   try {
@@ -144,6 +142,10 @@ router.patch('/admin/configuration/settings', requireSession, requireRole('Admin
   try { res.json(await updateSettings(req.body)) } catch (error) { next(error) }
 })
 
+router.get('/admin/db-status', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await adminDbStatus()) } catch (error) { next(error) }
+})
+
 router.get('/users', requireSession, requireRole('Administrador'), async (req, res, next) => {
   try { res.json(await listAdminUsers(req.query)) } catch (error) { next(error) }
 })
@@ -157,7 +159,7 @@ router.patch('/users/:id', requireSession, requireRole('Administrador'), async (
 })
 
 router.delete('/users/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { await deleteAdminUser(Number(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+  try { await deleteAdminUser(Number(req.params.id), req.session.id); res.status(204).send() } catch (error) { next(error) }
 })
 
 router.get('/spaces', requireSession, async (req, res, next) => {
@@ -196,6 +198,10 @@ router.patch('/requests/:id', requireSession, requireRole('Administrador'), asyn
   try { res.json(await updateAdminRequest(Number(req.params.id), req.body)) } catch (error) { next(error) }
 })
 
+router.delete('/requests/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { await deleteAdminRequest(Number(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+
 app.use(config.apiPrefix, router)
 
 app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
@@ -213,7 +219,7 @@ let server: ReturnType<typeof app.listen> | undefined
 async function start() {
   try {
     await initializeDatabase()
-    server = app.listen(config.port, () => {
+    server = app.listen(config.port, '0.0.0.0', () => {
       console.log(`API ejecutándose en http://localhost:${config.port}${config.apiPrefix}`)
     })
   } catch (error) {

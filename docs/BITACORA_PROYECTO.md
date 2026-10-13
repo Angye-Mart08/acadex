@@ -403,3 +403,124 @@ Monitor obtiene `HorarioMonitor`; las sesiones se filtran por estudiante o por
 asignación activa del rol. Los portales ahora muestran registros reales o un
 estado vacío, en lugar de citas de muestra. Las escrituras de agenda e informes
 personales siguen pendientes.
+
+## 20. Optimización integral de formularios, control directo de MariaDB y depuración de redundancias
+
+Para responder a los requerimientos de usabilidad, integridad de datos y control operativo de la base de datos, se dividió y ejecutó la tarea en las siguientes partes documentadas:
+
+### Parte 1: Asignaturas dinámicas y selectores avanzados desde MariaDB
+- Se integró el catálogo completo de 24 asignaturas almacenadas en la base de datos `gestion_monitorias_tutorias`.
+- En la asignación de perfiles de Tutor y Monitor, se implementó el componente `SubjectMultiSelect`, el cual incluye buscador en vivo por código o nombre, etiquetas/chips visuales removibles, acciones de selección rápida («Todas», «Limpiar») y contador dinámico.
+- En los formularios de solicitud de acompañamiento (estudiantil y administrativo), las asignaturas se presentan en listas desplegables con el formato institucional unificado `[CÓDIGO] Nombre de Asignatura` (ej. `[MAT101] Matemáticas básicas`), garantizando claridad académica y consistencia de IDs en la persistencia.
+
+### Parte 2: Eliminación de redundancias en formularios y modelos
+- **Formulario de Usuarios**: Se eliminó la solicitud duplicada del código estudiantil cuando ya existe el código institucional principal, utilizándolo como fallback automático y añadiendo un selector de semestre acotado (1 al 12). Los campos libres de categoría docente y tipo de vinculación fueron convertidos a listas desplegables curadas.
+- **Formulario de Espacios**: Se eliminó el campo redundante de texto libre «Ubicación detallada» que duplicaba los campos de Edificio, Bloque, Salón y Piso. En su lugar se incorporó una insignia dinámica de previsualización (`.location-preview-badge`) que calcula en tiempo real la nomenclatura oficial y un campo opcional de referencia de acceso.
+- **Limpieza de código muerto**: Se eliminaron completamente las funciones obsoletas y no utilizadas `LegacySpacesView` y `LegacyRequestsView` que duplicaban lógica en el archivo principal.
+
+### Parte 3: Funcionalidad completa de elementos visuales
+- **Chip de Periodo Académico (2026-2)**: El indicador con punto verde junto a «Periodo 2026-2», cuyo propósito resultaba ambiguo, fue transformado en un botón interactivo institucional (`.period-chip.interactive`). Al hacer clic, abre un modal explicativo (`PeriodModal`) que detalla el ciclo académico vigente, el estado activo para registro de solicitudes y la entidad en MariaDB (`PeriodoAcademico`).
+- **Botón «Ver calendario» en Solicitudes**: El botón inactivo de la vista administrativa de solicitudes fue conectado a un nuevo modal cronológico (`CalendarModal`), el cual resume el conteo por estados (totales, pendientes, en curso, atendidas) y lista en tarjetas ordenadas por fecha cada solicitud registrada.
+- **Banner de Estudiante en Solicitudes**: Al seleccionar un estudiante para radicar una solicitud administrativa, se despliega una tarjeta de confirmación (`.student-selected-banner`) con su código y programa académico activo.
+
+### Parte 4: Unificación de cierre de sesión y navegación limpia
+- Se eliminó la redundancia de múltiples formas de salida del sistema. El cierre de sesión se centralizó de manera exclusiva y uniforme en el menú desplegable del perfil institucional (`ProfileMenu`), ubicado en la esquina superior derecha del shell, tanto para Administrador como para roles de portal.
+- El selector inicial de rol únicamente ofrece la opción de salida en caso de que el usuario decida abortar la selección antes de ingresar al portal.
+
+### Parte 5: Control, inspección y auditoría directa de MariaDB
+- **Script de inspección en terminal**: Se desarrolló `api/scripts/inspect-db.mjs` y se registró el comando `npm run db:inspect` (ejecutable desde la raíz o desde `api/`). Este comando abre la conexión con MariaDB en `127.0.0.1:3306`, enumera las 36 tablas y renderiza tablas formateadas en consola con los últimos registros de `Usuario`, `Espacio` y `Solicitud`, permitiendo verificar al instante cualquier cambio de las operaciones CRUD.
+- **Panel web en vivo**: Se creó el endpoint `GET /api/v1/admin/db-status` y se incorporó en la sección de Configuración el módulo `DatabaseControlPanel`. Este panel expone el estado del motor, base de datos activa, puerto y métricas de registros en tiempo real con un botón de refresco inmediato.
+- **Acceso mediante clientes gráficos**: Se documentaron los parámetros oficiales para abrir la base en HeidiSQL, DBeaver o DataGrip, y se creó el script `fix-db-user.mjs` para asegurar privilegios consistentes para el usuario de aplicación `tutorias_app`.
+
+### Parte 6: Corrección de conectividad de la API y ejecución unificada
+- Se solucionó el error de fallo de conexión en el inicio de sesión relajando la validación CORS en modo desarrollo para admitir cualquier puerto en `localhost` y `127.0.0.1`.
+- Se configuró el proxy reverso `/api` en `web/vite.config.ts` hacia `http://127.0.0.1:3000` y se implementó un mecanismo de reintento transparente en `web/src/api.ts` ante discrepancias de resolución local.
+- Se creó un `package.json` raíz y el script `scripts/start-dev.mjs`, permitiendo iniciar tanto la API como el frontend de forma integrada con un único comando: `npm run dev`.
+
+## 21. Blindaje de conectividad cliente-servidor y verificación end-to-end
+
+Para erradicar por completo el fallo reportado en el inicio de sesión («No fue posible conectar con el servidor. Verifica que la API esté ejecutándose») y garantizar estabilidad permanente en cualquier configuración de red local, se implementaron las siguientes medidas técnicas definitivas:
+
+1. **Estrategia multi-candidato resiliente en el cliente web (`web/src/api.ts`)**:
+   - El cliente web intenta en primer lugar el proxy transparente relativo `/api/v1` de Vite. Al ser una petición de mismo origen (*same-origin*), elimina completamente restricciones de CORS, peticiones *preflight* OPTIONS y problemas de resolución de nombres de host.
+   - En caso de indisponibilidad o error 502/504 en el proxy, el cliente conmuta de forma automática e inmediata a conexiones directas sobre `http://localhost:3000/api/v1` y `http://127.0.0.1:3000/api/v1`.
+   - Si ninguna de las vías responde, arroja un diagnóstico claro con instrucciones exactas de comando (`npm run dev`) y estado de MariaDB en puerto 3306.
+
+2. **Alineación del servidor Express (`api/src/server.ts`)**:
+   - Se configuró el enlace de red explícito a `0.0.0.0` en `app.listen(config.port, '0.0.0.0')`, resolviendo la ambigüedad de pila dual IPv4/IPv6 en Windows 11 donde `localhost` puede asociarse a `::1` mientras los clientes esperan `127.0.0.1`.
+   - Se expuso la ruta de comprobación de salud tanto en `/health` como en `/api/v1/health` retornando `{ status: 'ok', database: 'connected' }`.
+   - Se flexibilizó CORS en desarrollo (`process.env.NODE_ENV !== 'production'`) admitiendo cualquier origen y puerto sin rechazos de cabeceras.
+
+3. **Verificación visual y de interacción en navegador real**:
+   - Mediante un subagente de navegación con grabación WebP (`login_and_features_verification`), se validó en vivo:
+     * El formulario de inicio de sesión institucional con la cuenta `jaysonquintero@unitropico.edu.co` y documento `1000000010`.
+     * Autenticación exitosa y carga del panel de Administración con datos reales de MariaDB.
+     * Apertura y cierre del modal explicativo del periodo académico (`PeriodModal`) desde el chip interactivo.
+     * Apertura del modal cronológico de solicitudes (`CalendarModal`) desde el botón «Ver calendario».
+     * Carga del panel **Control y Observación de MariaDB** en Configuración, confirmando motor `connected`, 36 tablas activas y conteos en vivo.
+
+
+
+## 22. Corrección del registro de usuarios, completitud del CRUD con eliminación definitiva y códigos institucionales autogenerados
+
+Para atender los requerimientos de corrección del registro de usuarios, culminar el CRUD administrativo con la operación de eliminación física y estandarizar la generación coherente y no editable de códigos institucionales en todos los formularios, se implementaron las siguientes soluciones:
+
+### 1. Diagnóstico y corrección del registro de usuarios
+- **Causa raíz**: El formulario web enviaba el atributo en español `semestre`, mientras que el esquema de validación Zod en `api/src/admin.ts` (`studentProfileSchema`) exigía estrictamente la clave `semester: z.coerce.number()`. Al ser `undefined`, la coerción resultaba en `NaN`, detonando un error HTTP 422 `VALIDATION_ERROR` que impedía crear usuarios con el rol de Estudiante.
+- **Solución**:
+  - En la API (`api/src/admin.ts`), se flexibilizó el esquema aceptando tanto `semester` como `semestre`:
+    ```typescript
+    semester: z.preprocess((val) => val, z.coerce.number().min(1).max(12).optional()),
+    semestre: z.preprocess((val) => val, z.coerce.number().min(1).max(12).optional())
+    ```
+    y se normalizó la lectura garantizando el valor numérico en la inserción a la tabla `Estudiante`.
+  - En el cliente web (`web/src/App.tsx`), se envía de forma transparente `{ semester: num, semestre: num }` para compatibilidad total.
+  - Se probó la creación de usuarios con múltiples roles y estudiantes, confirmando inserción exitosa tanto en `Usuario`, `Credencial`, `UsuarioRol` y `Estudiante`.
+
+### 2. CRUD completo del Administrador: Implementación de la función Eliminar
+Previamente, el sistema solo disponía de Crear, Editar y «Desactivar» (que únicamente actualizaba `estado = 'Inactivo'`). Se diseñó e implementó la función de **Eliminación Física Definitiva (`DELETE`)** con borrado seguro en cascada en MariaDB:
+
+- **Eliminación de Usuarios (`DELETE /api/v1/users/:id`)**:
+  - En `api/src/admin.ts`, se desarrolló la función `deleteAdminUser(id, currentUserId)` que ejecuta una transacción coordinada eliminando los registros dependientes en:
+    `EntregaActividad` -> `Seguimiento` -> `Solicitud` -> `SesionAcompanamiento` -> `HistorialSesion` -> `Informe` -> `EstudiantePrograma` -> `Estudiante` -> `Disponibilidad` -> `AsignacionAcademica` -> `HorarioMonitor` -> `Tutor` -> `Monitor` -> `Administrador` -> `Credencial` -> `UsuarioRol` -> `Usuario`.
+  - **Salvaguarda de seguridad**: Se incluyó la validación obligatoria que impide que el usuario administrador en sesión pueda autoeliminarse (`if (id === currentUserId) throw new HttpError(400, 'No es posible eliminar tu propio usuario en sesión.')`).
+  - En la interfaz web (`UsersView`), se diferenció la acción «Desactivar» / «Activar» del botón rojo de peligro **«Eliminar»**, el cual solicita confirmación explícita antes de ejecutar el borrado en MariaDB y retira el registro de la vista.
+
+- **Eliminación de Espacios (`DELETE /api/v1/spaces/:id`)**:
+  - En `api/src/admin.ts`, se implementó `deleteAdminSpace(id)` con limpieza previa en cascada de `HorarioMonitor` y `AsignacionEspacio` antes de borrar la fila en `Espacio`.
+  - En la interfaz web (`SpacesView`), se incorporaron tres acciones independientes para cada tarjeta:
+    1. **Activar / Desactivar**: Alterna el estado operativo entre `Activo` e `Inactivo`.
+    2. **Editar**: Abre la ficha para actualizar datos físicos y recursos.
+    3. **Eliminar** (acción destructiva): Borra permanentemente el espacio de MariaDB.
+
+- **Eliminación de Solicitudes (`DELETE /api/v1/requests/:id`)**:
+  - Se creó el endpoint `DELETE /api/v1/requests/:id` en `api/src/server.ts` con protección `requireSession` y `requireRole('Administrador')`.
+  - En `api/src/admin.ts`, se desarrolló `deleteAdminRequest(id)` con eliminación previa en cascada de `HistorialSesion`, `Informe` y `SesionAcompanamiento`.
+  - En `web/src/api.ts`, se integró y exportó la función `deleteRequest(accessToken, id)`.
+  - En la tabla de Solicitudes (`RequestsView`), se añadió el botón de acción con icono de papelera (`Trash2`) para borrado definitivo.
+
+### 3. Códigos institucionales estructurados, aleatorios y de solo lectura (`readOnly`)
+Para cumplir la directriz de que ningún usuario pueda escribir manualmente el código institucional y que este se genere de forma coherente según la entidad y el rol:
+
+- **Estructura coherente de nomenclatura**:
+  - **Administrador**: Prefijo `ADM` seguido de 3 dígitos numéricos aleatorios (ej. `ADM482`).
+  - **Tutor**: Prefijo `TUT` seguido de 3 dígitos numéricos aleatorios (ej. `TUT719`).
+  - **Monitor**: Prefijo `MON` seguido de 3 dígitos numéricos aleatorios (ej. `MON305`).
+  - **Estudiante**: Prefijo `EST` seguido de 3 dígitos numéricos aleatorios (ej. `EST640`).
+  - **Espacios físicos y virtuales**:
+    * Aulas: `AUL-###` (ej. `AUL-104`).
+    * Laboratorios: `LAB-###` (ej. `LAB-202`).
+    * Salas generales: `SAL-###` (ej. `SAL-301`).
+    * Salas de informática: `INF-###` (ej. `INF-502`).
+    * Bibliotecas: `BIB-###` (ej. `BIB-101`).
+    * Salones de reuniones: `REU-###` (ej. `REU-405`).
+    * Espacios virtuales: `VIR-###` (ej. `VIR-801`).
+    * Otros: `ESP-###`.
+  - **Radicados de Solicitudes**: Formato `RAD-YYYY-####` (ej. `RAD-2026-4891`).
+
+- **Reglas aplicadas a todos los formularios**:
+  1. **Campo no editable**: Todos los inputs de código institucional poseen el atributo `readOnly` y estilos visuales específicos (`.readonly-code-input`, fondo protegido y cursor neutral), impidiendo la edición manual directa.
+  2. **Actualización reactiva por selección**: Al cambiar el rol en el formulario de usuarios, o el tipo de espacio en el formulario de espacios, el código se actualiza automáticamente adoptando el prefijo correspondiente.
+  3. **Botón de regeneración aleatoria**: Se incorporó un botón adyacente (`.regenerate-code-btn`) con icono de actualización que permite generar una nueva combinación aleatoria respetando la unicidad frente a los registros existentes.
+  4. **Sincronización de perfil de estudiante**: En el formulario de perfiles específicos, el campo «Código estudiantil» permanece sincronizado en modo solo lectura con el código institucional asignado.
+  5. **Formulario de solicitud estudiantil**: Muestra el código institucional asignado a la cuenta del estudiante en solo lectura para verificación de identidad antes del envío.

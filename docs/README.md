@@ -9,7 +9,7 @@ Esta carpeta reúne los documentos de diseño y soporte para la revisión del re
 - [Índice de diagramas](./diagramas/README.md): propósito y archivos PDF del análisis.
 - [Índice de wireframes](./wireframes/README.md): capturas de referencia por rol y módulo.
 
-La bitácora general de avances se mantiene en [BITACORA_PROYECTO.md](../BITACORA_PROYECTO.md).
+El estado de ejecución y las guías de trabajo se resumen en el [README principal](../README.md) y la [documentación de la API](../api/README_API.md).
 
 Para ejecutar el sistema y validar los paquetes, consulta primero el
 [README principal](../README.md) y la [guía de la API](../api/README_API.md).

@@ -13,7 +13,6 @@ React + TypeScript → API REST con Node.js + TypeScript → MariaDB
 ```text
 acadex/
 ├── README.md                         # Entrada principal del repositorio
-├── BITACORA_PROYECTO.md              # Bitácora detallada de avances
 ├── .gitignore
 ├── .env.example                      # Variables de entorno sin secretos
 ├── database/
@@ -38,44 +37,43 @@ acadex/
 
 ## Ejecución rápida
 
-El frontend y la API son paquetes independientes. Para iniciar el sistema,
-primero configura MariaDB y `.env` desde `.env.example`, ejecuta la API y
-después inicia Vite. Abre la URL `localhost` que Vite muestre; en desarrollo
-también se admite `127.0.0.1`.
+El frontend y la API pueden ejecutarse de manera conjunta desde la raíz del proyecto o en terminales independientes:
 
-Frontend:
+### Opción 1: Ejecución integrada (Recomendada)
+
+Desde la raíz del repositorio (`acadex/`):
+
+```powershell
+npm run dev
+```
+
+Este comando inicia simultáneamente la API REST en `http://localhost:3000/api/v1` y el frontend Vite en `http://localhost:5173`.
+
+### Opción 2: Ejecución en terminales independientes
+
+Terminal 1 — API de MariaDB:
+
+```powershell
+cd C:\Users\brayh\acadex\api
+npm run dev
+```
+
+Terminal 2 — Frontend web:
 
 ```powershell
 cd C:\Users\brayh\acadex\web
-npm install
 npm run dev
 ```
 
-API — validación del contrato:
+### Control y verificación de Base de Datos (MariaDB)
+
+Para inspeccionar las tablas y ver en consola los últimos registros modificados por las operaciones CRUD:
 
 ```powershell
-cd C:\Users\brayh\acadex\api
-npm install
-npm run validate
+npm run db:inspect
 ```
 
-API — mock local:
-
-```powershell
-cd C:\Users\brayh\acadex\api
-npm run mock
-```
-
-API — servidor real de autenticación:
-
-```powershell
-cd C:\Users\brayh\acadex\api
-npm run dev
-```
-
-Configura `.env` y ejecuta la API. En el primer arranque creará la base de
-datos y cargará el esquema automáticamente; luego verifica
-`http://localhost:3000/health`.
+Configura `.env` desde `.env.example` antes de iniciar. En el primer arranque, la API creará la base de datos y cargará el esquema automáticamente; luego verifica `http://localhost:3000/health`.
 
 Validaciones locales:
 
@@ -127,7 +125,6 @@ permite probar el selector y el cambio entre los roles Monitor y Estudiante.
 
 ## Documentación principal
 
-- [Bitácora del proyecto](./BITACORA_PROYECTO.md)
 - [Documentación de la API](./api/README_API.md)
 - [Contrato OpenAPI 3.1](./api/openapi.yaml)
 - [Modelo de datos](./docs/modelo-datos.md)
@@ -141,3 +138,23 @@ permite probar el selector y el cambio entre los roles Monitor y Estudiante.
 - Angye Katherine Martínez Cucunubá — Líder técnico.
 - Brayham Orlando Lindarte Fuentes — Backend, datos, DevOps y calidad.
 - Nicolas Parra Franco — Frontend.
+
+## CRUD Completo del Administrador y Códigos Institucionales Autogenerados
+
+El módulo administrativo cuenta con el ciclo de vida CRUD completo para todas las entidades centrales:
+
+- **Crear**: Registro con validación de esquemas en API (incluyendo perfiles específicos de Estudiante, Tutor y Monitor).
+- **Editar**: Actualización completa de perfiles, capacidades, recursos y datos operativos.
+- **Activar / Desactivar**: Gestión del estado operativo (`Activo` / `Inactivo`) para control de disponibilidad.
+- **Eliminar permanentemente**: Borrado físico definitivo en MariaDB (`DELETE`) ejecutado mediante transacciones con eliminación en cascada de registros dependientes (sesiones, informes, asistencias, horarios y asignaciones) y salvaguarda contra autoeliminación del administrador en sesión.
+
+### Estructura de códigos institucionales autogenerados (Solo lectura)
+En ningún formulario del software es posible escribir o alterar manualmente el código institucional (`readOnly`). La aplicación genera códigos coherentes y aleatorios según el rol o entidad:
+- **Administrador**: `ADM###` (ej. `ADM482`).
+- **Tutor**: `TUT###` (ej. `TUT719`).
+- **Monitor**: `MON###` (ej. `MON305`).
+- **Estudiante**: `EST###` (ej. `EST640`).
+- **Espacios**: `AUL-###`, `LAB-###`, `SAL-###`, `INF-###`, `BIB-###`, `REU-###`, `VIR-###`, `ESP-###`.
+- **Radicados de Solicitudes**: `RAD-YYYY-####`.
+
+Cada formulario incluye un botón de regeneración aleatoria para obtener una nueva variante respetando la unicidad.

@@ -102,12 +102,51 @@ async function roleIds(connection: any, selectedRoles: string[]) {
   return rows
 }
 
-const assignmentSchema = z.object({ subjectIds: z.array(z.coerce.number().int().positive()).default([]), periodId: z.coerce.number().int().positive().optional(), weeklyHours: z.coerce.number().int().positive().max(60).optional() })
+const assignmentSchema = z.object({
+  subjectIds: z.array(z.coerce.number().int().positive()).default([]),
+  periodId: z.preprocess((val) => (val && Number(val) > 0 ? Number(val) : undefined), z.number().int().positive().optional()),
+  weeklyHours: z.preprocess((val) => (val && Number(val) > 0 ? Number(val) : undefined), z.number().int().positive().max(60).optional()),
+})
+
+const studentProfileSchema = z.object({
+  studentCode: z.string().trim().min(2).max(30),
+  semester: z.preprocess((val) => (val !== undefined && val !== null ? Number(val) : undefined), z.number().int().min(1).max(20).optional()),
+  semestre: z.preprocess((val) => (val !== undefined && val !== null ? Number(val) : undefined), z.number().int().min(1).max(20).optional()),
+  programId: z.coerce.number().int().positive(),
+}).transform((val) => {
+  const sem = val.semester ?? val.semestre ?? 1
+  return {
+    studentCode: val.studentCode,
+    semester: sem,
+    semestre: sem,
+    programId: val.programId,
+  }
+})
+
 const profileSchema = z.object({
-  administrador: z.object({ cargo: z.string().trim().min(2), dependencia: z.string().trim().min(2), institutionalEmail: z.string().trim().email(), observaciones: z.string().max(300).optional().default('') }).optional(),
-  estudiante: z.object({ studentCode: z.string().trim().min(2).max(30), semester: z.coerce.number().int().min(1).max(20), programId: z.coerce.number().int().positive() }).optional(),
-  tutor: z.object({ teachingCategory: z.string().trim().min(2), employmentType: z.string().trim().min(2), currentPeriod: z.string().trim().min(1).max(40), weeklyHours: z.coerce.number().int().positive().max(60), observations: z.string().max(300).optional().default(''), assignments: assignmentSchema.default({}) }).optional(),
-  monitor: z.object({ monitorType: z.string().trim().min(2).default('Monitor académico'), resolution: z.string().max(80).optional().default(''), currentPeriod: z.string().trim().min(1).max(40), weeklyHours: z.coerce.number().int().positive().max(60), observations: z.string().max(300).optional().default(''), assignments: assignmentSchema.default({}) }).optional(),
+  administrador: z.object({
+    cargo: z.string().trim().min(2),
+    dependencia: z.string().trim().min(2),
+    institutionalEmail: z.string().trim().email(),
+    observaciones: z.string().max(300).optional().default(''),
+  }).optional(),
+  estudiante: studentProfileSchema.optional(),
+  tutor: z.object({
+    teachingCategory: z.string().trim().min(2),
+    employmentType: z.string().trim().min(2),
+    currentPeriod: z.string().trim().min(1).max(40),
+    weeklyHours: z.coerce.number().int().positive().max(60),
+    observations: z.string().max(300).optional().default(''),
+    assignments: assignmentSchema.default({}),
+  }).optional(),
+  monitor: z.object({
+    monitorType: z.string().trim().min(2).default('Monitor académico'),
+    resolution: z.string().max(80).optional().default(''),
+    currentPeriod: z.string().trim().min(1).max(40),
+    weeklyHours: z.coerce.number().int().positive().max(60),
+    observations: z.string().max(300).optional().default(''),
+    assignments: assignmentSchema.default({}),
+  }).optional(),
 }).default({})
 
 const userSchema = z.object({ code: z.string().trim().min(2).max(20), document: z.string().trim().min(5).max(20), name: z.string().trim().min(2).max(160), email: z.string().trim().email().max(120), roles: z.array(roleSchema).min(1), profiles: profileSchema })
@@ -197,9 +236,62 @@ export async function updateAdminUser(id: number, payload: unknown) {
   } catch (error) { await connection.rollback(); if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_USER','El código, documento, correo o perfil ya está registrado.'); throw error } finally { connection.release() }
 }
 
-export async function deleteAdminUser(id: number) {
-  const [result] = await pool.execute("UPDATE Usuario SET estado='Inactivo' WHERE id_usuario=?", [id]); if (!result.affectedRows) throw new DataError(404,'USER_NOT_FOUND','El usuario no existe.')
-  await pool.execute("UPDATE Credencial SET estado='Inactivo' WHERE id_usuario=?",[id]); await pool.execute("UPDATE UsuarioRol SET estado='Inactivo' WHERE id_usuario=?",[id])
+export async function deleteAdminUser(id: number, currentUserId?: number) {
+  if (currentUserId && id === Number(currentUserId)) {
+    throw new DataError(400, 'CANNOT_DELETE_SELF', 'No puedes eliminar tu propia cuenta de usuario en sesión.')
+  }
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [existing] = await connection.query('SELECT id_usuario FROM Usuario WHERE id_usuario = ?', [id])
+    if (!existing.length) throw new DataError(404, 'USER_NOT_FOUND', 'El usuario no existe.')
+
+    // 1. Estudiante & dependencias
+    const [studentRows] = await connection.query('SELECT id_estudiante FROM Estudiante WHERE id_usuario = ?', [id])
+    for (const s of studentRows) {
+      await connection.execute('DELETE FROM EntregaActividad WHERE id_estudiante = ?', [s.id_estudiante])
+      await connection.execute('DELETE FROM Seguimiento WHERE id_estudiante = ?', [s.id_estudiante])
+      const [solRows] = await connection.query('SELECT id_solicitud FROM Solicitud WHERE id_estudiante = ?', [s.id_estudiante])
+      for (const sol of solRows) {
+        await connection.execute('DELETE FROM HistorialSesion WHERE id_sesion IN (SELECT id_sesion FROM Sesion WHERE id_solicitud = ?)', [sol.id_solicitud])
+        await connection.execute('DELETE FROM Informe WHERE id_sesion IN (SELECT id_sesion FROM Sesion WHERE id_solicitud = ?)', [sol.id_solicitud])
+        await connection.execute('DELETE FROM Sesion WHERE id_solicitud = ?', [sol.id_solicitud])
+      }
+      await connection.execute('DELETE FROM Solicitud WHERE id_estudiante = ?', [s.id_estudiante])
+      await connection.execute('DELETE FROM EstudiantePrograma WHERE id_estudiante = ?', [s.id_estudiante])
+    }
+    await connection.execute('DELETE FROM Estudiante WHERE id_usuario = ?', [id])
+
+    // 2. Asignaciones académicas & disponibilidad
+    await connection.execute('DELETE d FROM Disponibilidad d JOIN AsignacionAcademica aa ON aa.id_asignacion = d.id_asignacion WHERE aa.id_usuario = ?', [id])
+    await connection.execute('DELETE FROM AsignacionAcademica WHERE id_usuario = ?', [id])
+
+    // 3. Horarios monitor & informes
+    await connection.execute('DELETE FROM HorarioMonitor WHERE id_usuario = ?', [id])
+    await connection.execute('DELETE FROM RecuperacionMonitoria WHERE id_usuario = ?', [id])
+    await connection.execute('DELETE FROM ReporteMonitoria WHERE id_usuario = ?', [id])
+    await connection.execute('DELETE FROM HistorialInforme WHERE id_usuario = ?', [id])
+    await connection.execute('DELETE FROM Informe WHERE id_usuario = ? OR revisado_por = ?', [id, id])
+
+    // 4. Perfiles
+    await connection.execute('DELETE FROM Tutor WHERE id_usuario = ?', [id])
+    await connection.execute('DELETE FROM Monitor WHERE id_usuario = ?', [id])
+    await connection.execute('DELETE FROM Administrador WHERE id_usuario = ?', [id])
+
+    // 5. Credenciales y roles
+    await connection.execute('DELETE FROM Credencial WHERE id_usuario = ?', [id])
+    await connection.execute('DELETE FROM UsuarioRol WHERE id_usuario = ?', [id])
+
+    // 6. Registro principal en Usuario
+    await connection.execute('DELETE FROM Usuario WHERE id_usuario = ?', [id])
+
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 }
 
 function normalizeSpace(row: any) {
@@ -234,7 +326,25 @@ export async function listAdminSpaces(query:any={}) { const where=['1=1'];const 
 
 export async function createAdminSpace(payload:any) { const input=spaceSchema.parse(payload); try { const [result]=await pool.execute("INSERT INTO Espacio (codigo,nombre,edificio,bloque,salon,piso,ubicacion,descripcion,recursos,observaciones,capacidad,tipo,estado) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",[input.code,input.name,input.building,input.block,input.room,input.floor,input.location,input.description,input.resources,input.observations,input.capacity,input.type,input.status??'Activo']); return (await listAdminSpaces()).find((row)=>row.id===result.insertId) } catch(error){if(error?.code==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_SPACE','El código del espacio ya está registrado.');throw error} }
 export async function updateAdminSpace(id:number,payload:any){const input=spaceSchema.partial().parse(payload);const map:any={code:'codigo',name:'nombre',building:'edificio',block:'bloque',room:'salon',floor:'piso',location:'ubicacion',description:'descripcion',resources:'recursos',observations:'observaciones',capacity:'capacidad',type:'tipo',status:'estado'};const fields=[];const values=[];for(const key of Object.keys(map))if(input[key]!==undefined){fields.push(`${map[key]}=?`);values.push(input[key])}if(!fields.length)throw new DataError(422,'EMPTY_UPDATE','Debe enviar al menos un campo.');values.push(id);const [result]=await pool.execute(`UPDATE Espacio SET ${fields.join(',')} WHERE id_espacio=?`,values);if(!result.affectedRows)throw new DataError(404,'SPACE_NOT_FOUND','El espacio no existe.');return (await listAdminSpaces()).find((row)=>row.id===id)}
-export async function deleteAdminSpace(id:number){const [result]=await pool.execute("UPDATE Espacio SET estado='Inactivo' WHERE id_espacio=?",[id]);if(!result.affectedRows)throw new DataError(404,'SPACE_NOT_FOUND','El espacio no existe.')}
+export async function deleteAdminSpace(id: number) {
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [existing] = await connection.query('SELECT id_espacio FROM Espacio WHERE id_espacio = ?', [id])
+    if (!existing.length) throw new DataError(404, 'SPACE_NOT_FOUND', 'El espacio no existe.')
+
+    await connection.execute('DELETE FROM HorarioMonitor WHERE id_espacio = ?', [id])
+    await connection.execute('DELETE FROM AsignacionEspacio WHERE id_espacio = ?', [id])
+    await connection.execute('DELETE FROM Espacio WHERE id_espacio = ?', [id])
+
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
 
 function normalizeAdminRequest(row:any){return {id:Number(row.id),studentId:Number(row.studentId),student:row.student,programId:Number(row.programId),program:row.program,subjectId:Number(row.subjectId),subject:row.subject,type:row.type,priority:row.priority,status:row.status,date:row.date,motive:row.motive??'',description:row.description??'',period:row.period}}
 const requestSelect=`SELECT s.id_solicitud AS id,e.id_usuario AS studentId,CONCAT(u.nombres,' ',u.apellidos) AS student,p.id_programa AS programId,p.nombre AS program,a.id_asignatura AS subjectId,a.nombre AS subject,ts.nombre AS type,s.prioridad AS priority,s.estado AS status,DATE_FORMAT(s.fecha_solicitud,'%Y-%m-%d') AS date,s.motivo,s.descripcion,pa.nombre AS period FROM Solicitud s JOIN Estudiante e ON e.id_estudiante=s.id_estudiante JOIN Usuario u ON u.id_usuario=e.id_usuario JOIN Programa p ON p.id_programa=s.id_programa JOIN Asignatura a ON a.id_asignatura=s.id_asignatura JOIN TipoSolicitud ts ON ts.id_tipo_solicitud=s.id_tipo_solicitud JOIN PeriodoAcademico pa ON pa.id_periodo=s.id_periodo`;
@@ -277,6 +387,27 @@ export async function listAdminRequests(query: any = {}) {
 const adminRequestSchema=z.object({studentId:z.coerce.number().int().positive(),programId:z.coerce.number().int().positive(),subjectId:z.coerce.number().int().positive(),type:z.enum(['Monitoría','Tutoría','Acompañamiento']),priority:z.enum(['Alta','Media','Baja']),motive:z.string().trim().min(3).max(500),description:z.string().trim().min(3).max(500),periodId:z.coerce.number().int().positive().optional()})
 export async function createAdminRequest(payload:any){const input=adminRequestSchema.parse(payload);const [periods]=await pool.query("SELECT id_periodo FROM PeriodoAcademico WHERE estado='Activo' ORDER BY fecha_inicio DESC LIMIT 1");const periodId=input.periodId??periods[0]?.id_periodo;if(!periodId)throw new DataError(422,'PERIOD_REQUIRED','Selecciona un periodo académico.');const [students]=await pool.query('SELECT id_estudiante FROM Estudiante WHERE id_usuario=? AND estado=\'Activo\'',[input.studentId]);if(!students.length)throw new DataError(422,'STUDENT_NOT_FOUND','El estudiante no está activo.');const [result]=await pool.execute("INSERT INTO Solicitud (id_estudiante,id_programa,id_asignatura,id_tipo_solicitud,id_periodo,fecha_solicitud,motivo,descripcion,prioridad,estado) SELECT ?,?,?,id_tipo_solicitud,?,NOW(),?,?,?,'Pendiente' FROM TipoSolicitud WHERE nombre=? AND estado='Activo' LIMIT 1",[students[0].id_estudiante,input.programId,input.subjectId,periodId,input.motive,input.description,input.priority,input.type]);if(!result.affectedRows)throw new DataError(422,'REQUEST_TYPE_NOT_FOUND','El tipo de acompañamiento no está disponible.');const [rows]=await pool.query(`${requestSelect} WHERE s.id_solicitud=?`,[result.insertId]);return normalizeAdminRequest(rows[0])}
 export async function updateAdminRequest(id:number,payload:any){const input=z.object({status:z.enum(['Pendiente','Aprobada','Rechazada','Asignada','Atendida','Cancelada','Finalizada'])}).parse(payload);const [result]=await pool.execute('UPDATE Solicitud SET estado=? WHERE id_solicitud=?',[input.status,id]);if(!result.affectedRows)throw new DataError(404,'REQUEST_NOT_FOUND','La solicitud no existe.');const [rows]=await pool.query(`${requestSelect} WHERE s.id_solicitud=?`,[id]);return normalizeAdminRequest(rows[0])}
+
+export async function deleteAdminRequest(id: number) {
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [existing] = await connection.query('SELECT id_solicitud FROM Solicitud WHERE id_solicitud = ?', [id])
+    if (!existing.length) throw new DataError(404, 'REQUEST_NOT_FOUND', 'La solicitud no existe.')
+
+    await connection.execute('DELETE FROM HistorialSesion WHERE id_sesion IN (SELECT id_sesion FROM Sesion WHERE id_solicitud = ?)', [id])
+    await connection.execute('DELETE FROM Informe WHERE id_sesion IN (SELECT id_sesion FROM Sesion WHERE id_solicitud = ?)', [id])
+    await connection.execute('DELETE FROM Sesion WHERE id_solicitud = ?', [id])
+    await connection.execute('DELETE FROM Solicitud WHERE id_solicitud = ?', [id])
+
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
 
 export async function adminCatalogs(){const [programs]=await pool.query("SELECT p.id_programa AS id,p.codigo,p.nombre,p.id_facultad AS facultyId,f.nombre AS facultyName FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad WHERE p.estado='Activo' ORDER BY p.nombre");const [subjects]=await pool.query("SELECT id_asignatura AS id,codigo,nombre FROM Asignatura WHERE estado='Activo' ORDER BY nombre");const [periods]=await pool.query('SELECT id_periodo AS id,nombre,estado FROM PeriodoAcademico ORDER BY fecha_inicio DESC');const [students]=await pool.query("SELECT u.id_usuario AS id,CONCAT(u.nombres,' ',u.apellidos) AS name,e.codigo_estudiantil AS studentCode,ep.id_programa AS programId,p.nombre AS programName FROM Estudiante e JOIN Usuario u ON u.id_usuario=e.id_usuario LEFT JOIN EstudiantePrograma ep ON ep.id_estudiante=e.id_estudiante AND ep.principal=1 AND ep.estado='Activo' LEFT JOIN Programa p ON p.id_programa=ep.id_programa WHERE e.estado='Activo' ORDER BY u.nombres,u.apellidos");const [types]=await pool.query("SELECT id_tipo_solicitud AS id,nombre FROM TipoSolicitud WHERE estado='Activo' ORDER BY nombre");return {programs,subjects,periods,students,requestTypes:types}}
 
@@ -363,3 +494,32 @@ export async function resetCredential(id:number){const [rows]=await pool.query('
 export async function changePassword(id:number,payload:any){const input=z.object({currentPassword:z.string().min(1),newPassword:z.string().min(8).max(120),confirmPassword:z.string().min(8).max(120)}).refine((v)=>v.newPassword===v.confirmPassword,'Las contraseñas nuevas no coinciden.').parse(payload);const [rows]=await pool.query('SELECT password_hash FROM Credencial WHERE id_usuario=? AND estado=\'Activo\'',[id]);if(!rows.length)throw new DataError(404,'CREDENTIAL_NOT_FOUND','No existe una credencial activa.');const stored=rows[0].password_hash;const valid=stored.startsWith('$2')?await bcrypt.compare(input.currentPassword,stored):input.currentPassword===stored;if(!valid)throw new DataError(401,'INVALID_CURRENT_PASSWORD','La contraseña actual no es válida.');await pool.execute('UPDATE Credencial SET password_hash=?,primer_inicio=0 WHERE id_usuario=?',[await bcrypt.hash(input.newPassword,12),id]);return {changed:true}}
 export async function listSettings(){const [rows]=await pool.query('SELECT id_configuracion AS id,clave,valor,tipo,descripcion,fecha_actualizacion AS updatedAt FROM Configuracion ORDER BY clave');return rows}
 export async function updateSettings(payload:any){const input=z.object({settings:z.array(z.object({key:z.string().min(1).max(120),value:z.string().max(5000)})).min(1)}).parse(payload);for(const setting of input.settings)await pool.execute('UPDATE Configuracion SET valor=? WHERE clave=?',[setting.value,setting.key]);return listSettings()}
+
+export async function adminDbStatus() {
+  const [versionRows] = await pool.query('SELECT VERSION() AS version, DATABASE() AS databaseName')
+  const [tableCountRows] = await pool.query('SELECT COUNT(*) AS total FROM information_schema.tables WHERE table_schema = DATABASE()')
+  const [userCounts] = await pool.query('SELECT COUNT(*) AS total, SUM(estado = "Activo") AS active FROM Usuario')
+  const [spaceCounts] = await pool.query('SELECT COUNT(*) AS total, SUM(estado = "Activo") AS active FROM Espacio')
+  const [requestCounts] = await pool.query('SELECT COUNT(*) AS total, SUM(estado = "Pendiente") AS pending FROM Solicitud')
+  const [subjectCounts] = await pool.query('SELECT COUNT(*) AS total, SUM(estado = "Activo") AS active FROM Asignatura')
+  const [sessionCounts] = await pool.query('SELECT COUNT(*) AS total FROM Sesion')
+  const [periodCounts] = await pool.query('SELECT COUNT(*) AS total, SUM(estado = "Activo") AS active FROM PeriodoAcademico')
+
+  return {
+    engine: String(versionRows[0]?.version ?? 'MariaDB'),
+    database: String(versionRows[0]?.databaseName ?? 'gestion_monitorias_tutorias'),
+    host: '127.0.0.1:3306',
+    status: 'connected',
+    totalTables: Number(tableCountRows[0]?.total ?? 36),
+    tables: {
+      Usuario: { total: Number(userCounts[0]?.total ?? 0), active: Number(userCounts[0]?.active ?? 0) },
+      Espacio: { total: Number(spaceCounts[0]?.total ?? 0), active: Number(spaceCounts[0]?.active ?? 0) },
+      Solicitud: { total: Number(requestCounts[0]?.total ?? 0), pending: Number(requestCounts[0]?.pending ?? 0) },
+      Asignatura: { total: Number(subjectCounts[0]?.total ?? 0), active: Number(subjectCounts[0]?.active ?? 0) },
+      Sesion: { total: Number(sessionCounts[0]?.total ?? 0) },
+      PeriodoAcademico: { total: Number(periodCounts[0]?.total ?? 0), active: Number(periodCounts[0]?.active ?? 0) },
+    },
+    checkedAt: new Date().toISOString(),
+  }
+}
+

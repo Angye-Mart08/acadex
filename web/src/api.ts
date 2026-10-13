@@ -122,7 +122,7 @@ export type LoginResponse = {
   user: ApiUser
 }
 
-const apiUrl = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/$/, '')
+const explicitApiUrl = import.meta.env.VITE_API_URL ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '') : null
 
 class ApiError extends Error {
   status: number
@@ -136,14 +136,44 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${apiUrl}${path}`, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
-    })
-  } catch {
-    throw new ApiError(0, 'API_UNAVAILABLE', 'No fue posible conectar con el servidor. Verifica que la API esté ejecutándose.')
+  const candidateUrls: string[] = []
+  if (explicitApiUrl) {
+    candidateUrls.push(`${explicitApiUrl}${path}`)
+  } else {
+    // 1. Proxy relativo de Vite (evita CORS y bloqueos de red en el navegador)
+    if (typeof window !== 'undefined' && window.location) {
+      candidateUrls.push(`/api/v1${path}`)
+    }
+    // 2. Conexión directa a localhost
+    candidateUrls.push(`http://localhost:3000/api/v1${path}`)
+    // 3. Conexión directa a 127.0.0.1
+    candidateUrls.push(`http://127.0.0.1:3000/api/v1${path}`)
+  }
+
+  let response: Response | null = null
+
+  for (const targetUrl of candidateUrls) {
+    try {
+      const res = await fetch(targetUrl, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+      })
+      if ((res.status === 502 || res.status === 504) && candidateUrls.indexOf(targetUrl) < candidateUrls.length - 1) {
+        continue
+      }
+      response = res
+      break
+    } catch {
+      // Continuar al siguiente endpoint candidato
+    }
+  }
+
+  if (!response) {
+    throw new ApiError(
+      0,
+      'API_UNAVAILABLE',
+      'No fue posible conectar con el servidor API de Acadex (puerto 3000). Verifica que la API y MariaDB (puerto 3306) estén en ejecución con "npm run dev" desde la raíz del proyecto.'
+    )
   }
 
   if (!response.ok) {
@@ -215,6 +245,10 @@ export function updateRequest(accessToken: string, id: number, status: ApiReques
   return request<ApiRequest>(`/requests/${id}`, authenticatedOptions(accessToken, { method: 'PATCH', body: JSON.stringify({ status }) }))
 }
 
+export function deleteRequest(accessToken: string, id: number) {
+  return request<void>(`/requests/${id}`, authenticatedOptions(accessToken, { method: 'DELETE' }))
+}
+
 export function getAdminDashboard(accessToken: string) {
   return request<AdminDashboard>('/admin/dashboard', authenticatedOptions(accessToken))
 }
@@ -273,4 +307,19 @@ export function listSubjects(accessToken: string) {
   return request<Array<{ id: number; codigo: string; nombre: string }>>('/catalogs/subjects', authenticatedOptions(accessToken))
 }
 
+export type DbStatus = {
+  engine: string
+  database: string
+  host: string
+  status: string
+  totalTables: number
+  tables: Record<string, { total: number; active?: number; pending?: number }>
+  checkedAt: string
+}
+
+export function getDbStatus(accessToken: string) {
+  return request<DbStatus>('/admin/db-status', authenticatedOptions(accessToken))
+}
+
 export { ApiError }
+

@@ -98,19 +98,41 @@ El resultado esperado de la instalación local actual es 36 tablas. La cantidad
 de registros puede cambiar cuando se utilice el software; esa es precisamente
 la forma de verificar que las operaciones se están persistiendo.
 
-## Verificación de cambios realizados desde el software
+## Control y observación directa del CRUD en MariaDB
 
-1. Ejecuta la API y confirma `/health` con `database: connected`.
-2. Inicia el frontend e ingresa con un usuario administrador.
-3. Crea o modifica un usuario, espacio o estado de solicitud.
-4. Recarga el navegador; el registro debe conservarse porque se consulta de
-   nuevo desde MariaDB.
-5. Comprueba el mismo registro en HeidiSQL con su `id`, código o correo.
+Para comprobar en tiempo real que las operaciones de creación, edición, cambio de estado y eliminación (CRUD) se reflejan en la base de datos MariaDB:
 
-Si la API no está disponible, la operación debe mostrar un error y no debe
-considerarse guardada. Si una base existente tiene tablas parciales, el
-bootstrap se detiene y reporta las tablas esenciales faltantes; nunca ejecuta
-un borrado automático para repararla.
+### 1. Desde la terminal (Auditoría inmediata)
+
+Ejecuta el script de inspección oficial:
+
+```powershell
+npm run db:inspect
+```
+
+Este comando se conecta al motor MariaDB en `127.0.0.1:3306`, enumera las 36 tablas del esquema y muestra tablas formateadas con los últimos registros de:
+- **`Usuario`**: ID, código, nombre, correo institucional, estado y roles asignados.
+- **`Espacio`**: ID, código, nombre, tipo, capacidad y estado.
+- **`Solicitud`**: ID, estudiante, asignatura, modalidad, prioridad, estado y fecha de radicación.
+
+### 2. Desde el panel web (Configuración)
+
+Dentro de Acadex, ingresa como Administrador y navega a **Configuración**. En la parte superior encontrarás el módulo **Control y Observación de MariaDB**:
+- Indica el estado de la conexión en vivo.
+- Muestra el conteo en tiempo real de registros por tabla (`Usuario`, `Espacio`, `Solicitud`, `Asignatura`, `SesionAcompanamiento`, `PeriodoAcademico`).
+- Incluye el botón **Refrescar conteos** para observar inmediatamente cómo suben o bajan los registros al realizar operaciones en los módulos.
+
+### 3. Conexión desde clientes gráficos (HeidiSQL, DBeaver, MySQL Workbench)
+
+| Parámetro | Valor de conexión |
+| --- | --- |
+| Host / Servidor | `127.0.0.1` o `localhost` |
+| Puerto | `3306` |
+| Usuario | `tutorias_app` (o `root`) |
+| Contraseña | *(vacía o según tu archivo `.env`)* |
+| Base de datos | `gestion_monitorias_tutorias` |
+
+> En caso de que MariaDB presente error `Access denied for user 'tutorias_app'`, ejecuta `node scripts/fix-db-user.mjs` en la carpeta `api/` para sincronizar los privilegios automáticamente.
 
 ## Reglas
 
@@ -127,3 +149,21 @@ de `.env`, el estado de MariaDB y el origen del navegador frente a
 `CORS_ORIGIN`. Si la aplicación muestra una pantalla de recuperación por un
 error de renderizado, consulta también la consola del navegador y los logs de
 la API antes de modificar o reinstalar la base.
+
+## Integridad Referencial y Eliminación en Cascada (Hard Delete)
+
+Para garantizar la consistencia relacional y evitar violaciones de clave foránea (`foreign key constraints`) durante las eliminaciones definitivas ejecutadas por el Administrador:
+
+1. **Orden de eliminación en cascada para Usuarios**:
+   - Tablas de nivel operativo: `EntregaActividad`, `Seguimiento`.
+   - Flujo de solicitudes y sesiones: `Solicitud`, `HistorialSesion`, `Informe`, `SesionAcompanamiento`.
+   - Perfiles y asignaciones académicas: `EstudiantePrograma`, `Estudiante`, `Disponibilidad`, `AsignacionAcademica`, `HorarioMonitor`, `Tutor`, `Monitor`, `Administrador`.
+   - Seguridad y cuenta base: `Credencial`, `UsuarioRol` y finalmente `Usuario`.
+
+2. **Orden de eliminación en cascada para Espacios**:
+   - Desvinculación de horarios y reservas en `HorarioMonitor` y `AsignacionEspacio`.
+   - Eliminación del registro físico en `Espacio`.
+
+3. **Orden de eliminación para Solicitudes**:
+   - Desvinculación y limpieza de `HistorialSesion`, `Informe` y `SesionAcompanamiento`.
+   - Eliminación de la fila en `Solicitud`.
