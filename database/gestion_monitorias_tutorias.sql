@@ -5,9 +5,7 @@
 -- Universidad Internacional del Trópico Americano
 -- =====================================================
 
-DROP DATABASE IF EXISTS gestion_monitorias_tutorias;
-
-CREATE DATABASE gestion_monitorias_tutorias
+CREATE DATABASE IF NOT EXISTS gestion_monitorias_tutorias
 CHARACTER SET utf8mb4
 COLLATE utf8mb4_spanish_ci;
 
@@ -493,19 +491,7 @@ CREATE TABLE HorarioMonitor(
         FOREIGN KEY(id_usuario)
         REFERENCES Usuario(id_usuario)
         ON UPDATE CASCADE
-        ON DELETE RESTRICT,
-
-    CONSTRAINT fk_horario_monitor_periodo
-        FOREIGN KEY(id_periodo)
-        REFERENCES PeriodoAcademico(id_periodo)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
-
-    CONSTRAINT fk_horario_monitor_espacio
-        FOREIGN KEY(id_espacio)
-        REFERENCES Espacio(id_espacio)
-        ON UPDATE CASCADE
-        ON DELETE SET NULL
+        ON DELETE RESTRICT
 
 ) ENGINE=InnoDB;
 
@@ -714,6 +700,21 @@ CREATE TABLE Espacio(
     ) NOT NULL DEFAULT 'Activo'
 
 ) ENGINE=InnoDB;
+
+-- Las tablas PeriodoAcademico y Espacio se declaran después de
+-- HorarioMonitor. Las relaciones se agregan aquí, cuando ambas tablas ya
+-- existen, para permitir instalar el script en MariaDB desde cero.
+ALTER TABLE HorarioMonitor
+    ADD CONSTRAINT fk_horario_monitor_periodo
+        FOREIGN KEY(id_periodo)
+        REFERENCES PeriodoAcademico(id_periodo)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    ADD CONSTRAINT fk_horario_monitor_espacio
+        FOREIGN KEY(id_espacio)
+        REFERENCES Espacio(id_espacio)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL;
 
 -- -----------------------------------------------------
 -- TABLA: Disponibilidad
