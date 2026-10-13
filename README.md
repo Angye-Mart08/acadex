@@ -13,7 +13,7 @@ React + TypeScript → API REST con Node.js + TypeScript → MariaDB
 ```text
 acadex/
 ├── README.md                         # Entrada principal del repositorio
-├── README_PROYECTO.md                # Bitácora detallada de avances
+├── BITACORA_PROYECTO.md              # Bitácora detallada de avances
 ├── .gitignore
 ├── .env.example                      # Variables de entorno sin secretos
 ├── database/
@@ -38,6 +38,11 @@ acadex/
 
 ## Ejecución rápida
 
+El frontend y la API son paquetes independientes. Para iniciar el sistema,
+primero configura MariaDB y `.env` desde `.env.example`, ejecuta la API y
+después inicia Vite. Abre la URL `localhost` que Vite muestre; en desarrollo
+también se admite `127.0.0.1`.
+
 Frontend:
 
 ```powershell
@@ -61,6 +66,34 @@ cd C:\Users\brayh\acadex\api
 npm run mock
 ```
 
+API — servidor real de autenticación:
+
+```powershell
+cd C:\Users\brayh\acadex\api
+npm run dev
+```
+
+Configura `.env` y ejecuta la API. En el primer arranque creará la base de
+datos y cargará el esquema automáticamente; luego verifica
+`http://localhost:3000/health`.
+
+Validaciones locales:
+
+```powershell
+cd C:\Users\brayh\acadex\web
+npm run build
+
+cd C:\Users\brayh\acadex\api
+npm run typecheck
+npm run validate
+```
+
+Si el acceso administrativo no carga, confirma que `/health` responda con
+`database: connected`, que la API siga ejecutándose y que `CORS_ORIGIN` incluya
+el mismo origen del navegador (`localhost:5173` o `127.0.0.1:5173`). Ante una
+excepción de renderizado, Acadex muestra una pantalla de recuperación y registra
+el detalle técnico en la consola del navegador.
+
 ## Dependencias locales
 
 El repositorio tiene dos carpetas `node_modules` porque contiene dos paquetes independientes:
@@ -78,7 +111,7 @@ No se deben subir al repositorio:
 
 Todos están excluidos mediante `.gitignore`. Para instalar las dependencias se ejecuta `npm install` dentro de `api` y de `web` por separado.
 
-## Credenciales demo del frontend
+## Credenciales base de desarrollo
 
 El login utiliza correo institucional y documento de identidad:
 
@@ -89,8 +122,8 @@ El login utiliza correo institucional y documento de identidad:
 | Monitor + Estudiante | `brayhamlindarte.es@unitropico.edu.co` | `1093432540` |
 | Estudiante | `mariaamezquita.es@unitropico.edu.co` | `1029663952` |
 
-Son datos de demostración local. La autenticación real se implementará en la API y MariaDB.
-La cuenta de Monitor permite probar el selector y el cambio entre los roles Monitor y Estudiante.
+La autenticación se valida contra MariaDB mediante la API. La cuenta de Monitor
+permite probar el selector y el cambio entre los roles Monitor y Estudiante.
 
 ## Documentación principal
 
@@ -100,6 +133,8 @@ La cuenta de Monitor permite probar el selector y el cambio entre los roles Moni
 - [Modelo de datos](./docs/modelo-datos.md)
 - [Decisiones de arquitectura](./docs/decisiones.md)
 - [Documentación de diagramas y wireframes](./docs/README.md)
+- [Índice de diagramas](./docs/diagramas/README.md)
+- [Índice de wireframes](./docs/wireframes/README.md)
 
 ## Integrantes
 

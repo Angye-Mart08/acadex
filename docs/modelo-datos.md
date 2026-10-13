@@ -3,6 +3,8 @@
 ## Fuente principal
 
 El modelo implementado se encuentra en [gestion_monitorias_tutorias.sql](../database/gestion_monitorias_tutorias.sql).
+La API consulta esta misma base mediante `mysql2`; el frontend no mantiene una
+copia paralela como fuente de verdad.
 
 ## Módulos principales
 
@@ -60,9 +62,28 @@ Disponibilidad ──< AsignacionEspacio >── Espacio
 | Portal monitor | `Monitor`, `HorarioMonitor`, `Solicitud`, `Sesion` |
 | Portal estudiante | `Estudiante`, `Solicitud`, `Sesion`, `Seguimiento` |
 
+## Estado de integración
+
+La API implementa actualmente autenticación y selección de rol, usuarios,
+espacios, solicitudes, catálogos administrativos y consultas del dashboard y
+reportes. Los catálogos de asignaturas y periodos se consultan mediante
+`GET /catalogs/subjects` y `GET /catalogs/periods`. La lista ejecutable
+completa y sus métodos se mantiene en
+[README_API.md](../api/README_API.md); el servidor se registra en
+`api/src/server.ts`.
+
+El servidor ya consulta disponibilidad y sesiones por medio de
+`GET /availability` y `GET /sessions`, filtrando por el rol activo y el usuario
+autenticado. El esquema también modela asistencia, seguimiento, compromisos,
+evidencias e informes; sus operaciones de escritura y los informes personales
+aún no tienen persistencia API.
+
 ## Nota de seguridad
 
-El frontend de demostración utiliza datos locales. En la API real, el documento se utilizará para verificar el acceso junto con el correo institucional, pero no debe devolverse en las respuestas públicas del usuario.
+El documento se utiliza para verificar el acceso junto con el correo
+institucional. No se devuelve en las respuestas públicas de autenticación; el
+endpoint administrativo de usuarios lo entrega únicamente porque el
+administrador necesita editar el registro de acceso.
 
 La relación `UsuarioRol` es de muchos a muchos: un usuario puede ser, por
 ejemplo, Monitor y Estudiante al mismo tiempo. El rol activo no se almacena
