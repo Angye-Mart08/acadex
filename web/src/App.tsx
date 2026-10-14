@@ -12,11 +12,13 @@ import {
   PortalSession,
   RoleProfiles,
   changePassword,
+  createAcademicPeriod,
   createAdminRequest,
   createRequest as createRequestApi,
   createSpace as createSpaceApi,
   createUser as createUserApi,
   deleteRequest as deleteRequestApi,
+  deleteAcademicPeriod,
   deleteSpace as deleteSpaceApi,
   deleteUser as deleteUserApi,
   getAdminCatalogs,
@@ -25,6 +27,7 @@ import {
   getCurrentUser,
   getDbStatus,
   listCredentials,
+  listAdminPeriods,
   listPeriods as listPeriodsApi,
   listPortalAvailability as listPortalAvailabilityApi,
   listPortalSessions as listPortalSessionsApi,
@@ -39,6 +42,7 @@ import {
   selectRole as selectRoleApi,
   updateRequest as updateRequestApi,
   updateSettings,
+  updateAcademicPeriod,
   updateSpace as updateSpaceApi,
   updateUser as updateUserApi,
 } from './api'
@@ -136,6 +140,7 @@ type User = {
   status: Status
   initials: string
   profiles?: RoleProfiles
+  mustChangePassword?: boolean
 }
 
 type Space = {
@@ -182,6 +187,7 @@ function App() {
   const [accessToken, setAccessToken] = useState(() => window.localStorage.getItem(accessTokenStorageKey) ?? '')
   const [roleToken, setRoleToken] = useState(() => window.localStorage.getItem(roleTokenStorageKey) ?? '')
   const [hydratingSession, setHydratingSession] = useState(true)
+  const [sessionVersion, setSessionVersion] = useState(0)
   const [view, setView] = useState<View>('dashboard')
   const [portalView, setPortalView] = useState<PortalView>('inicio')
   const [loginError, setLoginError] = useState('')
@@ -219,7 +225,7 @@ function App() {
   }, [accessToken])
 
   useEffect(() => {
-    if (!accessToken || !selectedRole) return
+    if (!accessToken || !selectedRole || currentUser?.mustChangePassword) return
     let mounted = true
     setDataLoading(true)
     const loadData = async () => {
@@ -260,16 +266,16 @@ function App() {
     }
     void loadData()
     return () => { mounted = false }
-  }, [accessToken, selectedRole])
+  }, [accessToken, selectedRole, sessionVersion, currentUser?.mustChangePassword])
   const currentPeriod = periods.find((period) => period.estado === 'Activo')?.nombre ?? 'No disponible'
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const email = String(form.get('email') ?? '').trim().toLowerCase()
-    const document = String(form.get('password') ?? '').trim()
+    const password = String(form.get('password') ?? '')
     try {
-      const response = await loginApi(email, document)
+      const response = await loginApi(email, password)
       setCurrentUser(response.user)
       setAuthenticated(true)
       setRoleToken(response.preAuthToken ?? '')
@@ -329,6 +335,8 @@ function App() {
 
   if (!selectedRole) return <RoleSelector user={currentUser} onSelect={(role) => { void handleRoleSelect(role); setPortalView('inicio') }} onLogout={logout} error={loginError} />
 
+  if (currentUser.mustChangePassword) return <FirstPasswordChange accessToken={accessToken} onLogout={logout} onComplete={(user) => { setCurrentUser(user); setSessionVersion((version) => version + 1) }} />
+
   if (selectedRole !== 'Administrador') {
     return <RoleShell user={currentUser} activeRole={selectedRole} periodName={currentPeriod} periods={periods} view={portalView} onNavigate={setPortalView} onLogout={logout} onChangeRole={() => { setSelectedRole(null); setPortalView('inicio') }} accessToken={accessToken} requests={requests} subjects={subjects} sessions={portalSessions} availability={availability} dataError={dataError} dataLoading={dataLoading} onRequestsChange={setRequests} />
   }
@@ -369,8 +377,29 @@ function UniversitySignature({ onGreen = false }: { onGreen?: boolean }) {
   return <div className={`university-signature ${onGreen ? 'on-green' : ''}`}><img src={onGreen ? '/marca/unitropico-logotipo-oscuro.png' : '/marca/unitropico-logotipo.png'} alt="Unitrópico · Universidad Internacional del Trópico Americano" /></div>
 }
 
+function FirstPasswordChange({ accessToken, onLogout, onComplete }: { accessToken: string; onLogout: () => void; onComplete: (user: User) => void }) {
+  const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      await changePassword(accessToken, passwords)
+      const user = await getCurrentUser(accessToken)
+      onComplete(user as User)
+    } catch (saveError) {
+      setError(saveError instanceof ApiError ? saveError.message : 'No fue posible cambiar la contraseña.')
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <div className="role-selector-backdrop"><section className="role-selector-card" role="dialog" aria-modal="true" aria-labelledby="first-password-title"><div className="role-selector-header"><div><span className="eyebrow">Actualización de seguridad</span><h2 id="first-password-title">Crea tu contraseña personal</h2><p>Este acceso usa una clave temporal. Cámbiala antes de continuar.</p></div></div><form className="portal-form" onSubmit={submit}><label>Contraseña temporal o actual<input type="password" required autoComplete="current-password" value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<div className="role-selector-actions"><button type="button" className="secondary-button" onClick={onLogout}>Cerrar sesión</button><button type="submit" className="primary-button" disabled={saving}>{saving ? 'Guardando...' : 'Guardar contraseña'} <ArrowRight size={17} /></button></div></form></section></div>
+}
+
 function LoginPage({ onSubmit, error }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; error: string }) {
-  const [showDocument, setShowDocument] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const [email, setEmail] = useState(() => window.localStorage.getItem('acadex:remembered-email') ?? '')
   const [rememberEmail, setRememberEmail] = useState(() => Boolean(window.localStorage.getItem('acadex:remembered-email')))
 
@@ -409,7 +438,7 @@ function LoginPage({ onSubmit, error }: { onSubmit: (event: FormEvent<HTMLFormEl
           </div>
           <form className="login-form" onSubmit={submitLogin}>
             <label>Correo institucional<div className="login-input"><Mail size={18} /><input name="email" type="email" placeholder="nombre@unitropico.edu.co" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></label>
-            <label>Documento de identidad<div className="password-field login-input"><LockKeyhole size={18} /><input name="password" type={showDocument ? 'text' : 'password'} placeholder="Ingresa tu documento" autoComplete="current-password" required /><button type="button" aria-label={showDocument ? 'Ocultar documento' : 'Mostrar documento'} onClick={() => setShowDocument((visible) => !visible)}>{showDocument ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
+            <label>Contraseña<div className="password-field login-input"><LockKeyhole size={18} /><input name="password" type={showPassword ? 'text' : 'password'} placeholder="Ingresa tu contraseña" autoComplete="current-password" minLength={1} maxLength={72} required /><button type="button" aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
             <div className="form-row"><label className="check-label"><input type="checkbox" checked={rememberEmail} onChange={(event) => setRememberEmail(event.target.checked)} /> <span>Recordarme</span></label></div>
             {error && <div className="form-error"><CircleAlert size={16} />{error}</div>}
             <button className="primary-button login-button" type="submit">Iniciar sesión <ArrowRight size={18} /></button>
@@ -1525,14 +1554,17 @@ function ReportsView({ accessToken, catalogs }: { accessToken: string; catalogs:
 
 function DatabaseControlPanel({ accessToken }: { accessToken: string }) {
   const [dbStatus, setDbStatus] = useState<DbStatus | null>(null)
+  const [dbError, setDbError] = useState('')
   const [loading, setLoading] = useState(false)
 
   const reload = async () => {
     setLoading(true)
     try {
       setDbStatus(await getDbStatus(accessToken))
-    } catch {
-      // Fallback
+      setDbError('')
+    } catch (error) {
+      setDbStatus(null)
+      setDbError(error instanceof ApiError ? error.message : 'No fue posible consultar MariaDB.')
     } finally {
       setLoading(false)
     }
@@ -1557,22 +1589,23 @@ function DatabaseControlPanel({ accessToken }: { accessToken: string }) {
         </button>
       </div>
 
+      {dbError && <div className="form-error"><CircleAlert size={16} />{dbError}</div>}
       <div className="db-overview-cards">
-        <div className="db-card status-connected">
+        <div className={`db-card ${dbStatus?.status === 'connected' ? 'status-connected' : ''}`}>
           <span>Estado del motor</span>
-          <strong><span className="db-pulse-dot" /> {dbStatus?.status ?? 'Conectado'}</strong>
+          <strong>{dbStatus ? <><span className="db-pulse-dot" /> {dbStatus.status === 'connected' ? 'Conectado' : 'Sin conexión'}</> : 'Sin datos'}</strong>
         </div>
         <div className="db-card">
           <span>Base de datos</span>
-          <strong>{dbStatus?.database ?? 'gestion_monitorias_tutorias'}</strong>
+          <strong>{dbStatus?.database ?? '—'}</strong>
         </div>
         <div className="db-card">
           <span>Servidor / Puerto</span>
-          <strong>{dbStatus?.host ?? '127.0.0.1:3306'}</strong>
+          <strong>{dbStatus?.host ?? '—'}</strong>
         </div>
         <div className="db-card">
           <span>Tablas activas</span>
-          <strong>{dbStatus?.totalTables ?? 36} tablas</strong>
+          <strong>{dbStatus ? `${dbStatus.totalTables} tablas` : '—'}</strong>
         </div>
       </div>
 
@@ -1591,11 +1624,11 @@ function DatabaseControlPanel({ accessToken }: { accessToken: string }) {
         </div>
         <div className="db-table-chip">
           <small>Asignaturas</small>
-          <b>{dbStatus?.tables?.Asignatura?.total ?? '24'}</b>
+          <b>{dbStatus?.tables?.Asignatura?.total ?? '—'}</b>
         </div>
         <div className="db-table-chip">
           <small>Sesiones</small>
-          <b>{dbStatus?.tables?.SesionAcompanamiento?.total ?? '—'}</b>
+          <b>{dbStatus?.tables?.Sesion?.total ?? '—'}</b>
         </div>
         <div className="db-table-chip">
           <small>Periodos</small>
@@ -1613,6 +1646,49 @@ function DatabaseControlPanel({ accessToken }: { accessToken: string }) {
   )
 }
 
+function AcademicPeriodsPanel({ accessToken }: { accessToken: string }) {
+  type PeriodForm = { name: string; startDate: string; endDate: string; status: AcademicPeriod['estado'] }
+  const emptyForm: PeriodForm = { name: '', startDate: '', endDate: '', status: 'Planeado' }
+  const [periods, setPeriods] = useState<AcademicPeriod[]>([])
+  const [form, setForm] = useState<PeriodForm>(emptyForm)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const load = async () => {
+    setLoading(true)
+    try { setPeriods(await listAdminPeriods(accessToken)); setError('') }
+    catch (loadError) { setError(loadError instanceof ApiError ? loadError.message : 'No fue posible cargar los periodos.') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { void load() }, [accessToken])
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      if (editingId) await updateAcademicPeriod(accessToken, editingId, form)
+      else await createAcademicPeriod(accessToken, form)
+      setForm(emptyForm)
+      setEditingId(null)
+      await load()
+    } catch (saveError) { setError(saveError instanceof ApiError ? saveError.message : 'No fue posible guardar el periodo.') }
+    finally { setSaving(false) }
+  }
+  const edit = (period: AcademicPeriod) => {
+    setEditingId(period.id)
+    setForm({ name: period.nombre, startDate: period.startDate ?? '', endDate: period.endDate ?? '', status: period.estado })
+  }
+  const remove = async (period: AcademicPeriod) => {
+    if (!window.confirm(`¿Eliminar permanentemente el periodo ${period.nombre}? Solo se puede eliminar si no tiene registros asociados.`)) return
+    setError('')
+    try { await deleteAcademicPeriod(accessToken, period.id); await load() }
+    catch (deleteError) { setError(deleteError instanceof ApiError ? deleteError.message : 'No fue posible eliminar el periodo.') }
+  }
+  const cancelEdit = () => { setEditingId(null); setForm(emptyForm) }
+  return <section className="panel form-panel settings-panel"><div className="panel-heading"><div><h3>Periodos académicos</h3><p>CRUD administrativo. Los periodos vinculados a solicitudes, horarios o asignaciones no se pueden eliminar.</p></div><CalendarDays size={20} /></div>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<form className="settings-form" onSubmit={save}><label>Nombre<input required minLength={4} maxLength={20} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="2026-2" /></label><div className="form-columns"><label>Fecha inicial<input type="date" required value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label><label>Fecha final<input type="date" required value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.target.value })} /></label><label>Estado<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as AcademicPeriod['estado'] })}><option>Planeado</option><option>Activo</option><option>Finalizado</option></select></label></div><div className="modal-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Crear periodo'}</button>{editingId && <button type="button" className="secondary-button" onClick={cancelEdit}>Cancelar edición</button>}</div></form><div className="table-scroll"><table><thead><tr><th>PERIODO</th><th>VIGENCIA</th><th>ESTADO</th><th /></tr></thead><tbody>{periods.map((period) => <tr key={period.id}><td><strong>{period.nombre}</strong></td><td>{period.startDate} — {period.endDate}</td><td>{period.estado}</td><td className="align-right"><button className="row-action" onClick={() => edit(period)}>Editar</button><button className="delete-action" onClick={() => void remove(period)} title="Eliminar periodo"><Trash2 size={16} /></button></td></tr>)}{!periods.length && <tr><td colSpan={4}>{loading ? 'Cargando periodos...' : 'No hay periodos registrados.'}</td></tr>}</tbody></table></div></section>
+}
+
 function ConfigurationView({ accessToken }: { accessToken: string }) {
   const [role, setRole] = useState('')
   const [accounts, setAccounts] = useState<CredentialAccount[]>([])
@@ -1621,11 +1697,11 @@ function ConfigurationView({ accessToken }: { accessToken: string }) {
   const [loading, setLoading] = useState(false)
   const loadAccounts = async (selectedRole = role) => { setLoading(true); try { setAccounts(await listCredentials(accessToken, selectedRole)) } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cargar las credenciales.') } finally { setLoading(false) } }
   useEffect(() => { void Promise.all([loadAccounts(''), listSettings(accessToken).then(setSettings).catch(() => undefined)]) }, [accessToken])
-  const reset = async (account: CredentialAccount) => { if (!window.confirm(`¿Restablecer la contraseña de ${account.name} al documento registrado?`)) return; try { const result = await resetCredential(accessToken, account.id); setAccounts(accounts.map((item) => item.id === account.id ? { ...item, initialPassword: result.initialPassword } : item)); window.alert('Credencial restablecida. La contraseña inicial vuelve a ser el documento de identidad.') } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible restablecer la credencial.') } }
+  const reset = async (account: CredentialAccount) => { if (!window.confirm(`¿Generar una clave temporal nueva para ${account.name}?`)) return; try { const result = await resetCredential(accessToken, account.id); window.alert(`Clave temporal de un solo uso:\n\n${result.temporaryPassword}\n\nEntrégala por un canal seguro. Se exigirá cambiarla al iniciar sesión.`) } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible restablecer la credencial.') } }
   const savePassword = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { await changePassword(accessToken, passwords); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }); window.alert('Contraseña actualizada correctamente.') } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cambiar la contraseña.') } }
   const saveSettings = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { setSettings(await updateSettings(accessToken, settings.map((setting) => ({ key: setting.clave, value: setting.valor })))); window.alert('Configuración guardada.') } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible guardar la configuración.') } }
-  const exportCredentials = () => downloadCsv(`credenciales${role ? `-${role.toLowerCase()}` : ''}.csv`, accounts.map((account) => ({ nombre: account.name, codigo: account.code, correo: account.email, roles: account.roles.join(' / '), estado: account.status, contraseña_inicial: account.initialPassword })))
-  return <><PageHeader eyebrow="Administración / Configuración" title="Configuración y credenciales" description="Gestiona contraseñas, credenciales iniciales, parámetros operativos y supervisión de MariaDB." action={<button className="secondary-button" onClick={exportCredentials} disabled={!accounts.length}><Download size={17} /> Exportar credenciales</button>} /><DatabaseControlPanel accessToken={accessToken} /><div className="configuration-grid"><section className="panel table-panel"><div className="panel-heading"><div><h3>Credenciales de usuarios</h3><p>La contraseña inicial corresponde al documento de identidad.</p></div><KeyRound size={20} /></div><div className="table-toolbar config-toolbar"><select value={role} onChange={(event) => { setRole(event.target.value); void loadAccounts(event.target.value) }}><option value="">Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Tutor</option><option>Monitor</option></select><button className="secondary-button filter-button" onClick={() => void loadAccounts()}><RefreshCw size={16} /> {loading ? 'Cargando...' : 'Actualizar'}</button></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CONTRASEÑA INICIAL</th><th>ESTADO</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td><div className="user-roles">{account.roles.map((item) => <span className="role-pill" key={item}>{item}</span>)}</div></td><td><code className="credential-code">{account.initialPassword}</code></td><td>{account.status}</td><td className="align-right"><button className="row-action" onClick={() => void reset(account)}>Restablecer</button></td></tr>)}</tbody></table></div></section><section className="panel form-panel"><div className="panel-heading"><div><h3>Cambiar mi contraseña</h3><p>Usa una contraseña nueva de mínimo ocho caracteres.</p></div><LockKeyhole size={20} /></div><form className="portal-form" onSubmit={savePassword}><label>Contraseña actual<input type="password" required value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" minLength={8} required value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar contraseña<input type="password" minLength={8} required value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label><button className="primary-button" type="submit"><KeyRound size={17} /> Cambiar contraseña</button></form></section></div><section className="panel form-panel settings-panel"><div className="panel-heading"><div><h3>Parámetros institucionales</h3><p>Valores almacenados en la tabla Configuracion.</p></div><Settings2 size={20} /></div><form className="settings-form" onSubmit={saveSettings}>{settings.map((setting) => <label key={setting.id}>{setting.descripcion || setting.clave}<input value={setting.valor} onChange={(event) => setSettings(settings.map((item) => item.id === setting.id ? { ...item, valor: event.target.value } : item))} /></label>)}<button className="primary-button" type="submit"><Check size={17} /> Guardar parámetros</button></form></section></>
+  const exportCredentials = () => downloadCsv(`cuentas${role ? `-${role.toLowerCase()}` : ''}.csv`, accounts.map((account) => ({ nombre: account.name, codigo: account.code, correo: account.email, roles: account.roles.join(' / '), estado: account.status })))
+  return <><PageHeader eyebrow="Administración / Configuración" title="Configuración y credenciales" description="Gestiona contraseñas, parámetros operativos y supervisión de MariaDB." action={<button className="secondary-button" onClick={exportCredentials} disabled={!accounts.length}><Download size={17} /> Exportar cuentas</button>} /><DatabaseControlPanel accessToken={accessToken} /><AcademicPeriodsPanel accessToken={accessToken} /><div className="configuration-grid"><section className="panel table-panel"><div className="panel-heading"><div><h3>Credenciales de usuarios</h3><p>Las claves nunca se muestran ni se exportan.</p></div><KeyRound size={20} /></div><div className="table-toolbar config-toolbar"><select value={role} onChange={(event) => { setRole(event.target.value); void loadAccounts(event.target.value) }}><option value="">Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Tutor</option><option>Monitor</option></select><button className="secondary-button filter-button" onClick={() => void loadAccounts()}><RefreshCw size={16} /> {loading ? 'Cargando...' : 'Actualizar'}</button></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CLAVE</th><th>ESTADO</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td><div className="user-roles">{account.roles.map((item) => <span className="role-pill" key={item}>{item}</span>)}</div></td><td><code className="credential-code">Protegida</code></td><td>{account.status}</td><td className="align-right"><button className="row-action" onClick={() => void reset(account)}>Generar clave temporal</button></td></tr>)}</tbody></table></div></section><section className="panel form-panel"><div className="panel-heading"><div><h3>Cambiar mi contraseña</h3><p>Usa una contraseña nueva de 8 a 72 caracteres.</p></div><LockKeyhole size={20} /></div><form className="portal-form" onSubmit={savePassword}><label>Contraseña actual<input type="password" required value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label><button className="primary-button" type="submit"><KeyRound size={17} /> Cambiar contraseña</button></form></section></div><section className="panel form-panel settings-panel"><div className="panel-heading"><div><h3>Parámetros institucionales</h3><p>Valores almacenados en la tabla Configuracion.</p></div><Settings2 size={20} /></div><form className="settings-form" onSubmit={saveSettings}>{settings.map((setting) => <label key={setting.id}>{setting.descripcion || setting.clave}<input value={setting.valor} onChange={(event) => setSettings(settings.map((item) => item.id === setting.id ? { ...item, valor: event.target.value } : item))} /></label>)}<button className="primary-button" type="submit"><Check size={17} /> Guardar parámetros</button></form></section></>
 }
 
 function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {

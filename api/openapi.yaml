@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: API de Gestión de Tutorías y Monitorías — Unitrópico
   version: 0.1.0
-  summary: Contrato REST inicial alineado con el primer avance del frontend
+  summary: Contrato REST de las rutas actualmente implementadas
   description: |
     Contrato de la API REST para la plataforma web de gestión de tutorías y
     monitorías académicas de Unitrópico.
@@ -18,6 +18,9 @@ servers:
 tags:
   - name: Autenticación
   - name: Portal personal
+  - name: Administración
+  - name: Periodos académicos
+  - name: Estado del servicio
   - name: Usuarios
   - name: Espacios
   - name: Solicitudes
@@ -25,7 +28,7 @@ paths:
   /auth/login:
     post:
       tags: [Autenticación]
-      summary: Iniciar sesión con correo institucional y documento
+      summary: Iniciar sesión con correo institucional y contraseña
       operationId: login
       security: []
       requestBody:
@@ -35,8 +38,8 @@ paths:
             schema:
               $ref: '#/components/schemas/LoginRequest'
             example:
-              email: jaysonquintero@unitropico.edu.co
-              document: '1000000010'
+              email: usuario@unitropico.edu.co
+              password: clave-temporal
       responses:
         '200':
           description: Credenciales válidas.
@@ -95,15 +98,34 @@ paths:
   /auth/logout:
     post:
       tags: [Autenticación]
-      summary: Cerrar la sesión actual
+      summary: Cerrar la sesión local del cliente
       operationId: logout
       security:
         - bearerAuth: []
       responses:
         '204':
-          description: Sesión cerrada correctamente.
+          description: El cliente debe eliminar los tokens almacenados. El JWT no se revoca en el servidor y permanece válido hasta expirar.
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /health:
+    get:
+      tags: [Estado del servicio]
+      summary: Comprobar que la API y MariaDB estén disponibles
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: API activa y base de datos conectada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, database]
+                properties:
+                  status: { type: string, const: ok }
+                  database: { type: string, const: connected }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /portal/dashboard:
     get:
@@ -121,8 +143,153 @@ paths:
                 $ref: '#/components/schemas/PortalDashboard'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+
+  /admin/dashboard:
+    get:
+      tags: [Administración]
+      summary: Consultar indicadores administrativos
+      operationId: getAdminDashboard
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Indicadores operativos del sistema., content: { application/json: { schema: { type: object } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/reports:
+    get:
+      tags: [Administración]
+      summary: Generar reportes académicos
+      operationId: getAdminReport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: subjectId
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: Reporte agregado y filtrado., content: { application/json: { schema: { type: object } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /admin/catalogs:
+    get:
+      tags: [Administración]
+      summary: Consultar catálogos para formularios administrativos
+      operationId: getAdminCatalogs
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: 'Programas, asignaturas, periodos, estudiantes y tipos de solicitud.', content: { application/json: { schema: { type: object } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/db-status:
+    get:
+      tags: [Administración]
+      summary: Consultar estado y conteos de MariaDB
+      operationId: getAdminDatabaseStatus
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Estado real de la base y conteos actuales., content: { application/json: { schema: { type: object } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/configuration/credentials:
+    get:
+      tags: [Administración]
+      summary: Listar cuentas sin revelar contraseñas ni documentos
+      operationId: listCredentials
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/Role' }
+      responses:
+        '200': { description: Cuentas filtradas por rol., content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CredentialAccount' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/configuration/credentials/{id}/reset:
+    post:
+      tags: [Administración]
+      summary: Generar una contraseña temporal de un solo uso
+      operationId: resetCredential
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Contraseña temporal que solo se devuelve en esta respuesta.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, temporaryPassword]
+                properties:
+                  id: { type: integer }
+                  temporaryPassword: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/configuration/password:
+    patch:
+      tags: [Autenticación]
+      summary: Cambiar la contraseña propia o reemplazar una clave temporal
+      operationId: changePassword
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordChangeInput' }
+      responses:
+        '200': { description: Contraseña actualizada., content: { application/json: { schema: { type: object, properties: { changed: { type: boolean } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /admin/configuration/settings:
+    get:
+      tags: [Administración]
+      summary: Listar parámetros institucionales
+      operationId: listSettings
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Parámetros configurables., content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Setting' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [Administración]
+      summary: Actualizar parámetros institucionales
+      operationId: updateSettings
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingsUpdateInput' }
+      responses:
+        '200': { description: Parámetros actualizados., content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Setting' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /catalogs/subjects:
     get:
@@ -187,32 +354,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-    post:
-      tags: [Portal personal]
-      summary: Registrar un bloque de disponibilidad
-      operationId: createAvailability
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AvailabilityInput'
-      responses:
-        '201':
-          description: Disponibilidad registrada.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Availability'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/ValidationError'
-
   /sessions:
     get:
       tags: [Portal personal]
@@ -232,51 +373,90 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /monthly-reports:
+  /periods:
     get:
-      tags: [Portal personal]
-      summary: Consultar informes del tutor
-      operationId: listMonthlyReports
+      tags: [Periodos académicos]
+      summary: Listar periodos académicos para administración
+      operationId: listAdminPeriods
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: Informes visibles para el usuario autenticado.
+          description: Periodos con fechas y estado.
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/MonthlyReport'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                items: { $ref: '#/components/schemas/AcademicPeriod' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
-      tags: [Portal personal]
-      summary: Crear un informe mensual
-      operationId: createMonthlyReport
+      tags: [Periodos académicos]
+      summary: Crear un periodo académico
+      operationId: createAcademicPeriod
       security:
         - bearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/MonthlyReportInput'
+            schema: { $ref: '#/components/schemas/AcademicPeriodInput' }
       responses:
         '201':
-          description: Informe creado como borrador.
+          description: Periodo creado.
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/MonthlyReport'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/ValidationError'
+              schema: { $ref: '#/components/schemas/AcademicPeriod' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /periods/{id}:
+    patch:
+      tags: [Periodos académicos]
+      summary: Actualizar un periodo académico
+      operationId: updateAcademicPeriod
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcademicPeriodUpdate' }
+      responses:
+        '200':
+          description: Periodo actualizado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcademicPeriod' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Periodos académicos]
+      summary: Eliminar un periodo sin registros asociados
+      operationId: deleteAcademicPeriod
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204': { description: Periodo eliminado. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /users:
     get:
@@ -322,7 +502,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/AdminUser'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -353,7 +533,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/AdminUser'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -379,6 +559,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /spaces:
     get:
@@ -506,7 +688,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
     post:
       tags: [Solicitudes]
-      summary: Crear una solicitud de acompañamiento como estudiante
+      summary: Crear una solicitud como estudiante o administrador
       operationId: createRequest
       security:
         - bearerAuth: []
@@ -515,7 +697,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RequestInput'
+              oneOf:
+                - $ref: '#/components/schemas/RequestInput'
+                - $ref: '#/components/schemas/AdminRequestInput'
       responses:
         '201':
           description: Solicitud creada en estado Pendiente.
@@ -562,6 +746,19 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Solicitudes]
+      summary: Eliminar una solicitud y sus datos operativos asociados
+      operationId: deleteRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '204': { description: Solicitud eliminada. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
 components:
   securitySchemes:
@@ -591,7 +788,7 @@ components:
         type: integer
         minimum: 1
         maximum: 100
-        default: 20
+        default: 100
     UserId:
       name: id
       in: path
@@ -644,6 +841,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+    InternalError:
+      description: Error interno del servidor.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
   schemas:
     Role:
       type: string
@@ -678,12 +881,67 @@ components:
           description: Rol activo asociado al token de sesión, cuando aplica.
         status: { $ref: '#/components/schemas/Status' }
         initials: { type: string, minLength: 1, maxLength: 3 }
+        mustChangePassword:
+          type: boolean
+          description: Indica que el usuario debe reemplazar una clave temporal antes de operar.
+    AdminUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          required: [document]
+          properties:
+            document: { type: string, minLength: 5, maxLength: 20, description: Solo visible en endpoints administrativos protegidos. }
+    CredentialAccount:
+      type: object
+      required: [id, code, email, name, status, roles]
+      properties:
+        id: { type: integer, minimum: 1 }
+        code: { type: string, maxLength: 20 }
+        email: { type: string, format: email }
+        name: { type: string, minLength: 2, maxLength: 160 }
+        status: { $ref: '#/components/schemas/Status' }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+    PasswordChangeInput:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword, confirmPassword]
+      properties:
+        currentPassword: { type: string, minLength: 1, maxLength: 72 }
+        newPassword: { type: string, minLength: 8, maxLength: 72 }
+        confirmPassword: { type: string, minLength: 8, maxLength: 72 }
+    Setting:
+      type: object
+      required: [id, clave, valor, tipo]
+      properties:
+        id: { type: integer, minimum: 1 }
+        clave: { type: string, maxLength: 120 }
+        valor: { type: string, maxLength: 5000 }
+        tipo: { type: string }
+        descripcion: { type: string }
+    SettingsUpdateInput:
+      type: object
+      additionalProperties: false
+      required: [settings]
+      properties:
+        settings:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, value]
+            properties:
+              key: { type: string, minLength: 1, maxLength: 120 }
+              value: { type: string, maxLength: 5000 }
     LoginRequest:
       type: object
-      required: [email, document]
+      additionalProperties: false
+      required: [email, password]
       properties:
         email: { type: string, format: email, maxLength: 120 }
-        document: { type: string, minLength: 5, maxLength: 20, pattern: '^[0-9A-Za-z-]+$' }
+        password: { type: string, minLength: 1, maxLength: 72 }
     LoginResponse:
       type: object
       required: [roles, requiresRoleSelection, user]
@@ -705,6 +963,33 @@ components:
           uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
         user: { $ref: '#/components/schemas/User' }
+    AcademicPeriod:
+      type: object
+      required: [id, nombre, startDate, endDate, estado]
+      properties:
+        id: { type: integer, minimum: 1 }
+        nombre: { type: string, minLength: 4, maxLength: 20 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        estado: { type: string, enum: [Planeado, Activo, Finalizado] }
+    AcademicPeriodInput:
+      type: object
+      additionalProperties: false
+      required: [name, startDate, endDate]
+      properties:
+        name: { type: string, minLength: 4, maxLength: 20 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        status: { type: string, enum: [Planeado, Activo, Finalizado] }
+    AcademicPeriodUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 4, maxLength: 20 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        status: { type: string, enum: [Planeado, Activo, Finalizado] }
+      minProperties: 1
     RoleSelectionRequest:
       type: object
       required: [preAuthToken, role]
@@ -713,7 +998,8 @@ components:
         role: { $ref: '#/components/schemas/Role' }
     UserInput:
       type: object
-      required: [code, document, name, email, roles]
+      additionalProperties: false
+      required: [code, document, name, email, roles, profiles]
       properties:
         code: { type: string, minLength: 2, maxLength: 20 }
         document: { type: string, minLength: 5, maxLength: 20 }
@@ -724,10 +1010,14 @@ components:
           minItems: 1
           uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
+        profiles: { type: object, description: Perfiles académicos requeridos por los roles seleccionados. }
     UserUpdate:
       type: object
+      additionalProperties: false
       minProperties: 1
       properties:
+        code: { type: string, minLength: 2, maxLength: 20 }
+        document: { type: string, minLength: 5, maxLength: 20 }
         name: { type: string, minLength: 2, maxLength: 160 }
         email: { type: string, format: email, maxLength: 120 }
         roles:
@@ -736,6 +1026,7 @@ components:
           uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
         status: { $ref: '#/components/schemas/Status' }
+        profiles: { type: object, description: Perfiles académicos que se deben actualizar. }
     Space:
       type: object
       required: [id, code, name, type, location, capacity, status]
@@ -743,26 +1034,43 @@ components:
         id: { type: integer, minimum: 1 }
         code: { type: string, maxLength: 20 }
         name: { type: string, maxLength: 120 }
-        type: { type: string, enum: [Aula, Laboratorio, Sala, Biblioteca, Virtual, Otro] }
+        type: { type: string, enum: [Aula, Laboratorio, Sala, 'Sala de informática', Biblioteca, 'Salón de reuniones', Otro, Virtual] }
         location: { type: string, maxLength: 200 }
         capacity: { type: integer, minimum: 1, maximum: 1000 }
         status: { $ref: '#/components/schemas/Status' }
     SpaceInput:
       type: object
-      required: [code, name, type, location, capacity]
+      additionalProperties: false
+      required: [code, name, type, capacity]
       properties:
         code: { type: string, minLength: 2, maxLength: 20 }
         name: { type: string, minLength: 2, maxLength: 120 }
-        type: { type: string, enum: [Aula, Laboratorio, Sala, Biblioteca, Virtual, Otro] }
-        location: { type: string, minLength: 2, maxLength: 200 }
+        type: { type: string, enum: [Aula, Laboratorio, Sala, 'Sala de informática', Biblioteca, 'Salón de reuniones', Otro, Virtual] }
+        building: { type: string, maxLength: 80 }
+        block: { type: string, maxLength: 20 }
+        room: { type: string, maxLength: 20 }
+        floor: { type: string, maxLength: 10 }
+        location: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 300 }
+        resources: { type: string, maxLength: 500 }
+        observations: { type: string, maxLength: 300 }
         capacity: { type: integer, minimum: 1, maximum: 1000 }
     SpaceUpdate:
       type: object
+      additionalProperties: false
       minProperties: 1
       properties:
+        code: { type: string, minLength: 2, maxLength: 20 }
         name: { type: string, minLength: 2, maxLength: 120 }
-        type: { type: string, enum: [Aula, Laboratorio, Sala, Biblioteca, Virtual, Otro] }
+        type: { type: string, enum: [Aula, Laboratorio, Sala, 'Sala de informática', Biblioteca, 'Salón de reuniones', Otro, Virtual] }
+        building: { type: string, maxLength: 80 }
+        block: { type: string, maxLength: 20 }
+        room: { type: string, maxLength: 20 }
+        floor: { type: string, maxLength: 10 }
         location: { type: string, minLength: 2, maxLength: 200 }
+        description: { type: string, maxLength: 300 }
+        resources: { type: string, maxLength: 500 }
+        observations: { type: string, maxLength: 300 }
         capacity: { type: integer, minimum: 1, maximum: 1000 }
         status: { $ref: '#/components/schemas/Status' }
     Request:
@@ -772,27 +1080,39 @@ components:
         id: { type: integer, minimum: 1 }
         student: { type: string, maxLength: 160 }
         subject: { type: string, maxLength: 150 }
-        type: { type: string, enum: [Monitoría, Tutoría] }
+        type: { type: string, enum: [Monitoría, Tutoría, Acompañamiento] }
         priority: { $ref: '#/components/schemas/Priority' }
         status: { $ref: '#/components/schemas/RequestStatus' }
         date: { type: string, format: date }
     RequestInput:
       type: object
+      additionalProperties: false
       required: [subject, type, priority, reason]
       properties:
         subject: { type: string, minLength: 2, maxLength: 150 }
         type: { type: string, enum: [Monitoría, Tutoría] }
         priority: { $ref: '#/components/schemas/Priority' }
         reason: { type: string, minLength: 5, maxLength: 500 }
-        preferredDate: { type: string, format: date }
         preferredModality: { $ref: '#/components/schemas/Modality' }
+    AdminRequestInput:
+      type: object
+      additionalProperties: false
+      required: [studentId, programId, subjectId, type, priority, motive, description]
+      properties:
+        studentId: { type: integer, minimum: 1 }
+        programId: { type: integer, minimum: 1 }
+        subjectId: { type: integer, minimum: 1 }
+        periodId: { type: integer, minimum: 1 }
+        type: { type: string, enum: [Monitoría, Tutoría, Acompañamiento] }
+        priority: { $ref: '#/components/schemas/Priority' }
+        motive: { type: string, minLength: 3, maxLength: 500 }
+        description: { type: string, minLength: 3, maxLength: 500 }
     RequestUpdate:
       type: object
+      additionalProperties: false
       required: [status]
       properties:
         status: { $ref: '#/components/schemas/RequestStatus' }
-        assignedUserId: { type: integer, minimum: 1 }
-        observation: { type: string, maxLength: 500 }
     Availability:
       type: object
       required: [id, day, startTime, endTime, subject, place, status]
@@ -805,16 +1125,6 @@ components:
         place: { type: string, maxLength: 200 }
         modality: { $ref: '#/components/schemas/Modality' }
         status: { $ref: '#/components/schemas/Status' }
-    AvailabilityInput:
-      type: object
-      required: [day, startTime, endTime, subject, modality]
-      properties:
-        day: { type: string, enum: [Lunes, Martes, Miércoles, Jueves, Viernes, Sábado] }
-        startTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
-        endTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
-        subject: { type: string, minLength: 2, maxLength: 150 }
-        place: { type: string, maxLength: 200 }
-        modality: { $ref: '#/components/schemas/Modality' }
     Session:
       type: object
       required: [id, subject, date, startTime, endTime, modality, status]
@@ -827,25 +1137,6 @@ components:
         modality: { $ref: '#/components/schemas/Modality' }
         place: { type: string, maxLength: 200 }
         status: { type: string, enum: [Programada, Confirmada, Reprogramada, 'En Proceso', Realizada, 'No Asistida', Finalizada, Cancelada] }
-    MonthlyReport:
-      type: object
-      required: [id, title, period, status]
-      properties:
-        id: { type: integer, minimum: 1 }
-        title: { type: string, maxLength: 200 }
-        period: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' }
-        status: { type: string, enum: [Borrador, EnRevision, Aprobado, Rechazado] }
-        summary: { type: string, maxLength: 1000 }
-    MonthlyReportInput:
-      type: object
-      required: [title, period, summary]
-      properties:
-        title: { type: string, minLength: 2, maxLength: 200 }
-        period: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' }
-        summary: { type: string, minLength: 10, maxLength: 1000 }
-        achievements: { type: string, maxLength: 1000 }
-        difficulties: { type: string, maxLength: 1000 }
-        recommendations: { type: string, maxLength: 1000 }
     SubjectCatalogItem:
       type: object
       required: [id, codigo, nombre]
@@ -885,7 +1176,7 @@ components:
       properties:
         data:
           type: array
-          items: { $ref: '#/components/schemas/User' }
+          items: { $ref: '#/components/schemas/AdminUser' }
         pagination: { $ref: '#/components/schemas/Pagination' }
     PaginatedRequests:
       type: object

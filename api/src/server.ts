@@ -2,12 +2,12 @@
 import cors from 'cors'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import { randomUUID } from 'node:crypto'
-import { ZodError } from 'zod'
+import { z, ZodError } from 'zod'
 import { AuthError, currentUserFromToken, login, selectRole } from './auth.js'
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
-import { DataError, createRequest, createSpace, createUser, dashboard, deleteSpace, deleteUser, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSpaces, listSubjects, listUsers, updateRequest, updateSpace, updateUser } from './data.js'
-import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, changePassword, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminRequest, deleteAdminSpace, deleteAdminUser, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminRequest, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
+import { DataError, createRequest, dashboard, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects } from './data.js'
+import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, changePassword, createAdminPeriod, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminPeriod, deleteAdminRequest, deleteAdminSpace, deleteAdminUser, listAdminPeriods, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminPeriod, updateAdminRequest, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
 
 const app = express()
 app.disable('x-powered-by')
@@ -31,6 +31,10 @@ async function requireSession(req, res, next) {
     const header = req.header('authorization')
     if (!header?.startsWith('Bearer ')) return apiError(res, req, 401, 'MISSING_TOKEN', 'Se requiere un token Bearer.')
     req.session = await currentUserFromToken(header.slice(7).trim())
+    const passwordChangeAllowedRoutes = new Set(['/admin/configuration/password', '/auth/logout'])
+    if (req.session.user.mustChangePassword && !passwordChangeAllowedRoutes.has(req.path)) {
+      return apiError(res, req, 403, 'PASSWORD_CHANGE_REQUIRED', 'Debes cambiar tu contraseña temporal antes de continuar.')
+    }
     next()
   } catch (error) {
     next(error)
@@ -43,6 +47,13 @@ function requireRole(...allowedRoles: string[]) {
     next()
   }
 }
+
+const idParamSchema = z.coerce.number().int().positive()
+const requestQuerySchema = z.object({ search: z.string().trim().max(120).optional(), status: z.enum(['Pendiente','Aprobada','Asignada','Rechazada','Cancelada','Atendida','Finalizada']).optional(), page: z.coerce.number().int().positive().optional(), pageSize: z.coerce.number().int().positive().max(100).optional() }).strict()
+const userQuerySchema = z.object({ search: z.string().trim().max(120).optional(), role: z.enum(['Administrador','Tutor','Monitor','Estudiante']).optional(), page: z.coerce.number().int().positive().optional(), pageSize: z.coerce.number().int().positive().max(100).optional() }).strict()
+const spaceQuerySchema = z.object({ search: z.string().trim().max(120).optional(), status: z.enum(['Activo','Inactivo']).optional(), type: z.enum(['Aula','Laboratorio','Sala','Sala de informática','Biblioteca','Salón de reuniones','Otro','Virtual']).optional(), building: z.string().max(80).optional(), minCapacity: z.coerce.number().int().positive().max(1000).optional() }).strict()
+const isoDateQuerySchema = z.string().refine((value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`)) && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value, 'La fecha debe tener formato AAAA-MM-DD y ser válida.')
+const reportQuerySchema = z.object({ subjectId: z.coerce.number().int().positive().optional(), from: isoDateQuerySchema.optional(), to: isoDateQuerySchema.optional() }).strict().refine((value) => !value.from || !value.to || value.from <= value.to, { path: ['to'], message: 'La fecha hasta debe ser igual o posterior a la fecha desde.' })
 
 app.use((req, _res, next) => {
   req.requestId = randomUUID()
@@ -96,7 +107,8 @@ router.get('/auth/me', async (req, res, next) => {
   }
 })
 
-router.post('/auth/logout', (_req, res) => res.status(204).send())
+// Cierra la sesión del cliente; el JWT stateless permanece válido hasta expirar.
+router.post('/auth/logout', requireSession, (_req, res) => res.status(204).send())
 
 router.get('/portal/dashboard', requireSession, async (req, res, next) => {
   try { res.json(req.session.activeRole === 'Administrador' ? await adminDashboard() : await dashboard(req.session)) } catch (error) { next(error) }
@@ -115,7 +127,7 @@ router.get('/admin/dashboard', requireSession, requireRole('Administrador'), asy
 })
 
 router.get('/admin/reports', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { res.json(await adminReport(req.query)) } catch (error) { next(error) }
+  try { res.json(await adminReport(reportQuerySchema.parse(req.query))) } catch (error) { next(error) }
 })
 
 router.get('/admin/catalogs', requireSession, requireRole('Administrador'), async (_req, res, next) => {
@@ -123,11 +135,11 @@ router.get('/admin/catalogs', requireSession, requireRole('Administrador'), asyn
 })
 
 router.get('/admin/configuration/credentials', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { res.json(await listCredentials(req.query.role)) } catch (error) { next(error) }
+  try { const query=z.object({role:z.enum(['Administrador','Tutor','Monitor','Estudiante']).optional()}).strict().parse(req.query); res.json(await listCredentials(query.role)) } catch (error) { next(error) }
 })
 
 router.post('/admin/configuration/credentials/:id/reset', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { res.json(await resetCredential(Number(req.params.id))) } catch (error) { next(error) }
+  try { res.json(await resetCredential(idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
 })
 
 router.patch('/admin/configuration/password', requireSession, async (req, res, next) => {
@@ -147,7 +159,7 @@ router.get('/admin/db-status', requireSession, requireRole('Administrador'), asy
 })
 
 router.get('/users', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { res.json(await listAdminUsers(req.query)) } catch (error) { next(error) }
+  try { res.json(await listAdminUsers(userQuerySchema.parse(req.query))) } catch (error) { next(error) }
 })
 
 router.post('/users', requireSession, requireRole('Administrador'), async (req, res, next) => {
@@ -155,15 +167,15 @@ router.post('/users', requireSession, requireRole('Administrador'), async (req, 
 })
 
 router.patch('/users/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { res.json(await updateAdminUser(Number(req.params.id), req.body)) } catch (error) { next(error) }
+  try { res.json(await updateAdminUser(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
 })
 
 router.delete('/users/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { await deleteAdminUser(Number(req.params.id), req.session.id); res.status(204).send() } catch (error) { next(error) }
+  try { await deleteAdminUser(idParamSchema.parse(req.params.id), req.session.user.id); res.status(204).send() } catch (error) { next(error) }
 })
 
 router.get('/spaces', requireSession, async (req, res, next) => {
-  try { res.json(await listAdminSpaces(req.query)) } catch (error) { next(error) }
+  try { res.json(await listAdminSpaces(spaceQuerySchema.parse(req.query))) } catch (error) { next(error) }
 })
 
 router.post('/spaces', requireSession, requireRole('Administrador'), async (req, res, next) => {
@@ -171,15 +183,15 @@ router.post('/spaces', requireSession, requireRole('Administrador'), async (req,
 })
 
 router.patch('/spaces/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { res.json(await updateAdminSpace(Number(req.params.id), req.body)) } catch (error) { next(error) }
+  try { res.json(await updateAdminSpace(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
 })
 
 router.delete('/spaces/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { await deleteAdminSpace(Number(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+  try { await deleteAdminSpace(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
 })
 
 router.get('/requests', requireSession, async (req, res, next) => {
-  try { res.json(req.session.activeRole === 'Administrador' ? await listAdminRequests(req.query) : await listRequests({ session: req.session, search: req.query.search, status: req.query.status, page: req.query.page, pageSize: req.query.pageSize })) } catch (error) { next(error) }
+  try { const query=requestQuerySchema.parse(req.query); res.json(req.session.activeRole === 'Administrador' ? await listAdminRequests(query) : await listRequests({ session: req.session, ...query })) } catch (error) { next(error) }
 })
 
 router.get('/catalogs/subjects', requireSession, async (_req, res, next) => {
@@ -190,21 +202,40 @@ router.get('/catalogs/periods', requireSession, async (_req, res, next) => {
   try { res.json(await listPeriods()) } catch (error) { next(error) }
 })
 
+router.get('/periods', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listAdminPeriods()) } catch (error) { next(error) }
+})
+
+router.post('/periods', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.status(201).json(await createAdminPeriod(req.body)) } catch (error) { next(error) }
+})
+
+router.patch('/periods/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await updateAdminPeriod(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+
+router.delete('/periods/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { await deleteAdminPeriod(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+
 router.post('/requests', requireSession, async (req, res, next) => {
   try { res.status(201).json(req.session.activeRole === 'Administrador' ? await createAdminRequest(req.body) : await createRequest(req.session, req.body)) } catch (error) { next(error) }
 })
 
 router.patch('/requests/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { res.json(await updateAdminRequest(Number(req.params.id), req.body)) } catch (error) { next(error) }
+  try { res.json(await updateAdminRequest(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
 })
 
 router.delete('/requests/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { await deleteAdminRequest(Number(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+  try { await deleteAdminRequest(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
 })
 
 app.use(config.apiPrefix, router)
 
 app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
+  if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
+    return apiError(res, req, 400, 'INVALID_JSON', 'El cuerpo de la solicitud no contiene JSON válido.')
+  }
   if (error instanceof ZodError) {
     return apiError(res, req, 422, 'VALIDATION_ERROR', 'La información enviada no cumple las reglas de validación.', error.issues.map((issue) => ({ path: issue.path, message: issue.message })))
   }

@@ -319,9 +319,8 @@ const requestInputSchema = z.object({
   type: z.enum(['Monitoría', 'Tutoría']),
   priority: z.enum(['Alta', 'Media', 'Baja']),
   reason: z.string().trim().min(5).max(500),
-  preferredDate: z.string().date().optional(),
   preferredModality: z.enum(['Presencial', 'Virtual', 'Híbrida']).optional(),
-})
+}).strict()
 
 export async function createRequest(session: any, payload: unknown) {
   if (session.activeRole !== 'Estudiante') throw new DataError(403, 'ROLE_NOT_ALLOWED', 'Solo un estudiante puede crear solicitudes.')

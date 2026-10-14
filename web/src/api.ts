@@ -11,6 +11,7 @@ export type ApiUser = {
   activeRole?: Role
   document?: string
   profiles?: RoleProfiles
+  mustChangePassword?: boolean
 }
 
 export type RoleAssignment = { subjectId: number; subjectName?: string; periodId?: number; periodName?: string; weeklyHours?: number; status?: string }
@@ -43,7 +44,7 @@ export type ApiRequest = {
   id: number
   student: string
   subject: string
-  type: 'Monitoría' | 'Tutoría'
+  type: 'Monitoría' | 'Tutoría' | 'Acompañamiento'
   priority: 'Alta' | 'Media' | 'Baja'
   status: 'Pendiente' | 'Aprobada' | 'Asignada' | 'Rechazada' | 'Cancelada' | 'Atendida' | 'Finalizada'
   date: string
@@ -103,7 +104,7 @@ export type AdminReport = {
   sessions: Array<Record<string, unknown>>
 }
 
-export type CredentialAccount = { id: number; code: string; document: string; email: string; name: string; status: string; roles: Role[]; initialPassword: string }
+export type CredentialAccount = { id: number; code: string; email: string; name: string; status: string; roles: Role[] }
 export type AppSetting = { id: number; clave: string; valor: string; tipo: string; descripcion?: string; updatedAt?: string }
 
 export type Paginated<T> = {
@@ -185,8 +186,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function login(email: string, document: string) {
-  return request<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, document }) })
+export function login(email: string, password: string) {
+  return request<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
 }
 
 export function selectRole(preAuthToken: string, role: Role) {
@@ -266,7 +267,7 @@ export function listCredentials(accessToken: string, role = '') {
 }
 
 export function resetCredential(accessToken: string, id: number) {
-  return request<{ id: number; initialPassword: string }>(`/admin/configuration/credentials/${id}/reset`, authenticatedOptions(accessToken, { method: 'POST' }))
+  return request<{ id: number; temporaryPassword: string }>(`/admin/configuration/credentials/${id}/reset`, authenticatedOptions(accessToken, { method: 'POST' }))
 }
 
 export function changePassword(accessToken: string, input: { currentPassword: string; newPassword: string; confirmPassword: string }) {
@@ -289,10 +290,28 @@ export function createRequest(accessToken: string, input: { subject: string; typ
   return request<ApiRequest>('/requests', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(input) }))
 }
 
-export type AcademicPeriod = { id: number; nombre: string; estado: string }
+export type AcademicPeriod = { id: number; nombre: string; estado: 'Planeado' | 'Activo' | 'Finalizado'; startDate?: string; endDate?: string }
+
+export type AcademicPeriodInput = { name: string; startDate: string; endDate: string; status?: AcademicPeriod['estado'] }
 
 export function listPeriods(accessToken: string) {
   return request<AcademicPeriod[]>('/catalogs/periods', authenticatedOptions(accessToken))
+}
+
+export function listAdminPeriods(accessToken: string) {
+  return request<AcademicPeriod[]>('/periods', authenticatedOptions(accessToken))
+}
+
+export function createAcademicPeriod(accessToken: string, input: AcademicPeriodInput) {
+  return request<AcademicPeriod>('/periods', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(input) }))
+}
+
+export function updateAcademicPeriod(accessToken: string, id: number, input: Partial<AcademicPeriodInput>) {
+  return request<AcademicPeriod>(`/periods/${id}`, authenticatedOptions(accessToken, { method: 'PATCH', body: JSON.stringify(input) }))
+}
+
+export function deleteAcademicPeriod(accessToken: string, id: number) {
+  return request<void>(`/periods/${id}`, authenticatedOptions(accessToken, { method: 'DELETE' }))
 }
 
 export function listPortalSessions(accessToken: string) {

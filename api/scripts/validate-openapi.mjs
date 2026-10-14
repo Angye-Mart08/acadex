@@ -4,6 +4,7 @@ import yaml from 'yaml'
 const { parseDocument } = yaml
 
 const file = new URL('../openapi.yaml', import.meta.url)
+const serverFile = new URL('../src/server.ts', import.meta.url)
 const source = fs.readFileSync(file, 'utf8')
 const document = parseDocument(source)
 
@@ -33,5 +34,28 @@ if (pathNames.length === 0 || schemaNames.length === 0) {
   process.exit(1)
 }
 
+const serverSource = fs.readFileSync(serverFile, 'utf8')
+const activeOperations = new Set()
+const routePattern = /router\.(get|post|patch|put|delete)\s*\(\s*['"]([^'"]+)['"]/g
+for (const [, method, routePath] of serverSource.matchAll(routePattern)) {
+  const openApiPath = routePath.replace(/:([A-Za-z0-9_]+)/g, '{$1}')
+  activeOperations.add(`${method.toLowerCase()} ${openApiPath}`)
+}
+
+const documentedOperations = new Set()
+for (const [routePath, pathItem] of Object.entries(contract.paths ?? {})) {
+  for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+    if (pathItem?.[method]) documentedOperations.add(`${method} ${routePath}`)
+  }
+}
+
+const undocumented = [...activeOperations].filter((operation) => !documentedOperations.has(operation))
+const stale = [...documentedOperations].filter((operation) => !activeOperations.has(operation))
+if (undocumented.length || stale.length) {
+  if (undocumented.length) console.error(`Rutas activas sin documentar: ${undocumented.join(', ')}`)
+  if (stale.length) console.error(`Operaciones documentadas sin ruta activa: ${stale.join(', ')}`)
+  process.exit(1)
+}
+
 console.log(`OpenAPI válido: ${contract.info.title}`)
-console.log(`Versión: ${contract.openapi} · Rutas: ${pathNames.length} · Esquemas: ${schemaNames.length}`)
+console.log(`Versión: ${contract.openapi} · Rutas: ${pathNames.length} · Operaciones sincronizadas: ${activeOperations.size} · Esquemas: ${schemaNames.length}`)

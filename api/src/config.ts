@@ -4,10 +4,10 @@ import path from 'node:path'
 dotenv.config({ path: path.resolve(process.cwd(), '.env') })
 dotenv.config({ path: path.resolve(process.cwd(), '../.env') })
 
-const requiredSecret = process.env.JWT_SECRET
+const requiredSecret = process.env.JWT_SECRET?.trim()
 
-if (!requiredSecret && process.env.NODE_ENV === 'production') {
-  throw new Error('JWT_SECRET es obligatorio en producción.')
+if (process.env.NODE_ENV === 'production' && (!requiredSecret || requiredSecret.length < 32 || requiredSecret === 'change-this-local-secret')) {
+  throw new Error('JWT_SECRET debe ser una clave aleatoria de al menos 32 caracteres en producción.')
 }
 
 export const config = {

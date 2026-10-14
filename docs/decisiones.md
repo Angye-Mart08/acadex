@@ -30,13 +30,14 @@ visibilidad de los menús no sustituye esa autorización del servidor.
 ## 5. Persistencia y datos de demostración
 
 MariaDB es la fuente de verdad para autenticación, usuarios, espacios,
-solicitudes, catálogos, horarios y sesiones consultadas. El frontend inicia sus
-colecciones vacías y presenta un estado de carga; los datos de
-`web/data/ejemplo.json` no se usan como respaldo de pantalla ni para confirmar
-operaciones persistidas.
+periodos académicos, solicitudes, catálogos, horarios y sesiones consultadas.
+El frontend inicia sus colecciones vacías y presenta un estado de carga; los
+datos de `web/data/ejemplo.json` no se usan como respaldo de pantalla ni para
+confirmar operaciones persistidas.
 
-Las eliminaciones administrativas se implementan como desactivaciones lógicas
-para conservar las relaciones históricas de sesiones y solicitudes.
+Las eliminaciones de usuarios, espacios y solicitudes son físicas y limpian sus
+dependencias; solo deben usarse con datos de demostración. Un periodo con
+solicitudes, horarios o asignaciones no se puede eliminar.
 
 ## 6. Variables de entorno
 
@@ -45,7 +46,7 @@ para conservar las relaciones históricas de sesiones y solicitudes.
 ## 7. Estado de evolución
 
 1. Integrado: login, selección de rol y autorización JWT.
-2. Integrado: operaciones administrativas de usuarios, espacios y solicitudes.
+2. Integrado: CRUD administrativo de usuarios, espacios, solicitudes y periodos académicos.
 3. Integrado: catálogos administrativos, dashboard y generación de reportes.
 4. Integrado en lectura: disponibilidad, horarios y sesiones filtradas por rol.
 5. Pendiente: escritura de disponibilidad/sesiones, asistencia, seguimiento,
@@ -73,10 +74,11 @@ instancia `Root` en `import.meta.hot.data` para reutilizarla durante HMR.
 compatible con React Fast Refresh. Esta separación evita llamar dos veces a
 `createRoot()` sobre el mismo contenedor cuando Vite actualiza el módulo.
 
-## 10. CRUD completo (desactivación lógica vs. eliminación definitiva) y códigos institucionales autogenerados
+## 10. CRUD y códigos institucionales autogenerados
 
-Se diferencian de manera formal dos operaciones en la administración del sistema:
-- **Desactivación / Activación lógica**: Permite inhabilitar temporalmente a un usuario o espacio preservando su historial operativo.
-- **Eliminación definitiva en cascada (DELETE)**: Permite remover de forma irreversible registros de prueba o inconsistentes mediante una limpieza atómica y ordenada de claves foráneas en MariaDB, con una salvaguarda que impide que un administrador elimine su propia cuenta activa.
+`DELETE` elimina permanentemente usuarios, espacios y solicitudes, limpiando
+sus dependencias en MariaDB. El endpoint de usuario impide que el
+administrador elimine su propia cuenta. Los periodos se eliminan solo cuando
+no tienen registros relacionados.
 
 Asimismo, se establece que ningún código institucional (usuarios, espacios o radicados) puede ser digitado manualmente en los formularios. Estos se generan de forma determinística en su prefijo pero aleatoria en sus dígitos numéricos (`ADM###`, `TUT###`, `MON###`, `EST###`, `AUL-###`, `LAB-###`, etc.), manteniendo el atributo `readOnly` y ofreciendo un botón de regeneración aleatoria en la interfaz.

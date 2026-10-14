@@ -524,3 +524,17 @@ Para cumplir la directriz de que ningún usuario pueda escribir manualmente el c
   3. **Botón de regeneración aleatoria**: Se incorporó un botón adyacente (`.regenerate-code-btn`) con icono de actualización que permite generar una nueva combinación aleatoria respetando la unicidad frente a los registros existentes.
   4. **Sincronización de perfil de estudiante**: En el formulario de perfiles específicos, el campo «Código estudiantil» permanece sincronizado en modo solo lectura con el código institucional asignado.
   5. **Formulario de solicitud estudiantil**: Muestra el código institucional asignado a la cuenta del estudiante en solo lectura para verificación de identidad antes del envío.
+
+## Actualización del 13 de octubre de 2026: preparación del MVP
+
+Se alineó el backend y la documentación con los requisitos de entrega del MVP:
+
+- Se completó el cuarto CRUD administrativo para `PeriodoAcademico`, con validación de fechas, control de periodo activo y prevención de borrado cuando existen asignaciones, horarios o solicitudes asociadas.
+- Se endureció el cambio de estado de solicitudes mediante transiciones explícitas y se añadieron validaciones de formato y contenido en parámetros y solicitudes recibidas.
+- El inicio de sesión utiliza contraseña; las contraseñas nuevas se almacenan con bcrypt, las cuentas legadas del SQL local se migran en desarrollo y se exige reemplazar las claves temporales antes de usar el resto de la API. En producción se rechazan claves que no estén hasheadas.
+- El restablecimiento de credenciales genera una clave temporal aleatoria que solo aparece en la respuesta de esa operación. Las listas y exportaciones administrativas ya no incluyen documentos ni contraseñas.
+- La configuración de producción exige un `JWT_SECRET` aleatorio de al menos 32 caracteres. El cierre de sesión del servidor se documenta como limpieza local del token: el JWT sigue siendo válido hasta expirar.
+- Se incorporó administración de periodos en la interfaz, se retiraron valores ficticios del estado de MariaDB y se actualizó la especificación OpenAPI y la guía de endpoints.
+- El validador del contrato comprueba la sintaxis YAML y compara métodos/rutas declarados con los registrados en el router.
+
+Esta actualización deja el código y la documentación preparados para la revisión del MVP. La demostración funcional en vivo y las dos cápsulas técnicas de los grupos 1 y 4 todavía deben prepararse y realizarse el jueves 15 de octubre.
