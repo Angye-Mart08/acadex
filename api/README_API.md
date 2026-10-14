@@ -1,16 +1,16 @@
 # Contrato de API — Gestión de Tutorías y Monitorías
 
-El contrato inicial de la API se encuentra en [openapi.yaml](./openapi.yaml) y utiliza OpenAPI 3.1.
+El contrato de las rutas implementadas se encuentra en [openapi.yaml](./openapi.yaml) y utiliza OpenAPI 3.1.
 
 ## Alcance
 
 El contrato está alineado con el primer avance del frontend:
 
-- Inicio de sesión con correo institucional y documento de identidad.
+- Inicio de sesión con correo institucional y contraseña.
 - Selección del rol activo cuando una persona tiene más de un rol.
 - Consulta del usuario autenticado.
 - Dashboard personalizado por rol.
-- Disponibilidad, horarios, sesiones e informes del tutor o monitor.
+- Consulta de disponibilidad y sesiones para tutor, monitor y estudiante. La escritura de disponibilidad y los informes personales aún no están implementados.
 - Solicitudes creadas por estudiantes.
 - Solicitudes asignadas, aprobadas o rechazadas.
 - Administración de usuarios.
@@ -47,14 +47,14 @@ Authorization: Bearer <accessToken>
 | Administración | `/admin/dashboard`, `/admin/reports`, `/admin/catalogs`, `/admin/configuration/*` | Indicadores, catálogos, credenciales y configuración |
 | Usuarios | `GET/POST /users`, `PATCH/DELETE /users/{id}` | `Usuario`, `Credencial`, `UsuarioRol` |
 | Espacios | `GET/POST /spaces`, `PATCH/DELETE /spaces/{id}` | `Espacio` |
-| Solicitudes | `GET/POST /requests`, `PATCH /requests/{id}` | `Solicitud`, `Estudiante`, `Programa`, `Asignatura`, `TipoSolicitud`, `PeriodoAcademico` |
+| Periodos académicos | `GET/POST /periods`, `PATCH/DELETE /periods/{id}` | `PeriodoAcademico` |
+| Solicitudes | `GET/POST /requests`, `PATCH/DELETE /requests/{id}` | `Solicitud`, `Estudiante`, `Programa`, `Asignatura`, `TipoSolicitud`, `PeriodoAcademico` |
 | Estado del servicio | `GET /health` (fuera de `/api/v1`) | Conexión MariaDB |
 
 La implementación activa está en `api/src/server.ts`. `GET /availability` y
-`GET /sessions` son consultas de solo lectura con aislamiento por rol; las
-operaciones de escritura de disponibilidad/sesiones y los informes personales
-siguen planeados. La presencia de una operación en OpenAPI no implica por sí
-sola que ya tenga una ruta ejecutable.
+`GET /sessions` son consultas de solo lectura con aislamiento por rol. Las
+operaciones de escritura de disponibilidad y los informes personales todavía
+no forman parte de la API ejecutable ni del contrato actual.
 
 `GET /requests` devuelve siempre `{ data, pagination }`, también para
 Administración. Los filtros `search`, `status` y `page`/`pageSize` se aplican
@@ -71,7 +71,7 @@ visual mientras se completa la primera carga del API.
 Desde PowerShell:
 
 ```powershell
-cd C:\Users\brayh\acadex\api
+cd .\api
 npm install
 npm run validate
 ```
@@ -87,7 +87,7 @@ limitados sobre esa base y el esquema si todavía no existen tablas.
 Desde PowerShell:
 
 ```powershell
-cd C:\Users\brayh\acadex\api
+cd .\api
 npm install
 npm run dev
 ```
@@ -104,16 +104,20 @@ Si existe una base con algunas tablas, pero faltan las tablas esenciales, la
 API detiene el arranque y muestra el problema; nunca la elimina ni intenta
 reconstruirla automáticamente.
 
-El script SQL de desarrollo contiene inicialmente el documento en
-`Credencial.password_hash` para conservar las credenciales base del proyecto.
-Después del primer login válido, la API reemplaza ese valor por un hash bcrypt.
-Los nuevos usuarios deberán registrarse siempre con hashes, nunca con
-contraseñas en texto plano.
+Las credenciales antiguas del SQL local de desarrollo pueden iniciar con el
+documento como clave temporal. En desarrollo, si se detecta una contraseña en
+texto plano, la API la migra a bcrypt y marca la cuenta para cambiarla antes de
+acceder a otras rutas. En producción las contraseñas que no sean hashes bcrypt
+se rechazan; prepara hashes antes de migrar una base de datos. Las claves nuevas
+y restablecidas se almacenan con bcrypt.
+
+En producción configura `JWT_SECRET` con un valor aleatorio de al menos 32
+caracteres. El servidor rechaza el secreto de ejemplo o uno más corto.
 
 ## Levantar un mock local
 
 ```powershell
-cd C:\Users\brayh\acadex\api
+cd .\api
 npm run mock
 ```
 
@@ -152,24 +156,38 @@ consulta. Si el valor permanece, la operación fue persistida; si la API está
 detenida, el frontend debe mostrar un error de conexión y no guardar cambios
 locales.
 
-Las operaciones “Eliminar” de usuarios y espacios son desactivaciones lógicas
-(`estado = 'Inactivo'`) para conservar las relaciones de solicitudes, sesiones
-y trazabilidad histórica.
+Los endpoints DELETE de usuarios, espacios y solicitudes realizan eliminación
+física y limpian dependencias relacionadas. Úsalos únicamente con registros de
+demostración: no se conserva el historial eliminado. Los periodos académicos
+solo se pueden borrar cuando no tengan solicitudes, horarios ni asignaciones.
 
 ## Reglas importantes
 
-- La API real debe consultar la tabla `Credencial` para verificar el documento asociado al correo institucional.
-- `POST /auth/login` autentica con correo institucional y documento; `POST /auth/select-role` confirma el rol activo.
+- `POST /auth/login` autentica con correo institucional y contraseña; `POST /auth/select-role` confirma el rol activo.
+- Las contraseñas se guardan con bcrypt. Las claves temporales se devuelven una sola vez al restablecerlas y se debe exigir su cambio antes de usar otras rutas.
+- Los tokens de acceso se guardan en el cliente. `POST /auth/logout` exige un token y el frontend lo elimina, pero el servidor no revoca el JWT; este continúa válido hasta su expiración.
 - `POST /users` y `PATCH /users/{id}` reciben `roles[]`, con mínimo un rol y sin valores repetidos.
-- No se debe devolver `password_hash` ni el documento de identidad en las respuestas públicas del usuario.
+- No se deben devolver contraseñas, hashes ni documentos de identidad en listados de credenciales ni exportaciones.
 - El backend debe aplicar autorización por rol, además de validar el JWT.
-- Los cambios de estado de solicitudes deben respetar las transiciones del dominio.
+- Las solicitudes siguen transiciones permitidas: Pendiente → Aprobada/Rechazada/Cancelada; Aprobada → Asignada/Cancelada; Asignada → Atendida/Cancelada; Atendida → Finalizada/Cancelada. Rechazada, Cancelada y Finalizada son terminales.
 - Los módulos integrados del frontend deben consumir estas rutas y no confirmar cambios usando datos locales.
 
-## Operaciones de Eliminación Definitiva en Cascada (DELETE)
+## Eliminación permanente
 
 La API cuenta con endpoints de eliminación física real (`DELETE`) protegidos con sesión y rol de Administrador:
 
-- `DELETE /api/v1/users/:id`: Elimina definitivamente el usuario en cascada sobre todas las entidades asociadas en MariaDB (`EntregaActividad`, `Seguimiento`, `Solicitud`, `SesionAcompanamiento`, `HistorialSesion`, `Informe`, `EstudiantePrograma`, `Estudiante`, `Disponibilidad`, `AsignacionAcademica`, `HorarioMonitor`, `Tutor`, `Monitor`, `Administrador`, `Credencial`, `UsuarioRol` y `Usuario`). Impide la autoeliminación de la cuenta en sesión (HTTP 400).
+- `DELETE /api/v1/users/:id`: Elimina definitivamente el usuario y sus datos dependientes. Impide la autoeliminación de la cuenta en sesión (HTTP 400) y devuelve `409 USER_HAS_ASSIGNED_SESSIONS` si todavía tiene sesiones asignadas que deben resolverse primero.
 - `DELETE /api/v1/spaces/:id`: Elimina permanentemente el espacio tras limpiar sus dependencias en `HorarioMonitor` y `AsignacionEspacio`.
-- `DELETE /api/v1/requests/:id`: Elimina la solicitud tras limpiar en cascada sus dependencias en `HistorialSesion`, `Informe` y `SesionAcompanamiento`.
+- `DELETE /api/v1/requests/:id`: Elimina la solicitud tras limpiar sus sesiones y dependencias operativas en `RecuperacionMonitoria`, `Asistencia`, `HistorialSesion`, `HistorialInforme`, `Informe`, `EntregaActividad`, `Evidencia`, `Compromiso`, `Seguimiento`, `ReporteMonitoria` y `CancelacionMonitoria`.
+
+`DELETE /api/v1/periods/:id` devuelve `409 PERIOD_IN_USE` si el periodo tiene
+asignaciones, horarios o solicitudes asociadas.
+
+## Demostración local
+
+Usa la API real en `http://localhost:3000/api/v1` y confirma primero
+`http://localhost:3000/health`. No uses Prism para evidenciar persistencia:
+el mock sirve para revisar el contrato y no guarda cambios en MariaDB. Para la
+demostración, inicia sesión, crea un registro temporal, consulta, actualiza y
+elimínalo; verifica el cambio en MariaDB. El panel administrativo mostrará
+“Sin datos” si no puede consultar la base y no presentará conteos de ejemplo.

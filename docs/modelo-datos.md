@@ -64,11 +64,12 @@ Disponibilidad ──< AsignacionEspacio >── Espacio
 
 ## Estado de integración
 
-La API implementa actualmente autenticación y selección de rol, usuarios,
-espacios, solicitudes, catálogos administrativos y consultas del dashboard y
-reportes. Los catálogos de asignaturas y periodos se consultan mediante
-`GET /catalogs/subjects` y `GET /catalogs/periods`. La lista ejecutable
-completa y sus métodos se mantiene en
+La API implementa autenticación y selección de rol, usuarios, espacios,
+solicitudes, periodos académicos, catálogos administrativos y consultas del
+dashboard y reportes. Los catálogos de asignaturas y periodos se consultan
+mediante `GET /catalogs/subjects` y `GET /catalogs/periods`; administración
+gestiona el CRUD de periodos mediante `/periods`. La lista ejecutable completa
+y sus métodos se mantiene en
 [README_API.md](../api/README_API.md); el servidor se registra en
 `api/src/server.ts`.
 
@@ -80,10 +81,12 @@ aún no tienen persistencia API.
 
 ## Nota de seguridad
 
-El documento se utiliza para verificar el acceso junto con el correo
-institucional. No se devuelve en las respuestas públicas de autenticación; el
-endpoint administrativo de usuarios lo entrega únicamente porque el
-administrador necesita editar el registro de acceso.
+El login usa correo institucional y contraseña. Las cuentas del SQL local de
+desarrollo pueden tener el documento como clave temporal; en desarrollo el
+servidor migra esas claves a bcrypt y exige cambiarlas en el primer acceso. En
+producción las claves que no sean hashes bcrypt se rechazan. Las claves
+temporales generadas por administración solo se devuelven una vez y no aparecen
+en listados ni CSV.
 
 La relación `UsuarioRol` es de muchos a muchos: un usuario puede ser, por
 ejemplo, Monitor y Estudiante al mismo tiempo. El rol activo no se almacena

@@ -10,8 +10,8 @@ export type Role = typeof roles[number]
 
 const loginSchema = z.object({
   email: z.string().trim().email().max(120),
-  document: z.string().trim().min(5).max(20).regex(/^[0-9A-Za-z-]+$/),
-})
+  password: z.string().min(1).max(72).refine((value) => Buffer.byteLength(value, 'utf8') <= 72, 'La contraseña supera el límite admitido.'),
+}).strict()
 
 const roleSelectionSchema = z.object({
   preAuthToken: z.string().min(1),
@@ -29,6 +29,7 @@ type AuthRow = {
   userStatus: string
   credentialStatus: string
   passwordHash: string
+  mustChangePassword: number | boolean
   role: Role
   roleStatus: string
 }
@@ -41,6 +42,7 @@ type AuthenticatedUser = {
   roles: Role[]
   status: 'Activo' | 'Inactivo'
   initials: string
+  mustChangePassword: boolean
 }
 
 type AccessClaims = jwt.JwtPayload & {
@@ -67,6 +69,7 @@ const authQuery = `
     c.id_credencial AS credentialId,
     c.estado AS credentialStatus,
     c.password_hash AS passwordHash,
+    c.primer_inicio AS mustChangePassword,
     r.nombre AS role,
     ur.estado AS roleStatus
   FROM Usuario u
@@ -93,6 +96,7 @@ function toUser(rows: AuthRow[]): AuthenticatedUser {
     roles: [...new Set(rows.map((row) => row.role))],
     status: first.userStatus as 'Activo' | 'Inactivo',
     initials,
+    mustChangePassword: rows.some((row) => Boolean(row.mustChangePassword)),
   }
 }
 
@@ -111,9 +115,9 @@ async function verifyPassword(password: string, storedPassword: string) {
     return { valid: await bcrypt.compare(password, storedPassword), needsUpgrade: false }
   }
 
-  // El script SQL de desarrollo contiene inicialmente el documento en texto
-  // plano para permitir la primera validación del proyecto. Los nuevos datos
-  // deberán almacenarse con bcrypt.
+  // Solo la base local puede migrar las claves históricas del SQL de desarrollo.
+  // En producción una contraseña que no sea un hash bcrypt nunca es válida.
+  if (process.env.NODE_ENV === 'production') return { valid: false, needsUpgrade: false }
   return { valid: password === storedPassword, needsUpgrade: password === storedPassword }
 }
 
@@ -146,13 +150,14 @@ export async function login(payload: unknown) {
   if (!rows.length) {
     throw new AuthError(401, 'INVALID_CREDENTIALS', 'Las credenciales no son válidas.')
   }
-  const passwordCheck = await verifyPassword(input.document, rows[0].passwordHash)
+  const passwordCheck = await verifyPassword(input.password, rows[0].passwordHash)
   if (!passwordCheck.valid) throw new AuthError(401, 'INVALID_CREDENTIALS', 'Las credenciales no son válidas.')
   if (passwordCheck.needsUpgrade) {
-    const passwordHash = await bcrypt.hash(input.document, 12)
-    await pool.execute('UPDATE Credencial SET password_hash = ? WHERE id_credencial = ?', [passwordHash, rows[0].credentialId])
+    const passwordHash = await bcrypt.hash(input.password, 12)
+    await pool.execute('UPDATE Credencial SET password_hash = ?, primer_inicio = 1 WHERE id_credencial = ?', [passwordHash, rows[0].credentialId])
   }
   const user = toUser(rows)
+  user.mustChangePassword = user.mustChangePassword || passwordCheck.needsUpgrade
   return publicLoginResponse(user, user.roles.length === 1 ? user.roles[0] : undefined)
 }
 

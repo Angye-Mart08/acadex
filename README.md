@@ -54,15 +54,13 @@ Este comando inicia simultáneamente la API REST en `http://localhost:3000/api/v
 Terminal 1 — API de MariaDB:
 
 ```powershell
-cd C:\Users\brayh\acadex\api
-npm run dev
+npm run dev:api
 ```
 
 Terminal 2 — Frontend web:
 
 ```powershell
-cd C:\Users\brayh\acadex\web
-npm run dev
+npm run dev:web
 ```
 
 ### Control y verificación de Base de Datos (MariaDB)
@@ -78,12 +76,10 @@ Configura `.env` desde `.env.example` antes de iniciar. En el primer arranque, l
 Validaciones locales:
 
 ```powershell
-cd C:\Users\brayh\acadex\web
-npm run build
+npm run build:web
 
-cd C:\Users\brayh\acadex\api
-npm run typecheck
-npm run validate
+npm run typecheck:api
+npm --prefix api run validate
 ```
 
 Si el acceso administrativo no carga, confirma que `/health` responda con
@@ -109,19 +105,12 @@ No se deben subir al repositorio:
 
 Todos están excluidos mediante `.gitignore`. Para instalar las dependencias se ejecuta `npm install` dentro de `api` y de `web` por separado.
 
-## Credenciales base de desarrollo
+## Acceso de demostración
 
-El login utiliza correo institucional y documento de identidad:
-
-| Rol | Correo | Documento |
-| --- | --- | --- |
-| Administrador | `jaysonquintero@unitropico.edu.co` | `1000000010` |
-| Tutor | `tutormatematica@unitropico.edu.co` | `1007418843` |
-| Monitor + Estudiante | `brayhamlindarte.es@unitropico.edu.co` | `1093432540` |
-| Estudiante | `mariaamezquita.es@unitropico.edu.co` | `1029663952` |
-
-La autenticación se valida contra MariaDB mediante la API. La cuenta de Monitor
-permite probar el selector y el cambio entre los roles Monitor y Estudiante.
+La autenticación usa correo institucional y contraseña. Las claves temporales
+se deben entregar por un canal seguro y cambiar en el primer inicio de sesión.
+No incluyas correos personales, documentos ni contraseñas en el repositorio,
+las diapositivas o las exportaciones de cuentas.
 
 ## Documentación principal
 
@@ -139,14 +128,17 @@ permite probar el selector y el cambio entre los roles Monitor y Estudiante.
 - Brayham Orlando Lindarte Fuentes — Backend, datos, DevOps y calidad.
 - Nicolas Parra Franco — Frontend.
 
-## CRUD Completo del Administrador y Códigos Institucionales Autogenerados
+## CRUD administrativo y códigos institucionales
 
-El módulo administrativo cuenta con el ciclo de vida CRUD completo para todas las entidades centrales:
+La API administrativa expone CRUD para usuarios, espacios, solicitudes y
+periodos académicos. Las eliminaciones permanentes deben ejecutarse solo sobre
+datos de demostración; los periodos con asignaciones, horarios o solicitudes
+asociadas quedan protegidos.
 
 - **Crear**: Registro con validación de esquemas en API (incluyendo perfiles específicos de Estudiante, Tutor y Monitor).
 - **Editar**: Actualización completa de perfiles, capacidades, recursos y datos operativos.
-- **Activar / Desactivar**: Gestión del estado operativo (`Activo` / `Inactivo`) para control de disponibilidad.
-- **Eliminar permanentemente**: Borrado físico definitivo en MariaDB (`DELETE`) ejecutado mediante transacciones con eliminación en cascada de registros dependientes (sesiones, informes, asistencias, horarios y asignaciones) y salvaguarda contra autoeliminación del administrador en sesión.
+- **Validar**: Esquemas de entrada, roles, fechas y transiciones de estado se verifican en el servidor.
+- **Eliminar**: `DELETE` elimina físicamente algunos recursos y dependencias; consulta la guía API antes de usarlo con datos que deban conservarse.
 
 ### Estructura de códigos institucionales autogenerados (Solo lectura)
 En ningún formulario del software es posible escribir o alterar manualmente el código institucional (`readOnly`). La aplicación genera códigos coherentes y aleatorios según el rol o entidad:
