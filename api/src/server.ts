@@ -7,7 +7,7 @@ import { AuthError, currentUserFromToken, login, selectRole } from './auth.js'
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
 import { DataError, createRequest, dashboard, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects } from './data.js'
-import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminPeriod, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminPeriod, deleteAdminRequest, deleteAdminSpace, deleteAdminUser, listAdminPeriods, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminPeriod, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
+import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminPeriod, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminPeriod, deleteAdminRequest, deleteAdminSpace, deleteAdminUser, exportTemporaryCredentials, listAdminPeriods, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminPeriod, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
 
 const app = express()
 app.disable('x-powered-by')
@@ -138,8 +138,12 @@ router.get('/admin/configuration/credentials', requireSession, requireRole('Admi
   try { const query=z.object({role:z.enum(['Administrador','Tutor','Monitor','Estudiante']).optional()}).strict().parse(req.query); res.json(await listCredentials(query.role)) } catch (error) { next(error) }
 })
 
+router.post('/admin/configuration/credentials/export', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { const body=z.object({role:z.enum(['Administrador','Tutor','Monitor','Estudiante'])}).strict().parse(req.body); res.json(await exportTemporaryCredentials(body.role,req.session.user.id)) } catch (error) { next(error) }
+})
+
 router.post('/admin/configuration/credentials/:id/reset', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { res.json(await resetCredential(idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+  try { res.json(await resetCredential(idParamSchema.parse(req.params.id),req.session.user.id)) } catch (error) { next(error) }
 })
 
 router.patch('/admin/configuration/password', requireSession, async (req, res, next) => {

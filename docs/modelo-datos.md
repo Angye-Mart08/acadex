@@ -85,8 +85,10 @@ El login usa correo institucional y contraseña. Las cuentas del SQL local de
 desarrollo pueden tener el documento como clave temporal; en desarrollo el
 servidor migra esas claves a bcrypt y exige cambiarlas en el primer acceso. En
 producción las claves que no sean hashes bcrypt se rechazan. Las claves
-temporales generadas por administración solo se devuelven una vez y no aparecen
-en listados ni CSV.
+temporales generadas por administración se devuelven una sola vez. Los listados
+no incluyen secretos ni hashes. El CSV de entrega incluye únicamente claves
+temporales recién generadas, revoca las anteriores y obliga al cambio en el
+primer acceso; el archivo debe compartirse de forma segura y eliminarse después.
 
 La relación `UsuarioRol` es de muchos a muchos: un usuario puede ser, por
 ejemplo, Monitor y Estudiante al mismo tiempo. El rol activo no se almacena
@@ -99,3 +101,15 @@ después del login. Por eso el contrato utiliza `roles[]` y contempla
 La asignación de una solicitud no agrega columnas a `Solicitud`: se representa mediante una fila en `Sesion` que enlaza `Sesion.id_solicitud` con `Sesion.id_asignacion`. Esta última referencia `AsignacionAcademica`, cuya persona, rol, asignatura y periodo deben estar activos y coincidir con la solicitud. La atención cierra la sesión como `Realizada` y la solicitud como `Atendida`. El flujo no requiere migración SQL.
 
 Regla de captura: por perfil/rol Tutor o Monitor el formulario y la API exigen exactamente una asignatura en la asignación académica. El historial puede conservar filas de periodos previos, pero cada alta o edición de perfil establece una sola asignatura activa para ese rol.
+
+## Refuerzo de integridad en MariaDB (15 de octubre de 2026)
+
+El DDL principal refuerza las reglas de dominio con `CHECK`, manteniendo las claves foráneas, unicidades y `ENUM` existentes. Se fijan los límites de semestre (1–12), horas semanales (1–60), capacidad (1–1000), créditos (1–30 cuando se informan) y duración de horario (1–1440 minutos). También se impide guardar rangos de fechas invertidos y sesiones/reportes/recuperaciones con hora final igual o anterior a la inicial; compromisos cumplidos antes de su fecha prevista y cancelaciones con días de anticipación negativos.
+
+Para instalaciones anteriores, aplicar únicamente después de respaldo y con conteos de prevalidación en cero la migración `database/migrations/001_integridad_datos.sql`. Esta migración no se ejecutó sobre la base local. Las reglas que dependen de varias tablas (como correspondencia solicitud–asignación–periodo–asignatura) las valida la API dentro de transacciones; no se duplican como restricciones de una sola fila.
+
+## Resultado de auditoría local (15 de octubre de 2026)
+
+La auditoría de solo lectura reportó 36 tablas InnoDB, 55 claves foráneas, 26 restricciones `UNIQUE` y cero referencias huérfanas en esas relaciones. Tampoco detectó correos fuera del dominio institucional, perfiles activos sin rol, estudiantes sin programa relacionado ni horarios con fin anterior al inicio.
+
+Quedan hallazgos que requieren revisión: 4 credenciales almacenadas en un formato que no parece bcrypt; 6 perfiles de Estudiante con código distinto al de `Usuario`; una persona con más de una asignatura activa dentro del mismo rol; y una sesión cuyo responsable se relaciona con una asignatura o periodo diferente al de su solicitud. Además, la instalación todavía carece de las nuevas restricciones `CHECK` propuestas (14 adicionales; el horario de `Disponibilidad` y `Sesion` ya contaba con checks anteriores). No se imprimieron valores personales y no se alteró ningún registro. Resolver los hallazgos relevantes y repetir `npm run db:audit` antes de usar información real; ejecutar la migración únicamente si sus propios conteos de prevalidación son cero.

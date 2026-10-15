@@ -156,10 +156,11 @@ consulta. Si el valor permanece, la operación fue persistida; si la API está
 detenida, el frontend debe mostrar un error de conexión y no guardar cambios
 locales.
 
-Los endpoints DELETE de usuarios, espacios y solicitudes realizan eliminación
-física y limpian dependencias relacionadas. Úsalos únicamente con registros de
-demostración: no se conserva el historial eliminado. Los periodos académicos
-solo se pueden borrar cuando no tengan solicitudes, horarios ni asignaciones.
+Los endpoints DELETE se validan contra dependencias y no borran en cascada el
+historial académico. Si el recurso tiene uso, la API devuelve `409` y la acción
+recomendada es desactivar la cuenta/espacio o conservar la solicitud mediante
+su estado. Los periodos solo se eliminan cuando no tienen solicitudes,
+horarios ni asignaciones.
 
 ## Reglas importantes
 
@@ -167,21 +168,25 @@ solo se pueden borrar cuando no tengan solicitudes, horarios ni asignaciones.
 - Las contraseñas se guardan con bcrypt. Las claves temporales se devuelven una sola vez al restablecerlas y se debe exigir su cambio antes de usar otras rutas.
 - Los tokens de acceso se guardan en el cliente. `POST /auth/logout` exige un token y el frontend lo elimina, pero el servidor no revoca el JWT; este continúa válido hasta su expiración.
 - `POST /users` y `PATCH /users/{id}` reciben `roles[]`, con mínimo un rol y sin valores repetidos.
-- No se deben devolver contraseñas, hashes ni documentos de identidad en listados de credenciales ni exportaciones.
+- Los listados nunca devuelven claves actuales, hashes ni documentos. La exportación de credenciales solo incluye claves temporales aleatorias, por una única respuesta, revoca la clave previa y fuerza cambio al entrar; se limita a un rol y excluye al administrador solicitante.
 - El backend debe aplicar autorización por rol, además de validar el JWT.
 - Las solicitudes siguen transiciones permitidas: Pendiente → Aprobada/Rechazada/Cancelada; Aprobada → Asignada/Cancelada; Asignada → Atendida/Cancelada; Atendida → Finalizada/Cancelada. Rechazada, Cancelada y Finalizada son terminales.
 - Los módulos integrados del frontend deben consumir estas rutas y no confirmar cambios usando datos locales.
 
-## Eliminación permanente
+## Eliminación validada
 
-La API cuenta con endpoints de eliminación física real (`DELETE`) protegidos con sesión y rol de Administrador:
+Los endpoints `DELETE` requieren sesión y rol Administrador. Solo borran recursos sin historial ni referencias; la lectura de dependencias y el borrado se realizan en una transacción.
 
-- `DELETE /api/v1/users/:id`: Elimina definitivamente el usuario y sus datos dependientes. Impide la autoeliminación de la cuenta en sesión (HTTP 400) y devuelve `409 USER_HAS_ASSIGNED_SESSIONS` si todavía tiene sesiones asignadas que deben resolverse primero.
-- `DELETE /api/v1/spaces/:id`: Elimina permanentemente el espacio tras limpiar sus dependencias en `HorarioMonitor` y `AsignacionEspacio`.
-- `DELETE /api/v1/requests/:id`: Elimina la solicitud tras limpiar sus sesiones y dependencias operativas en `RecuperacionMonitoria`, `Asistencia`, `HistorialSesion`, `HistorialInforme`, `Informe`, `EntregaActividad`, `Evidencia`, `Compromiso`, `Seguimiento`, `ReporteMonitoria` y `CancelacionMonitoria`.
+- `DELETE /api/v1/users/:id`: no permite autoeliminación, borrar al último administrador ni borrar usuarios con actividad académica/operativa. Desactiva la cuenta para conservar historial.
+- `DELETE /api/v1/spaces/:id`: bloquea horarios, reservas o sesiones asociadas; desactiva el espacio si se encuentra en uso.
+- `DELETE /api/v1/requests/:id`: solo admite solicitudes no asignadas, sin sesiones ni clasificaciones; preserva el historial de solicitudes en curso.
+- `DELETE /api/v1/periods/:id`: bloquea el periodo activo y periodos con asignaciones, horarios o solicitudes (`409 PERIOD_ACTIVE` / `409 PERIOD_IN_USE`).
 
-`DELETE /api/v1/periods/:id` devuelve `409 PERIOD_IN_USE` si el periodo tiene
-asignaciones, horarios o solicitudes asociadas.
+Las claves foráneas siguen protegiendo frente a dependencias no incluidas en la validación previa. El frontend confirma el borrado e indica cuándo usar desactivación en lugar de eliminar.
+
+## Exportación segura de claves temporales
+
+`POST /api/v1/admin/configuration/credentials/export` recibe un rol y genera un CSV en el navegador con claves aleatorias nuevas para cuentas activas de ese rol (máximo 500). La operación invalida las claves previas, marca cambio obligatorio en el siguiente inicio y excluye la cuenta del administrador que la ejecuta. El endpoint solo devuelve el secreto en esa respuesta; no registra valores en logs ni guarda contraseñas en texto claro. Compartir el archivo por un canal institucional seguro y eliminarlo después de la entrega. No se implementó correo automático porque falta una configuración SMTP institucional autorizada.
 
 ## Demostración local
 
@@ -208,3 +213,27 @@ La interfaz filtra `staffAssignments` por asignatura, periodo y rol inferido del
 ## Regla de asignatura por perfil (14 de octubre de 2026)
 
 El formulario de usuario ofrece una selección única de asignatura para Tutor y otra para Monitor. La API valida el límite al crear o editar el perfil; los perfiles deben tener exactamente una asignatura por cada uno de esos roles seleccionados. Si un usuario heredado tiene varias, al editar se precarga la primera como selección inicial y se debe revisar cuál debe quedar activa antes de guardar.
+
+## Mejora 1: validaciones de integridad de entradas (15 de octubre de 2026)
+
+La API es la validación autoritativa y rechaza propiedades desconocidas en los contratos administrativos. La interfaz aporta restricciones HTML equivalentes para prevenir errores antes del envío.
+
+- Usuarios: correo `@unitropico.edu.co`, normalizado a minúsculas; documento de 5–20 dígitos; nombre completo con nombre y apellido; longitudes alineadas con MariaDB. Código de estudiante sincronizado con el código institucional y correo de perfil Administrador sincronizado con el correo de cuenta.
+- Perfiles: semestre 1–12; horas semanales enteras y dentro del límite; una asignatura por perfil Tutor/Monitor; límites de tamaño acordes con las columnas.
+- Espacios: código alfanumérico/guiones, tipo permitido, nombre y capacidad entera de 1–1000; texto opcional recortado y limitado a la columna correspondiente. Se aceptan códigos legados al editar.
+- Solicitudes: motivo y descripción no vacíos y con longitudes acotadas. Una sesión asignada debe tener fecha válida, no pasada, horas válidas y caer dentro del periodo de la solicitud.
+- Periodos: fecha válida y final posterior al inicio; solo un periodo activo, además de controles de uso antes de eliminar.
+
+Verificación de esta mejora: `npm run build` (web) y `npm run typecheck` (api) exitosos. La validación de constraints físicos, datos preexistentes y persistencia se realiza en los pasos de base de datos/auditoría; no se ejecutaron escrituras contra MariaDB en este cambio.
+
+## Auditoría de MariaDB (15 de octubre de 2026)
+
+Ejecuta `npm run db:audit` desde `api/`. La consulta es estrictamente de solo lectura, informa conteos/metadatos y nunca imprime valores de credenciales ni atributos personales. No corrige hallazgos ni ejecuta migraciones.
+
+En la auditoría local se observaron 36 tablas InnoDB, 55 claves foráneas, 26 restricciones `UNIQUE` y ninguna referencia huérfana. Hallazgos: 4 credenciales que no parecen bcrypt; 6 códigos de estudiante distintos del código institucional; una persona con más de una asignatura activa para un rol; y una sesión con asignatura o periodo distinto al de su solicitud. Las restricciones `CHECK` añadidas en la mejora 2 aún no estaban instaladas. Revisar y remediar los datos antes de usar información real; ejecutar la migración solo si sus conteos de prevalidación son cero.
+
+## Registro de espacios (15 de octubre de 2026)
+
+El alta administrativa valida tipo, código, nombre, capacidad y longitudes contra el esquema MariaDB. Los espacios físicos deben indicar edificio, bloque, salón o referencia; las ubicaciones virtuales se admiten sin dirección física. Se limita la ubicación calculada a 200 caracteres antes del envío. El `INSERT` y la lectura de confirmación se ejecutan en una transacción: un error de lectura revierte el alta y no deja un registro persistido con respuesta fallida. Los duplicados se devuelven como `409 DUPLICATE_SPACE`.
+
+Verificación: prueba de rechazo de una ubicación presencial vacía; prueba integrada en MariaDB creó un registro temporal, lo recuperó por el ID insertado y eliminó ese registro de prueba. No quedan registros temporales.

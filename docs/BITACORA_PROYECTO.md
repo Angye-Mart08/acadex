@@ -564,3 +564,80 @@ Esta actualización deja el código y la documentación preparados para la revis
 - La acción de cierre de sesión permanece visible en móvil y se compacta a un botón de icono accesible en pantallas de hasta 380 px.
 - Se aplica una presentación común a los formularios con validación nativa: controles compactos, rejilla adaptable y asterisco/leyenda de obligatoriedad.
 - Verificación de esta actualización: `npm run build` en `web`, `npm run typecheck` en `api`, `npm run validate` del contrato OpenAPI y `git diff --check` finalizaron correctamente. No se ejecutó una comprobación visual manual en varios tamaños de pantalla ni se escribieron datos en MariaDB.
+
+## Mejora 1 de 10 (15 de octubre de 2026): validaciones de formularios y API
+
+- Se alinearon las validaciones del navegador y los esquemas de API para los datos de usuario, perfiles, solicitudes, espacios, periodos y programación de sesiones.
+- Las cuentas nuevas y el inicio de sesión validan correo institucional `@unitropico.edu.co`; se normaliza a minúsculas. Documento de identidad: entre 5 y 20 dígitos; nombre: al menos nombre y apellido; los campos de perfil se limitan a los máximos del esquema.
+- En perfiles de estudiante se limita el semestre a 1–12 y se exige que el código estudiantil coincida con el código de usuario. Si también es Administrador, el correo del perfil debe coincidir con el de la cuenta.
+- Los espacios validan capacidad entera, formato permitido del código, longitudes y tipos admitidos. Las solicitudes validan longitudes y contenido no vacío; una sesión asignada debe caer dentro del periodo académico asociado y no puede tener fecha pasada.
+- Los esquemas anidados del CRUD administrativo ahora rechazan campos desconocidos y datos fuera de sus límites.
+- Verificación de la mejora 1: compilación de producción del frontend (`npm run build`) y revisión de tipos de API (`npm run typecheck`) correctas. La validación con registros reales de MariaDB se deja para la mejora 2 y auditoría de la base; no se escribieron datos durante esta mejora.
+
+## Mejora 2 de 10 (15 de octubre de 2026): restricciones de integridad en MariaDB
+
+- Se reforzó el DDL principal con límites para semestres, créditos, horas semanales, capacidad y duración, además de coherencia de fechas y horarios en asignaciones, espacios, sesiones, reportes, recuperaciones y compromisos.
+- Se agregó `database/migrations/001_integridad_datos.sql` para instalaciones que ya existen. Incluye consultas previas de solo lectura y ALTER explícitos; requiere respaldo, conteos en cero y aplicación manual una sola vez. No recrea la base ni borra o transforma datos.
+- Las reglas que dependen de más de una tabla (por ejemplo, que una sesión corresponda a la misma asignatura y periodo que la solicitud) continúan protegidas por validación transaccional en la API.
+- Documentación de aplicación y límites en `database/README.md` y `docs/modelo-datos.md`.
+- Verificación: inspección de consistencia de reglas/DDL y `git diff --check`; no se ejecutó la migración ni se modificó la base local. La comprobación de datos existentes queda para la mejora 3 (auditoría), antes de recomendar su aplicación.
+
+## Mejora 3 de 10 (15 de octubre de 2026): auditoría de base de datos
+
+- Se creó `api/scripts/audit-db-integrity.mjs` y el comando `npm run db:audit`. La auditoría corre con transacción de solo lectura y no muestra PII ni contraseñas/hashes.
+- Resultado medido en MariaDB 12.3.3: 36 tablas (todas InnoDB), 55 claves foráneas, 26 restricciones `UNIQUE`, cero referencias huérfanas y seis restricciones `CHECK` instaladas.
+- Hallazgos: cuatro credenciales no reconocidas como bcrypt; seis diferencias entre el código del perfil Estudiante y el código de Usuario; una persona con más de una asignatura activa para un rol; una sesión cuya asignatura o periodo difiere de la solicitud relacionada. La auditoría no detectó perfiles activos sin rol, correo no institucional, programa estudiantil ausente ni rangos horarios invertidos.
+- La instalación no contiene 14 nuevas restricciones `CHECK`; se conservan dos validaciones horarias preexistentes. Remediar inconsistencias antes de usar datos reales; aplicar la migración solo si sus conteos de prevalidación son cero.
+- No se corrigieron datos automáticamente: los cambios a credenciales y relaciones operativas requieren un proceso de remediación revisado. Resultados agregados documentados en `database/README.md`, `api/README_API.md` y `docs/modelo-datos.md`.
+
+## Mejora 4 de 10 (15 de octubre de 2026): registro de espacios
+
+- El formulario ya no inventa `Campus Principal` como ubicación para un espacio físico sin ubicación. Exige al menos edificio, bloque, salón o referencia; los espacios Virtuales pueden omitirse. La vista previa ahora incorpora la referencia y el frontend impide superar los 200 caracteres de `Espacio.ubicacion`.
+- La API valida rangos, tipo, formato y longitudes de cada campo. La creación inserta y recupera por ID dentro de una única transacción, evitando informar error después de haber dejado el registro guardado. Conserva el mensaje específico para código duplicado.
+- Verificación: typecheck y compilación de producción correctos; el API rechazó ubicación física vacía; prueba integrada con MariaDB creó y leyó un espacio temporal, y luego eliminó ese mismo registro. No quedan datos de prueba.
+- Documentación actualizada en `api/README_API.md` y `database/README.md`.
+
+## Mejora 5 de 10 (15 de octubre de 2026): validación de borrados CRUD
+
+- Los borrados de usuario ya no purgan sesiones, solicitudes, informes ni seguimiento. Se permiten únicamente sin historial/dependencias; bloquean autoeliminación, el último Administrador activo y las relaciones académicas, con mensajes que indican desactivar la cuenta para preservar datos.
+- El espacio se elimina solo si no tiene horarios, reservas ni sesiones. Una solicitud solo si no está asignada/atendida/finalizada y no tiene sesiones ni clasificaciones. Un periodo no se elimina si está Activo o tiene asignaciones, horarios o solicitudes.
+- Se bloquearon condiciones bajo transacción (`SELECT ... FOR UPDATE`) y se conserva la protección de las claves foráneas como defensa final. El frontend confirma cada operación con reglas explícitas y presenta los errores de API.
+- OpenAPI actualizado para los estados HTTP `400/409` y el nuevo alcance de las operaciones.
+- Verificación integrada en MariaDB: el borrado de un usuario con historial, un espacio en uso, una solicitud con sesión y un periodo en uso devolvió `409` en los cuatro casos, sin borrar registros. Typecheck API, build web y contrato OpenAPI correctos.
+- Se corrigió la guía de eliminación que antes describía borrado en cascada; la bitácora histórica se conserva y esta entrada documenta el cambio de política.
+
+## Mejora 6 de 10 (15 de octubre de 2026): log de navegación en tiempo real
+
+- Se agregó `web/src/navigation-log.ts` y su integración en el componente principal. Cada cambio efectivo de vista, una vez autenticado y con rol seleccionado, emite una traza con timestamp ISO, rol y clave de vista.
+- En modo desarrollo la traza aparece en consola como `[Acadex navigation]` y dispara el evento de navegador `acadex:navigation` para que herramientas locales puedan suscribirse en tiempo real.
+- Por privacidad, el evento no contiene nombre, correo, ID de usuario, tokens, query strings ni contenido de formularios; no se guarda en base de datos ni se envía a servicios externos. No corre en build de producción.
+- La verificación de compilación del frontend se ejecutará junto con la validación general de esta secuencia.
+
+## Mejora 7 de 10 (15 de octubre de 2026): proporción y tamaño de modales
+
+- Los modales usan un ancho compacto (500 px) o ancho de formulario (740 px), centrado y limitado al 88–90 % de la altura disponible. En móvil ocupan el ancho útil y respetan el alto del viewport dinámico.
+- El encabezado queda fijo/visible, el contenido del formulario tiene scroll propio y las acciones sticky permanecen accesibles; se evita que formularios extensos se conviertan en un bloque vertical que salga de pantalla.
+- Se reforzó la semántica accesible del diálogo con `role=dialog`, `aria-modal`, título y descripción asociados.
+- Verificación de compilación de producción del frontend correcta. Falta inspección visual manual en dispositivo/emulador pequeño; el navegador nativo no se usó en esta revisión.
+
+## Mejora 8 de 10 (15 de octubre de 2026): organización de configuración y perfil Estudiante
+
+- Configuración se agrupó por propósito en **Operación académica** (estado de MariaDB y periodos) y **Seguridad** (credenciales/cambio de contraseña), con jerarquía visual y encabezados descriptivos.
+- Se eliminó del formulario Estudiante el campo visible de código estudiantil, duplicado del código institucional general. Al guardar, la API sigue recibiendo el mismo código sincronizado del usuario para preservar compatibilidad del modelo, pero el usuario ya no lo digita ni lo ve repetido.
+- Los controles de semestre y programa quedan juntos en la misma ficha de rol. El panel de parámetros se conserva por ahora; su eliminación corresponde al punto 10.
+- Verificación: `npm run build` del frontend (TypeScript y Vite) correcto. No se alteró la estructura de la base para retirar el control redundante.
+
+## Mejora 9 de 10 (15 de octubre de 2026): entrega segura de credenciales
+
+- Se añadió `POST /admin/configuration/credentials/export`, limitado a un rol y 500 cuentas activas por operación. La administración confirma el alcance antes de proceder.
+- Se generan claves aleatorias nuevas por cuenta dentro de una transacción; la contraseña anterior queda invalidada, se guarda solo el hash bcrypt y el primer acceso exige cambiarla. El administrador solicitante queda excluido; se mantiene separado el listado CSV sin secretos.
+- El CSV de entrega solo recibe esos temporales una vez; incluye datos necesarios para identificar la cuenta, se protege contra fórmulas CSV y no se escriben claves en consola/logs. La UI advierte compartir por canal seguro y eliminar el archivo después.
+- El restablecimiento individual también se acota a cuentas activas, bloquea el autorrestablecimiento desde el módulo de credenciales y valida que exista credencial.
+- No se configuró envío de correo: el proyecto no tiene SMTP institucional autorizado. El equipo debe solicitar host/puerto/cuenta/gestión de secretos antes de habilitar correo automático.
+- Verificación de tipo/API/OpenAPI/frontend registrada al cierre; no se rotaron credenciales reales en MariaDB para probar exportación masiva, pues eso invalidaría contraseñas de cuentas activas. La ruta está versionada y validada por contrato.
+
+## Mejora 10 de 10 (15 de octubre de 2026): retiro de parámetros institucionales de la interfaz
+
+- Se retiró de Configuración del administrador el panel «Parámetros institucionales» y la carga/guardado de esos valores desde la vista React. La pantalla queda enfocada en operación académica, credenciales y cambio de contraseña.
+- Se conservaron deliberadamente la tabla `Configuracion`, los endpoints de configuración y sus datos en MariaDB. Esta mejora es de alcance visual/funcional de la interfaz: no incluye migraciones ni borrados de datos ni de contrato.
+- Verificación: pendiente de validación general de build, typecheck, contrato y revisión de diff al cierre de la secuencia.

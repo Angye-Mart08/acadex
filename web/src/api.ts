@@ -109,6 +109,7 @@ export type AdminReport = {
 }
 
 export type CredentialAccount = { id: number; code: string; email: string; name: string; status: string; roles: Role[] }
+export type TemporaryCredentialExport = { generatedAt: string; role: Role; accounts: Array<Pick<CredentialAccount, 'id' | 'code' | 'email' | 'name' | 'roles'> & { temporaryPassword: string }> }
 export type AppSetting = { id: number; clave: string; valor: string; tipo: string; descripcion?: string; updatedAt?: string }
 
 export type Paginated<T> = {
@@ -280,6 +281,10 @@ export function listCredentials(accessToken: string, role = '') {
 
 export function resetCredential(accessToken: string, id: number) {
   return request<{ id: number; temporaryPassword: string }>(`/admin/configuration/credentials/${id}/reset`, authenticatedOptions(accessToken, { method: 'POST' }))
+}
+
+export function exportTemporaryCredentials(accessToken: string, role: Role) {
+  return request<TemporaryCredentialExport>('/admin/configuration/credentials/export', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify({ role }) }))
 }
 
 export function changePassword(accessToken: string, input: { currentPassword: string; newPassword: string; confirmPassword: string }) {

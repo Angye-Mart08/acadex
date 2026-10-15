@@ -212,7 +212,7 @@ CREATE TABLE Estudiante(
 
     codigo_estudiantil VARCHAR(30) NOT NULL UNIQUE,
 
-    semestre TINYINT NOT NULL CHECK (semestre >= 1),
+    semestre TINYINT NOT NULL CONSTRAINT chk_estudiante_semestre CHECK (semestre BETWEEN 1 AND 12),
 
     estado ENUM(
         'Activo',
@@ -256,6 +256,8 @@ CREATE TABLE Tutor(
         'Inactivo'
     ) NOT NULL DEFAULT 'Activo',
 
+    CONSTRAINT chk_tutor_horas CHECK (horas_semanales IS NULL OR horas_semanales BETWEEN 1 AND 60),
+
     CONSTRAINT fk_tutor_usuario
 
         FOREIGN KEY(id_usuario)
@@ -292,6 +294,8 @@ CREATE TABLE Monitor(
         'Activo',
         'Inactivo'
     ) NOT NULL DEFAULT 'Activo',
+
+    CONSTRAINT chk_monitor_horas CHECK (horas_semanales IS NULL OR horas_semanales BETWEEN 1 AND 60),
 
     CONSTRAINT fk_monitor_usuario
 
@@ -386,7 +390,9 @@ CREATE TABLE Asignatura(
         'Activo',
         'Inactivo'
 
-    ) NOT NULL DEFAULT 'Activo'
+    ) NOT NULL DEFAULT 'Activo',
+
+    CONSTRAINT chk_asignatura_creditos CHECK (creditos IS NULL OR creditos BETWEEN 1 AND 30)
 
 ) ENGINE=InnoDB;
 
@@ -410,6 +416,8 @@ CREATE TABLE ProgramaAsignatura(
         'Inactivo'
 
     ) NOT NULL DEFAULT 'Activo',
+
+    CONSTRAINT chk_programa_asignatura_semestre CHECK (semestre IS NULL OR semestre BETWEEN 1 AND 12),
 
     CONSTRAINT uq_programa_asignatura
 
@@ -486,6 +494,8 @@ CREATE TABLE HorarioMonitor(
     ) NOT NULL DEFAULT 'Activo',
 
     fecha_actualizacion TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT chk_horario_monitor_tiempo CHECK (hora_fin > hora_inicio AND duracion_minutos BETWEEN 1 AND 1440),
 
     CONSTRAINT fk_horario_monitor_usuario
         FOREIGN KEY(id_usuario)
@@ -589,7 +599,7 @@ CREATE TABLE AsignacionAcademica(
 
     id_periodo INT NOT NULL,
 
-    horas_semanales TINYINT NOT NULL CHECK (horas_semanales > 0),
+    horas_semanales TINYINT NOT NULL CONSTRAINT chk_asignacion_horas CHECK (horas_semanales BETWEEN 1 AND 60),
 
     fecha_inicio DATE NOT NULL,
 
@@ -641,7 +651,9 @@ CREATE TABLE AsignacionAcademica(
 
         ON UPDATE CASCADE
 
-        ON DELETE RESTRICT
+        ON DELETE RESTRICT,
+
+    CONSTRAINT chk_asignacion_fechas CHECK (fecha_fin IS NULL OR fecha_fin >= fecha_inicio)
 
 ) ENGINE=InnoDB;
 
@@ -677,7 +689,7 @@ CREATE TABLE Espacio(
 
     observaciones VARCHAR(300),
 
-    capacidad INT NOT NULL CHECK (capacidad > 0),
+    capacidad INT NOT NULL CONSTRAINT chk_espacio_capacidad CHECK (capacidad BETWEEN 1 AND 1000),
 
     tipo ENUM(
 
@@ -737,9 +749,9 @@ CREATE TABLE Disponibilidad(
 
     ) NOT NULL,
 
-    hora_inicio TIME NOT NULL check(hora_inicio < hora_fin),
+    hora_inicio TIME NOT NULL,
 
-    hora_fin TIME NOT NULL check(hora_fin > hora_inicio),
+    hora_fin TIME NOT NULL,
     
     modalidad ENUM(
 
@@ -754,6 +766,8 @@ CREATE TABLE Disponibilidad(
         'Inactivo'
 
     ) NOT NULL DEFAULT 'Activo',
+
+    CONSTRAINT chk_disponibilidad_horario CHECK (hora_fin > hora_inicio),
 
     CONSTRAINT fk_disponibilidad_asignacion
 
@@ -799,6 +813,8 @@ CREATE TABLE AsignacionEspacio(
         ON UPDATE CASCADE
 
         ON DELETE RESTRICT,
+
+    CONSTRAINT chk_asignacion_espacio_fechas CHECK (fecha_fin IS NULL OR fecha_fin >= fecha_inicio),
 
     CONSTRAINT fk_asignacion_espacio
 
@@ -945,9 +961,9 @@ CREATE TABLE Sesion(
 
     fecha DATE NOT NULL,
 
-     hora_inicio TIME NOT NULL check(hora_inicio < hora_fin),
+     hora_inicio TIME NOT NULL,
 
-     hora_fin TIME NOT NULL check(hora_fin > hora_inicio),
+     hora_fin TIME NOT NULL,
 
     modalidad ENUM(
 
@@ -981,6 +997,8 @@ CREATE TABLE Sesion(
         'Cancelada'
 
     ) NOT NULL DEFAULT 'Programada',
+
+    CONSTRAINT chk_sesion_horario CHECK (hora_fin > hora_inicio),
 
     CONSTRAINT fk_sesion_solicitud
 
@@ -1036,6 +1054,8 @@ CREATE TABLE CancelacionMonitoria(
         'Activo',
         'Anulada'
     ) NOT NULL DEFAULT 'Activo',
+
+    CONSTRAINT chk_cancelacion_dias CHECK (dias_anticipacion >= 0),
 
     CONSTRAINT fk_cancelacion_sesion
         FOREIGN KEY(id_sesion)
@@ -1093,6 +1113,8 @@ CREATE TABLE ReporteMonitoria(
             id_usuario
         ),
 
+    CONSTRAINT chk_reporte_monitoria_horario CHECK (hora_fin_real > hora_inicio_real),
+
     CONSTRAINT fk_reporte_monitoria_sesion
         FOREIGN KEY(id_sesion)
         REFERENCES Sesion(id_sesion)
@@ -1138,6 +1160,8 @@ CREATE TABLE RecuperacionMonitoria(
         'Realizada',
         'Cancelada'
     ) NOT NULL DEFAULT 'Programada',
+
+    CONSTRAINT chk_recuperacion_horario CHECK (hora_fin > hora_inicio),
 
     CONSTRAINT fk_recuperacion_sesion
         FOREIGN KEY(id_sesion_original)
@@ -1396,6 +1420,8 @@ CREATE TABLE Compromiso(
         'Incumplido'
 
     ) NOT NULL DEFAULT 'Pendiente',
+
+    CONSTRAINT chk_compromiso_fechas CHECK (fecha_cumplimiento IS NULL OR fecha_cumplimiento >= fecha_compromiso),
 
     CONSTRAINT fk_compromiso_seguimiento
 

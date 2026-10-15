@@ -150,24 +150,43 @@ de `.env`, el estado de MariaDB y el origen del navegador frente a
 error de renderizado, consulta también la consola del navegador y los logs de
 la API antes de modificar o reinstalar la base.
 
-## Integridad Referencial y Eliminación en Cascada (Hard Delete)
+## Integridad referencial y reglas de eliminación
 
-Para garantizar la consistencia relacional y evitar violaciones de clave foránea (`foreign key constraints`) durante las eliminaciones definitivas ejecutadas por el Administrador:
+Los endpoints de borrado no eliminan en cascada el historial académico. Un usuario con actividad asociada recibe `409`; se debe desactivar la cuenta para conservar sus datos. Tampoco se permite autoeliminarse ni eliminar al último administrador activo.
 
-1. **Orden de eliminación en cascada para Usuarios**:
-   - Tablas de nivel operativo: `EntregaActividad`, `Seguimiento`.
-   - Flujo de solicitudes y sesiones: `Solicitud`, `HistorialSesion`, `Informe`, `SesionAcompanamiento`.
-   - Perfiles y asignaciones académicas: `EstudiantePrograma`, `Estudiante`, `Disponibilidad`, `AsignacionAcademica`, `HorarioMonitor`, `Tutor`, `Monitor`, `Administrador`.
-   - Seguridad y cuenta base: `Credencial`, `UsuarioRol` y finalmente `Usuario`.
-
-2. **Orden de eliminación en cascada para Espacios**:
-   - Desvinculación de horarios y reservas en `HorarioMonitor` y `AsignacionEspacio`.
-   - Eliminación del registro físico en `Espacio`.
-
-3. **Orden de eliminación para Solicitudes**:
-   - Desvinculación y limpieza de `HistorialSesion`, `Informe` y `SesionAcompanamiento`.
-   - Eliminación de la fila en `Solicitud`.
+Un espacio con horarios, reservas o sesiones y una solicitud asignada, en atención o con sesiones/clasificaciones tampoco se borran: se desactiva el espacio o se conserva/cambia el estado de la solicitud. El periodo activo y los periodos con asignaciones, horarios o solicitudes siguen protegidos. Las comprobaciones y el borrado permitido se ejecutan dentro de transacciones; las claves foráneas siguen siendo la última barrera frente a dependencias no contempladas.
 
 ## Integración reciente de solicitudes y espacios
 
 La asignación de una solicitud utiliza las columnas existentes `Sesion.id_solicitud` e `Sesion.id_asignacion`; la aplicación no necesita volver a crear ni modificar el esquema para habilitarla. El personal asignable debe tener una asignación activa para la materia y periodo de la solicitud. El alta de espacios conserva el esquema actual de `Espacio` y confirma la fila mediante su ID recién generado.
+
+El alta administrativa de espacios valida campos y requiere una referencia física para espacios presenciales. La persistencia y lectura de confirmación son atómicas. La prueba de integración del 15 de octubre creó y eliminó su propio espacio temporal; no dejó filas temporales.
+
+## Mejora 2: restricciones de integridad en MariaDB
+
+El esquema nuevo en `gestion_monitorias_tutorias.sql` aplica restricciones `CHECK` para rangos y coherencia temporal, además de las claves foráneas, unicidad y dominios `ENUM` ya existentes. Entre ellas: semestre 1–12; horas de asignación 1–60; capacidad de espacio 1–1000; créditos 1–30 cuando se informen; horarios de inicio/fin; duración válida y fechas finales no anteriores a las iniciales. La migración histórica agrega 14 reglas nuevas; conserva las validaciones de horario de `Disponibilidad` y `Sesion` que ya existían en las instalaciones anteriores.
+
+### Base ya instalada
+
+La instalación automática inicial no vuelve a ejecutar el DDL sobre una base existente. Por ello, la mejora incluye `database/migrations/001_integridad_datos.sql`, separada del instalador y sin operaciones de borrado o recreación. Antes de aplicarla:
+
+1. Hacer un respaldo de la base.
+2. Ejecutar la sección **PREVALIDACIÓN** del archivo en HeidiSQL. Cada conteo debe ser cero; si no, corregir los registros señalados antes de continuar.
+3. Ejecutar la sección **APLICACIÓN** una sola vez. No ejecutar el archivo completo por segunda vez porque MariaDB no admite volver a crear los mismos nombres de constraint.
+4. Ejecutar la consulta final del archivo y confirmar que aparezcan las restricciones añadidas.
+
+No se ejecutó esta migración automáticamente ni se alteró la base local durante el desarrollo. Las reglas intertablas (por ejemplo, que una asignación de una sesión corresponda a la misma materia y periodo que su solicitud) siguen verificándose transaccionalmente en la API; no pueden expresarse como un `CHECK` simple de una fila.
+
+La prevalidación es de solo lectura. La aplicación efectiva requiere revisar los conteos, disponer de respaldo y ejecutar la migración conscientemente.
+
+## Auditoría de integridad de la instalación
+
+Desde `api/`, con el servicio MariaDB activo y `.env` configurado, ejecutar:
+
+```powershell
+npm run db:audit
+```
+
+El script fuerza una transacción de solo lectura, no imprime datos personales ni hashes, comprueba metadatos, las relaciones foráneas, las credenciales, perfiles/roles, asignaciones, solicitudes/sesiones, rangos y restricciones `CHECK`. Un resultado `REVISAR` o `PENDIENTE` es evidencia para analizar; el script no corrige registros ni instala restricciones automáticamente.
+
+Auditoría local del 15 de octubre de 2026: 36/36 tablas InnoDB, 55 claves foráneas, 26 restricciones `UNIQUE`, cero referencias huérfanas; se encontraron 4 credenciales que no parecen bcrypt, 6 diferencias entre códigos de estudiante y usuario, 1 usuario con más de una asignatura activa en un rol y 1 sesión con materia o periodo distinto al de su solicitud. No se encontraron correos no institucionales, perfiles activos sin rol, solicitudes sin programa del estudiante ni horarios invertidos. Faltaban las nuevas restricciones `CHECK` de la mejora 2. No se modificaron datos. Remediar los registros antes de usar la base con cuentas reales; para aplicar la migración, comprobar por separado que todos sus conteos de prevalidación sean cero.
