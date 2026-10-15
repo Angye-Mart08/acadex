@@ -167,3 +167,7 @@ Para garantizar la consistencia relacional y evitar violaciones de clave foráne
 3. **Orden de eliminación para Solicitudes**:
    - Desvinculación y limpieza de `HistorialSesion`, `Informe` y `SesionAcompanamiento`.
    - Eliminación de la fila en `Solicitud`.
+
+## Integración reciente de solicitudes y espacios
+
+La asignación de una solicitud utiliza las columnas existentes `Sesion.id_solicitud` e `Sesion.id_asignacion`; la aplicación no necesita volver a crear ni modificar el esquema para habilitarla. El personal asignable debe tener una asignación activa para la materia y periodo de la solicitud. El alta de espacios conserva el esquema actual de `Espacio` y confirma la fila mediante su ID recién generado.

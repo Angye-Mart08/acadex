@@ -82,3 +82,13 @@ administrador elimine su propia cuenta. Los periodos se eliminan solo cuando
 no tienen registros relacionados.
 
 Asimismo, se establece que ningún código institucional (usuarios, espacios o radicados) puede ser digitado manualmente en los formularios. Estos se generan de forma determinística en su prefijo pero aleatoria en sus dígitos numéricos (`ADM###`, `TUT###`, `MON###`, `EST###`, `AUL-###`, `LAB-###`, etc.), manteniendo el atributo `readOnly` y ofreciendo un botón de regeneración aleatoria en la interfaz.
+
+## 11. Asignación de solicitudes y consistencia de atención (14 de octubre de 2026)
+
+Se reutiliza la relación existente `Sesion` ↔ `Solicitud` ↔ `AsignacionAcademica` en lugar de agregar una referencia de responsable directamente a `Solicitud`. Así, una asignación administrativa crea en la misma transacción la sesión inicial y cambia el estado a `Asignada`; solo se ofrecen tutores/monitores con rol, asignatura y periodo activos coincidentes. Esta decisión evita datos de asignación incompletos y no requiere migración de la base.
+
+Los formularios comparten tamaños, espaciado, ayudas de validación y acciones accesibles en modales largos, conservando el sistema de marca existente y sus reglas responsivas.
+
+## 12. Una asignatura por rol de Tutor o Monitor (14 de octubre de 2026)
+
+El alta y la edición de perfil deben elegir una única asignatura para Tutor y una única asignatura para Monitor. Se usa un selector simple en lugar del multiselector anterior y la API aplica validación estricta de un elemento para que la regla no dependa solo del navegador. Si un usuario mantiene ambos roles, puede tener una asignatura propia para cada rol.

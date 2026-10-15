@@ -302,8 +302,8 @@ export async function listRequests({ session, search = '', status = '', page = 1
   if (session.activeRole === 'Estudiante') {
     where.push('e.id_usuario = ?'); params.push(session.user.id)
   } else if (session.activeRole === 'Tutor' || session.activeRole === 'Monitor') {
-    where.push(`EXISTS (SELECT 1 FROM Sesion sx INNER JOIN AsignacionAcademica ax ON ax.id_asignacion = sx.id_asignacion WHERE sx.id_solicitud = s.id_solicitud AND ax.id_usuario = ?)`)
-    params.push(session.user.id)
+    where.push(`EXISTS (SELECT 1 FROM Sesion sx INNER JOIN AsignacionAcademica ax ON ax.id_asignacion = sx.id_asignacion INNER JOIN Rol rx ON rx.id_rol = ax.id_rol WHERE sx.id_solicitud = s.id_solicitud AND ax.id_usuario = ? AND rx.nombre = ?)`)
+    params.push(session.user.id, session.activeRole)
   }
   const [countRows] = await pool.query(
     `SELECT COUNT(*) AS total FROM Solicitud s INNER JOIN Estudiante e ON e.id_estudiante = s.id_estudiante INNER JOIN Usuario u ON u.id_usuario = e.id_usuario INNER JOIN Asignatura a ON a.id_asignatura = s.id_asignatura WHERE ${where.join(' AND ')}`,

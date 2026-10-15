@@ -55,6 +55,7 @@ export type ApiRequest = {
   motive?: string
   description?: string
   period?: string
+  periodId?: number
 }
 
 export type PortalSession = {
@@ -85,7 +86,10 @@ export type AdminCatalogs = {
   periods: Array<{ id: number; nombre: string; estado: string }>
   students: Array<{ id: number; name: string; studentCode: string; programId?: number; programName?: string }>
   requestTypes: Array<{ id: number; nombre: string }>
+  staffAssignments: Array<{ userId: number; name: string; role: 'Tutor' | 'Monitor'; subjectId: number; periodId: number; weeklyHours: number }>
 }
+
+export type RequestAssignmentInput = { userId: number; role: 'Tutor' | 'Monitor'; date: string; startTime: string; endTime: string; modality: 'Presencial' | 'Virtual' }
 
 export type AdminDashboard = {
   generatedAt: string
@@ -244,6 +248,14 @@ export function listRequests(accessToken: string) {
 
 export function updateRequest(accessToken: string, id: number, status: ApiRequest['status']) {
   return request<ApiRequest>(`/requests/${id}`, authenticatedOptions(accessToken, { method: 'PATCH', body: JSON.stringify({ status }) }))
+}
+
+export function assignRequest(accessToken: string, id: number, assignment: RequestAssignmentInput) {
+  return request<ApiRequest>(`/requests/${id}/assign`, authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(assignment) }))
+}
+
+export function markAssignedRequestAttended(accessToken: string, id: number) {
+  return request<ApiRequest>(`/requests/${id}/attendance`, authenticatedOptions(accessToken, { method: 'PATCH', body: JSON.stringify({ status: 'Atendida' }) }))
 }
 
 export function deleteRequest(accessToken: string, id: number) {

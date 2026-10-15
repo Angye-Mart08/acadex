@@ -187,7 +187,7 @@ paths:
       security:
         - bearerAuth: []
       responses:
-        '200': { description: 'Programas, asignaturas, periodos, estudiantes y tipos de solicitud.', content: { application/json: { schema: { type: object } } } }
+        '200': { description: 'Programas, asignaturas, periodos, estudiantes, tipos de solicitud y personal activo por asignatura/periodo.', content: { application/json: { schema: { type: object } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -760,6 +760,61 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /requests/{id}/assign:
+    post:
+      tags: [Solicitudes]
+      summary: Asignar tutor o monitor y programar la primera sesión
+      operationId: assignRequest
+      description: Solo admite personal con asignación académica activa para la misma asignatura y periodo de la solicitud.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequestAssignmentInput' }
+      responses:
+        '200':
+          description: Solicitud asignada y sesión inicial creada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Request' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /requests/{id}/attendance:
+    patch:
+      tags: [Solicitudes]
+      summary: Marcar atendida la solicitud asignada al tutor o monitor activo
+      operationId: markAssignedRequestAttended
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, const: Atendida }
+      responses:
+        '200':
+          description: Solicitud y sesión actualizadas como atendidas/realizadas.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Request' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1010,7 +1065,7 @@ components:
           minItems: 1
           uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
-        profiles: { type: object, description: Perfiles académicos requeridos por los roles seleccionados. }
+        profiles: { type: object, description: Perfiles académicos requeridos por los roles seleccionados. Tutor y Monitor deben declarar exactamente una asignatura en sus asignaciones. }
     UserUpdate:
       type: object
       additionalProperties: false
@@ -1026,7 +1081,7 @@ components:
           uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
         status: { $ref: '#/components/schemas/Status' }
-        profiles: { type: object, description: Perfiles académicos que se deben actualizar. }
+        profiles: { type: object, description: Perfiles académicos que se deben actualizar. Tutor y Monitor deben declarar exactamente una asignatura en sus asignaciones. }
     Space:
       type: object
       required: [id, code, name, type, location, capacity, status]
@@ -1107,6 +1162,17 @@ components:
         priority: { $ref: '#/components/schemas/Priority' }
         motive: { type: string, minLength: 3, maxLength: 500 }
         description: { type: string, minLength: 3, maxLength: 500 }
+    RequestAssignmentInput:
+      type: object
+      additionalProperties: false
+      required: [userId, role, date, startTime, endTime, modality]
+      properties:
+        userId: { type: integer, minimum: 1 }
+        role: { type: string, enum: [Tutor, Monitor] }
+        date: { type: string, format: date }
+        startTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        endTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        modality: { $ref: '#/components/schemas/Modality' }
     RequestUpdate:
       type: object
       additionalProperties: false

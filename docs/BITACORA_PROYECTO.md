@@ -538,3 +538,29 @@ Se alineó el backend y la documentación con los requisitos de entrega del MVP:
 - El validador del contrato comprueba la sintaxis YAML y compara métodos/rutas declarados con los registrados en el router.
 
 Esta actualización deja el código y la documentación preparados para la revisión del MVP. La demostración funcional en vivo y las dos cápsulas técnicas de los grupos 1 y 4 todavía deben prepararse y realizarse el jueves 15 de octubre.
+
+## Actualización del 14 de octubre de 2026: formularios, espacios y solicitudes asignadas
+
+- Se refinó la presentación de formularios modales: espaciado más claro, controles de lectura cómodos, indicaciones visibles, acciones accesibles al desplazarse y adaptación a pantallas estrechas. Se mantienen los estilos comunes para evitar diferencias visuales entre módulos.
+- El alta de espacios ahora recupera el registro directamente por la clave primaria generada después del `INSERT`, sin depender del listado para confirmar la respuesta. Se añadieron respuestas de validación entendibles para duplicados y formatos rechazados por MariaDB.
+- El administrador puede asignar una solicitud Pendiente o Aprobada a un Tutor o Monitor activo que tenga la misma asignatura y periodo. La operación crea transaccionalmente una primera sesión en `Sesion` y cambia la solicitud a `Asignada`; no se permite forzar ese estado sin crear la relación operativa.
+- Los portales de Tutor y Monitor muestran sus solicitudes asignadas de acuerdo con el rol activo. El responsable puede marcar la atención como realizada, lo que actualiza la sesión y la solicitud a `Atendida`.
+- Se documentaron ambas operaciones nuevas en OpenAPI 3.1. La asignación reutiliza `Sesion.id_solicitud` y `Sesion.id_asignacion`; no requiere migración del esquema.
+- Validación pendiente de entorno: confirmar el flujo completo con cuentas que tengan asignaciones activas de prueba y verificar en MariaDB una creación/edición/eliminación de espacio y la asignación/atención de una solicitud.
+
+## Actualización del 14 de octubre de 2026: formularios adaptables y asignación al radicar
+
+- Se estandarizaron los tamaños de formularios de creación y edición (incluidos los CRUD), el ancho de modales, controles, espaciado y acciones para móvil/escritorio. Los formularios extensos conservan scroll accesible sin desbordar la ventana.
+- Los campos marcados `required` muestran `*` y cada formulario con campos requeridos incluye la leyenda «* Campo obligatorio».
+- En la creación administrativa de una solicitud, Monitoría filtra personal Monitor, Tutoría filtra Tutor y Acompañamiento deja escoger entre ambos roles. La lista exige coincidencia de materia y periodo.
+- Al elegir una persona elegible se solicitan fecha, horario y modalidad, y al guardar se crea la solicitud y se programa su primera sesión. Si el sistema no ofrece personal elegible, la solicitud se puede crear y asignar desde la gestión administrativa posteriormente.
+- Se añadió una acción directa y visible de «Cerrar sesión» a la barra superior en pantallas pequeñas, tanto en el espacio administrativo como en los portales personales.
+- Verificaciones: compilación/typecheck del frontend y revisión en navegador de anchos móvil pendientes de ejecutar tras esta actualización.
+
+### Ajuste de perfiles académicos del mismo día
+
+- Tutor y Monitor ahora seleccionan exactamente una asignatura en el formulario de crear/editar usuario; el servidor rechaza perfiles sin asignatura o con más de una.
+- Se retiró el selector múltiple y sus estilos que quedaron obsoletos. Las asignaturas existentes se muestran con una única selección inicial al editar.
+- La acción de cierre de sesión permanece visible en móvil y se compacta a un botón de icono accesible en pantallas de hasta 380 px.
+- Se aplica una presentación común a los formularios con validación nativa: controles compactos, rejilla adaptable y asterisco/leyenda de obligatoriedad.
+- Verificación de esta actualización: `npm run build` en `web`, `npm run typecheck` en `api`, `npm run validate` del contrato OpenAPI y `git diff --check` finalizaron correctamente. No se ejecutó una comprobación visual manual en varios tamaños de pantalla ni se escribieron datos en MariaDB.
