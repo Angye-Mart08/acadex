@@ -913,15 +913,15 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
   const [status, setStatus] = useState('Todos los estados')
   const [modal, setModal] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
-  const [selectedRoles, setSelectedRoles] = useState<Role[]>(['Estudiante'])
+  const [selectedRoles, setSelectedRoles] = useState<Role[]>([])
   const [userCode, setUserCode] = useState('')
 
   const filtered = users.filter((user) => `${user.name} ${user.email} ${user.code} ${user.document ?? ''}`.toLowerCase().includes(query.toLowerCase()) && (role === 'Todos los roles' || user.roles.includes(role as Role)) && (status === 'Todos los estados' || user.status === status))
 
   const openCreate = () => {
     setEditingUser(null)
-    setSelectedRoles(['Estudiante'])
-    setUserCode(generateUserCode(['Estudiante'], users.map((u) => u.code)))
+    setSelectedRoles([])
+    setUserCode('')
     setModal(true)
   }
 
@@ -936,10 +936,10 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
     const next = selectedRoles.includes(availableRole)
       ? selectedRoles.filter((r) => r !== availableRole)
       : [...selectedRoles, availableRole]
-    if (!isValidUserRoleSet(next)) return
+    if (selectedRoles.includes(availableRole) === false && !isValidUserRoleSet(next)) return
     setSelectedRoles(next)
-    if (!editingUser && next.length > 0) {
-      setUserCode(generateUserCode(next, users.map((u) => u.code)))
+    if (!editingUser) {
+      setUserCode(next.length > 0 ? generateUserCode(next, users.map((u) => u.code)) : '')
     }
   }
 
@@ -949,7 +949,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
     const name = String(form.get('name') ?? '').trim()
     const roles = selectedRoles
     if (!isValidUserRoleSet(roles)) {
-      window.alert('Roles permitidos: Administrador solo, Tutor solo, Estudiante solo o Monitor con Estudiante.')
+      window.alert('Selecciona al menos un rol. Combinaciones permitidas: Administrador solo, Tutor solo, Estudiante solo o Monitor con Estudiante.')
       return
     }
     const email = String(form.get('email') ?? '').trim().toLowerCase()
@@ -1063,7 +1063,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
             <div className="generated-code-wrapper">
               <input
                 name="code"
-                required
+                required={selectedRoles.length > 0}
                 value={editingUser ? editingUser.code : userCode}
                 readOnly
                 className="readonly-code-input"
@@ -1073,6 +1073,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
                 <button
                   type="button"
                   className="regenerate-code-btn"
+                  disabled={selectedRoles.length === 0}
                   onClick={() => setUserCode(generateUserCode(selectedRoles, users.map((u) => u.code)))}
                   title="Generar otro código aleatorio"
                 >
@@ -1080,7 +1081,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
                 </button>
               )}
             </div>
-            <span className="form-field-hint">Código generado automáticamente según el rol seleccionado (no editable).</span>
+            <span className="form-field-hint">{selectedRoles.length ? 'Código generado automáticamente según el rol seleccionado (no editable).' : 'Selecciona un rol para generar el código institucional.'}</span>
           </label>
           <label>Documento de identidad<input name="document" required minLength={5} maxLength={20} pattern="[0-9]{5,20}" inputMode="numeric" autoComplete="off" defaultValue={editingUser?.document ?? ''} placeholder="Ej. 1093432540" /></label>
         </div>

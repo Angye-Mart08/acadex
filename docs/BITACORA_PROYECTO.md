@@ -661,3 +661,9 @@ Esta actualización deja el código y la documentación preparados para la revis
 - Se incorporó el teléfono de contacto ya existente en `Usuario.telefono` al formulario administrativo de creación y edición; se precarga al editar y no se exige para guardar.
 - La API valida el formato cuando se proporciona, lo persiste en altas y actualizaciones, y permite conservarlo al omitir el campo en PATCH o quitarlo con un valor vacío/null. El contrato OpenAPI y la documentación del modelo/API quedaron sincronizados.
 - No se modificó el esquema de MariaDB porque la columna ya existe.
+
+## Selección explícita de roles al crear usuarios
+
+- El alta de usuario inicia con todas las casillas de rol desmarcadas y no genera el código institucional hasta que se selecciona un rol.
+- Se permite desmarcar cualquier rol, incluso el último; al intentar guardar se exige una selección y se aplican las combinaciones válidas. La edición conserva marcados los roles actuales.
+- El código se vuelve a generar al cambiar la selección y queda vacío si se desmarcan todos los roles.
