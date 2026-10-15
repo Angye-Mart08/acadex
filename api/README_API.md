@@ -191,3 +191,20 @@ el mock sirve para revisar el contrato y no guarda cambios en MariaDB. Para la
 demostración, inicia sesión, crea un registro temporal, consulta, actualiza y
 elimínalo; verifica el cambio en MariaDB. El panel administrativo mostrará
 “Sin datos” si no puede consultar la base y no presentará conteos de ejemplo.
+
+## Asignación y atención de solicitudes (14 de octubre de 2026)
+
+- `POST /api/v1/requests/{id}/assign` (Administrador) recibe `userId`, `role` (`Tutor` o `Monitor`), `date`, `startTime`, `endTime` y `modality`. Solo acepta personal activo con una asignación académica activa que coincida con la asignatura y el periodo de la solicitud. En una transacción crea la primera fila de `Sesion` y cambia la solicitud a `Asignada`.
+- `PATCH /api/v1/requests/{id}/attendance` recibe `{ "status": "Atendida" }`. Solo el Tutor o Monitor que tenga asignada la sesión bajo el rol activo puede cerrar la atención; actualiza la solicitud a `Atendida` y la sesión a `Realizada`.
+- `GET /api/v1/admin/catalogs` ahora incluye `staffAssignments`, usado para ofrecer únicamente candidatos válidos según asignatura y periodo.
+- El alta de espacios devuelve el registro recién insertado consultándolo por su ID, además de reportar duplicados y datos incompatibles como errores comprensibles.
+
+Los modales comparten tamaños de control, espaciado y acciones accesibles al desplazarse. Verifica la persistencia contra MariaDB local con datos de demostración; el mock OpenAPI no guarda cambios.
+
+### Flujo de asignación desde el formulario de creación
+
+La interfaz filtra `staffAssignments` por asignatura, periodo y rol inferido del tipo de acompañamiento. Para Monitoría presenta monitores; para Tutoría, tutores; para Acompañamiento permite escoger el rol. Si se selecciona un responsable, el frontend crea primero la solicitud mediante `POST /requests` y luego invoca `POST /requests/{id}/assign` con fecha, hora y modalidad para abrir la sesión inicial. Si falla la segunda operación, la solicitud ya creada permanece Pendiente y puede asignarse desde el módulo administrativo.
+
+## Regla de asignatura por perfil (14 de octubre de 2026)
+
+El formulario de usuario ofrece una selección única de asignatura para Tutor y otra para Monitor. La API valida el límite al crear o editar el perfil; los perfiles deben tener exactamente una asignatura por cada uno de esos roles seleccionados. Si un usuario heredado tiene varias, al editar se precarga la primera como selección inicial y se debe revisar cuál debe quedar activa antes de guardar.

@@ -7,7 +7,7 @@ import { AuthError, currentUserFromToken, login, selectRole } from './auth.js'
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
 import { DataError, createRequest, dashboard, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects } from './data.js'
-import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, changePassword, createAdminPeriod, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminPeriod, deleteAdminRequest, deleteAdminSpace, deleteAdminUser, listAdminPeriods, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminPeriod, updateAdminRequest, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
+import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminPeriod, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminPeriod, deleteAdminRequest, deleteAdminSpace, deleteAdminUser, listAdminPeriods, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminPeriod, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
 
 const app = express()
 app.disable('x-powered-by')
@@ -224,6 +224,17 @@ router.post('/requests', requireSession, async (req, res, next) => {
 
 router.patch('/requests/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
   try { res.json(await updateAdminRequest(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+
+router.post('/requests/:id/assign', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await assignAdminRequest(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+
+router.patch('/requests/:id/attendance', requireSession, async (req, res, next) => {
+  try {
+    if (!['Tutor', 'Monitor'].includes(req.session.activeRole)) return apiError(res, req, 403, 'FORBIDDEN', 'Solo el tutor o monitor asignado puede cerrar la atención.')
+    res.json(await updateAssignedRequestStatus(req.session, idParamSchema.parse(req.params.id), req.body))
+  } catch (error) { next(error) }
 })
 
 router.delete('/requests/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {

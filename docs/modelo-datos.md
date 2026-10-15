@@ -93,3 +93,9 @@ ejemplo, Monitor y Estudiante al mismo tiempo. El rol activo no se almacena
 como un dato único del usuario; pertenece al contexto de la sesión y se elige
 después del login. Por eso el contrato utiliza `roles[]` y contempla
 `POST /auth/select-role`.
+
+## Nota de integración del 14 de octubre de 2026
+
+La asignación de una solicitud no agrega columnas a `Solicitud`: se representa mediante una fila en `Sesion` que enlaza `Sesion.id_solicitud` con `Sesion.id_asignacion`. Esta última referencia `AsignacionAcademica`, cuya persona, rol, asignatura y periodo deben estar activos y coincidir con la solicitud. La atención cierra la sesión como `Realizada` y la solicitud como `Atendida`. El flujo no requiere migración SQL.
+
+Regla de captura: por perfil/rol Tutor o Monitor el formulario y la API exigen exactamente una asignatura en la asignación académica. El historial puede conservar filas de periodos previos, pero cada alta o edición de perfil establece una sola asignatura activa para ese rol.

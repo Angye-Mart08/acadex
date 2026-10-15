@@ -150,3 +150,15 @@ En ningún formulario del software es posible escribir o alterar manualmente el 
 - **Radicados de Solicitudes**: `RAD-YYYY-####`.
 
 Cada formulario incluye un botón de regeneración aleatoria para obtener una nueva variante respetando la unicidad.
+
+### Formularios y perfiles Tutor/Monitor
+
+Los formularios de creación y edición usan una distribución compacta y adaptable, muestran `*` en campos obligatorios y una leyenda de referencia. Tutor y Monitor seleccionan una única asignatura por perfil, con validación tanto en la interfaz como en la API. En móviles, la barra superior mantiene visible el cierre de sesión, reduciendo el control a un botón de icono en anchos muy pequeños.
+
+## Usabilidad de formularios y navegación móvil
+
+Los formularios de creación y edición comparten tamaños compactos, distribución adaptable y botones accesibles al desplazarse. Los campos HTML marcados como `required` se identifican con `*`; cada formulario que los contiene muestra la leyenda «* Campo obligatorio».
+
+En la creación administrativa de solicitudes, el tipo Monitoría filtra monitores, Tutoría filtra tutores y Acompañamiento permite escoger el rol. El personal disponible se filtra por asignatura y periodo. Si se selecciona una persona, el formulario solicita fecha, hora y modalidad para crear también la primera sesión; si no hay personal elegible, la solicitud puede registrarse y asignarse después.
+
+En pantallas pequeñas se muestra una acción directa «Cerrar sesión» en la barra superior, además del menú del perfil. Los modales se ajustan al ancho y alto disponibles y permiten desplazamiento interno.

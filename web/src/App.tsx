@@ -11,6 +11,7 @@ import {
   PortalAvailability,
   PortalSession,
   RoleProfiles,
+  assignRequest as assignRequestApi,
   changePassword,
   createAcademicPeriod,
   createAdminRequest,
@@ -36,6 +37,7 @@ import {
   listSpaces as listSpacesApi,
   listSubjects as listSubjectsApi,
   listUsers as listUsersApi,
+  markAssignedRequestAttended,
   login as loginApi,
   logout as logoutApi,
   resetCredential,
@@ -175,6 +177,7 @@ type Request = {
   motive?: string
   description?: string
   period?: string
+  periodId?: number
 }
 
 const accessTokenStorageKey = 'acadex:access-token'
@@ -506,6 +509,7 @@ function AdminShell({ user, activeRole, periodName, periods, children, view, onN
               <span>Periodo {periodName}</span>
             </button>
             {user.roles.length > 1 && <button className="role-switcher" onClick={onChangeRole}><UsersRound size={15} /> Cambiar rol</button>}
+            <button className="mobile-logout-button" type="button" aria-label="Cerrar sesión" title="Cerrar sesión" onClick={onLogout}><LogOut size={17} /><span>Cerrar sesión</span></button>
             <ProfileMenu user={user} activeRole={activeRole} onLogout={onLogout} />
           </div>
         </header>
@@ -573,6 +577,7 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
             <span>Periodo {periodName}</span>
           </button>
           {user.roles.length > 1 && <button className="role-switcher" onClick={onChangeRole}><UsersRound size={15} /> Cambiar rol</button>}
+          <button className="mobile-logout-button" type="button" aria-label="Cerrar sesión" title="Cerrar sesión" onClick={onLogout}><LogOut size={17} /><span>Cerrar sesión</span></button>
           <ProfileMenu user={user} activeRole={activeRole} onLogout={onLogout} />
         </div>
       </header>
@@ -585,7 +590,7 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
         {(view === 'sesiones' || view === 'mis-sesiones') && <PortalSessions sessions={sessions} activeRole={activeRole} periodName={periodName} />}
         {view === 'solicitar' && <StudentRequestForm accessToken={accessToken} subjects={subjects} user={user} requests={requests} onChange={onRequestsChange} />}
         {view === 'mis-solicitudes' && <MyRequests requests={requests} />}
-        {view === 'solicitudes' && <AssignedRequests requests={requests} />}
+        {view === 'solicitudes' && <AssignedRequests accessToken={accessToken} activeRole={activeRole} requests={requests} onChange={onRequestsChange} />}
       </main>
       {periodModalOpen && <PeriodModal periodName={periodName} periods={periods} onClose={() => setPeriodModalOpen(false)} />}
     </div>
@@ -806,7 +811,18 @@ function MyRequests({ requests }: { requests: Request[] }) {
   </>
 }
 
-function AssignedRequests({ requests }: { requests: Request[] }) { const assigned = requests.filter((request) => request.status === 'Aprobada' || request.status === 'Asignada'); return <><PageHeader eyebrow="Mi espacio / Solicitudes" title="Solicitudes asignadas" description="Consulta los acompañamientos que requieren tu atención." /><section className="panel table-panel"><div className="table-meta"><span><strong>{assigned.length}</strong> solicitudes asignadas</span><span>Coordinación académica</span></div><div className="table-scroll"><table><thead><tr><th>ESTUDIANTE</th><th>ASIGNATURA</th><th>TIPO</th><th>ESTADO</th></tr></thead><tbody>{assigned.map((request) => <tr key={request.id}><td><strong>{request.student}</strong></td><td>{request.subject}</td><td>{request.type}</td><td><RequestStatus status={request.status} /></td></tr>)}</tbody></table></div></section></> }
+function AssignedRequests({ accessToken, activeRole, requests, onChange }: { accessToken: string; activeRole: PortalRole; requests: Request[]; onChange: (requests: Request[]) => void }) {
+  const assigned = requests.filter((request) => request.status === 'Asignada' || request.status === 'Atendida')
+  const markAttended = async (request: Request) => {
+    try {
+      const saved = await markAssignedRequestAttended(accessToken, request.id)
+      onChange(requests.map((item) => item.id === request.id ? saved as Request : item))
+    } catch (error) {
+      window.alert(error instanceof ApiError ? error.message : 'No fue posible actualizar la solicitud asignada.')
+    }
+  }
+  return <><PageHeader eyebrow={`Mi espacio / Solicitudes · ${activeRole}`} title="Solicitudes asignadas" description="Atiende las solicitudes vinculadas a tus asignaturas y registra su cierre." /><section className="panel table-panel"><div className="table-meta"><span><strong>{assigned.length}</strong> solicitudes asignadas a tu rol</span><span>Información sincronizada con MariaDB</span></div><div className="table-scroll"><table><thead><tr><th>ESTUDIANTE</th><th>ASIGNATURA</th><th>TIPO</th><th>PRIORIDAD</th><th>ESTADO</th><th>FECHA</th><th className="align-right">ACCIÓN</th></tr></thead><tbody>{assigned.map((request) => <tr key={request.id}><td><strong>{request.student}</strong></td><td>{request.subject}</td><td>{request.type}</td><td><span className={`priority ${request.priority.toLowerCase()}`}><span />{request.priority}</span></td><td><RequestStatus status={request.status} /></td><td>{request.date}</td><td className="align-right">{request.status === 'Asignada' && <button className="row-action" onClick={() => void markAttended(request)}>Marcar atendida</button>}</td></tr>)}{!assigned.length && <tr><td colSpan={7} className="empty-table-cell">No tienes solicitudes asignadas para el rol {activeRole}.</td></tr>}</tbody></table></div></section></>
+}
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
   return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>
@@ -854,71 +870,27 @@ function RoleProfileFields({ roles, catalogs, user, generatedCode }: { roles: Ro
     <p className="form-section-title">Información específica de los roles seleccionados</p>
     {roles.includes('Administrador') && <fieldset className="role-profile-fieldset"><legend><ShieldCheck size={15} /> Administrador</legend><div className="form-columns"><label>Cargo<input name="adminCargo" required defaultValue={admin?.cargo ?? ''} placeholder="Coordinación académica" /></label><label>Dependencia<input name="adminDependency" required defaultValue={admin?.dependencia ?? ''} placeholder="Facultad o dependencia" /></label></div><label>Observaciones del rol<textarea name="adminObservations" defaultValue={admin?.observaciones ?? ''} placeholder="Responsabilidades o notas del rol" /></label></fieldset>}
     {roles.includes('Estudiante') && <fieldset className="role-profile-fieldset"><legend><GraduationCap size={15} /> Estudiante</legend><div className="form-columns"><label>Código estudiantil<input name="studentCode" value={user ? (student?.studentCode || user.code) : generatedCode} readOnly className="readonly-code-input" title="Sincronizado con el código institucional" /><small className="form-field-hint">Sincronizado de forma automática con el código institucional (no editable).</small></label><label>Semestre actual<select name="studentSemester" defaultValue={student?.semestre || 1}>{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((s) => <option key={s} value={s}>Semestre {s}</option>)}</select></label></div><label>Programa académico<select name="studentProgramId" required defaultValue={student?.programId ?? ''}><option value="">Selecciona un programa académico de la universidad</option>{(catalogs?.programs ?? []).map((program) => <option key={program.id} value={program.id}>{program.codigo} · {program.nombre}</option>)}</select></label></fieldset>}
-    {roles.includes('Tutor') && <fieldset className="role-profile-fieldset"><legend><GraduationCap size={15} /> Tutor</legend><div className="form-columns"><label>Categoría docente<select name="tutorCategory" defaultValue={tutor?.teachingCategory ?? 'Profesor Asistente'}><option>Profesor Titular</option><option>Profesor Asociado</option><option>Profesor Asistente</option><option>Profesor Auxiliar</option><option>Docente Ocasional</option><option>Docente Catedrático</option></select></label><label>Tipo de vinculación<select name="tutorEmployment" defaultValue={tutor?.employmentType ?? 'Tiempo completo'}><option>Tiempo completo</option><option>Medio tiempo</option><option>Cátedra</option><option>Planta</option></select></label><label>Periodo académico<select name="tutorPeriodId" required defaultValue={tutorAssignments[0]?.periodId ?? periods.find((period) => period.estado === 'Activo')?.id ?? ''}>{periods.map((period) => <option key={period.id} value={period.id}>{period.nombre} · {period.estado}</option>)}</select></label><label>Horas semanales<input type="number" min="1" max="60" name="tutorHours" required defaultValue={tutor?.weeklyHours ?? 20} /></label></div><SubjectMultiSelect label="Asignaturas asignadas (MariaDB)" name="tutorSubjectIds" subjects={subjects} selectedIds={tutorAssignments.filter((assignment) => assignment.status === 'Activa').map((assignment) => assignment.subjectId)} /><label>Observaciones del tutor<textarea name="tutorObservations" defaultValue={tutor?.observations ?? ''} placeholder="Notas docentes, disponibilidad horaria o restricciones" /></label></fieldset>}
-    {roles.includes('Monitor') && <fieldset className="role-profile-fieldset"><legend><BookOpen size={15} /> Monitor</legend><div className="form-columns"><label>Tipo de monitor<select name="monitorType" defaultValue={monitor?.monitorType ?? 'Monitor académico'}><option>Monitor académico</option><option>Monitor de investigación</option><option>Monitor de bienestar</option><option>Monitor de laboratorio</option><option>Monitor par</option></select></label><label>Resolución<input name="monitorResolution" defaultValue={monitor?.resolution ?? ''} placeholder="Ej. Resolución 2026-01" /></label><label>Periodo académico<select name="monitorPeriodId" required defaultValue={monitorAssignments[0]?.periodId ?? periods.find((period) => period.estado === 'Activo')?.id ?? ''}>{periods.map((period) => <option key={period.id} value={period.id}>{period.nombre} · {period.estado}</option>)}</select></label><label>Horas semanales<input type="number" min="1" max="60" name="monitorHours" required defaultValue={monitor?.weeklyHours ?? 10} /></label></div><SubjectMultiSelect label="Asignaturas de monitoría (MariaDB)" name="monitorSubjectIds" subjects={subjects} selectedIds={monitorAssignments.filter((assignment) => assignment.status === 'Activa').map((assignment) => assignment.subjectId)} /><label>Observaciones del monitor<textarea name="monitorObservations" defaultValue={monitor?.observations ?? ''} placeholder="Notas operativas, horarios asignados" /></label></fieldset>}
+    {roles.includes('Tutor') && <fieldset className="role-profile-fieldset"><legend><GraduationCap size={15} /> Tutor</legend><div className="form-columns"><label>Categoría docente<select name="tutorCategory" defaultValue={tutor?.teachingCategory ?? 'Profesor Asistente'}><option>Profesor Titular</option><option>Profesor Asociado</option><option>Profesor Asistente</option><option>Profesor Auxiliar</option><option>Docente Ocasional</option><option>Docente Catedrático</option></select></label><label>Tipo de vinculación<select name="tutorEmployment" defaultValue={tutor?.employmentType ?? 'Tiempo completo'}><option>Tiempo completo</option><option>Medio tiempo</option><option>Cátedra</option><option>Planta</option></select></label><label>Periodo académico<select name="tutorPeriodId" required defaultValue={tutorAssignments[0]?.periodId ?? periods.find((period) => period.estado === 'Activo')?.id ?? ''}>{periods.map((period) => <option key={period.id} value={period.id}>{period.nombre} · {period.estado}</option>)}</select></label><label>Horas semanales<input type="number" min="1" max="60" name="tutorHours" required defaultValue={tutor?.weeklyHours ?? 20} /></label></div><SubjectAssignmentSelect label="Asignatura asignada (MariaDB)" name="tutorSubjectIds" subjects={subjects} selectedIds={tutorAssignments.filter((assignment) => assignment.status === 'Activa').map((assignment) => assignment.subjectId)} /><label>Observaciones del tutor<textarea name="tutorObservations" defaultValue={tutor?.observations ?? ''} placeholder="Notas docentes, disponibilidad horaria o restricciones" /></label></fieldset>}
+    {roles.includes('Monitor') && <fieldset className="role-profile-fieldset"><legend><BookOpen size={15} /> Monitor</legend><div className="form-columns"><label>Tipo de monitor<select name="monitorType" defaultValue={monitor?.monitorType ?? 'Monitor académico'}><option>Monitor académico</option><option>Monitor de investigación</option><option>Monitor de bienestar</option><option>Monitor de laboratorio</option><option>Monitor par</option></select></label><label>Resolución<input name="monitorResolution" defaultValue={monitor?.resolution ?? ''} placeholder="Ej. Resolución 2026-01" /></label><label>Periodo académico<select name="monitorPeriodId" required defaultValue={monitorAssignments[0]?.periodId ?? periods.find((period) => period.estado === 'Activo')?.id ?? ''}>{periods.map((period) => <option key={period.id} value={period.id}>{period.nombre} · {period.estado}</option>)}</select></label><label>Horas semanales<input type="number" min="1" max="60" name="monitorHours" required defaultValue={monitor?.weeklyHours ?? 10} /></label></div><SubjectAssignmentSelect label="Asignatura de monitoría (MariaDB)" name="monitorSubjectIds" subjects={subjects} selectedIds={monitorAssignments.filter((assignment) => assignment.status === 'Activa').map((assignment) => assignment.subjectId)} /><label>Observaciones del monitor<textarea name="monitorObservations" defaultValue={monitor?.observations ?? ''} placeholder="Notas operativas, horarios asignados" /></label></fieldset>}
   </div>
 }
 
-function SubjectMultiSelect({ label, name, subjects, selectedIds }: { label: string; name: string; subjects: AdminCatalogs['subjects']; selectedIds: number[] }) {
-  const [selected, setSelected] = useState<number[]>(selectedIds)
-  const [search, setSearch] = useState('')
+function SubjectAssignmentSelect({ label, name, subjects, selectedIds }: { label: string; name: string; subjects: AdminCatalogs['subjects']; selectedIds: number[] }) {
+  const initialSubjectId = selectedIds[0] ?? ''
+  const [selected, setSelected] = useState<number | ''>(initialSubjectId)
 
   useEffect(() => {
-    setSelected(selectedIds)
-  }, [selectedIds])
-
-  const filtered = subjects.filter((subject) => `${subject.codigo} ${subject.nombre}`.toLowerCase().includes(search.toLowerCase()))
-  const toggleSubject = (id: number) => {
-    setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
-  }
-  const selectAll = () => setSelected(subjects.map((s) => s.id))
-  const clearAll = () => setSelected([])
+    setSelected(initialSubjectId)
+  }, [initialSubjectId])
 
   return (
-    <div className="subject-multiselect-container">
-      <div className="subject-multiselect-header">
-        <span>{label}</span>
-        <div className="subject-multiselect-quick-actions">
-          <span className="subject-count-pill">{selected.length} seleccionada{selected.length === 1 ? '' : 's'}</span>
-          <button type="button" className="text-link-button" onClick={selectAll}>Todas</button>
-          <span className="divider">·</span>
-          <button type="button" className="text-link-button" onClick={clearAll}>Limpiar</button>
-        </div>
-      </div>
-      <div className="subject-multiselect-box">
-        {selected.length > 0 && (
-          <div className="subject-chips">
-            {selected.map((id) => {
-              const subj = subjects.find((s) => s.id === id)
-              if (!subj) return null
-              return (
-                <span className="subject-chip" key={id}>
-                  <strong>{subj.codigo}</strong> {subj.nombre}
-                  <button type="button" onClick={() => toggleSubject(id)} aria-label="Quitar asignatura"><X size={13} /></button>
-                </span>
-              )
-            })}
-          </div>
-        )}
-        <div className="subject-multiselect-search">
-          <Search size={14} />
-          <input type="text" placeholder="Buscar por código o nombre de asignatura..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <div className="subject-options-scroll">
-          {filtered.map((subject) => {
-            const isChecked = selected.includes(subject.id)
-            return (
-              <label key={subject.id} className={`subject-option-item ${isChecked ? 'selected' : ''}`}>
-                <input type="checkbox" name={name} value={subject.id} checked={isChecked} onChange={() => toggleSubject(subject.id)} />
-                <span className="subject-code-tag">{subject.codigo}</span>
-                <span className="subject-name-text">{subject.nombre}</span>
-              </label>
-            )
-          })}
-          {filtered.length === 0 && <div className="subject-empty-search">No se encontraron asignaturas con "{search}".</div>}
-        </div>
-      </div>
-    </div>
+    <label className="single-subject-field">{label}
+      <select name={name} value={selected} required onChange={(event) => setSelected(Number(event.target.value) || '')}>
+        <option value="">Selecciona una asignatura</option>
+        {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.codigo} · {subject.nombre}</option>)}
+      </select>
+      <small className="form-field-hint">Cada tutor o monitor puede tener una sola asignatura asignada por este formulario.</small>
+    </label>
   )
 }
 
@@ -1360,8 +1332,17 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
   const [subjectId, setSubjectId] = useState('Todos')
   const [modal, setModal] = useState(false)
   const [calendarModalOpen, setCalendarModalOpen] = useState(false)
+  const [assigningRequest, setAssigningRequest] = useState<Request | null>(null)
+  const [assignmentRole, setAssignmentRole] = useState<'Tutor' | 'Monitor'>('Monitor')
+  const [assignmentUserId, setAssignmentUserId] = useState('')
+  const [assignmentDate, setAssignmentDate] = useState('')
   const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null)
   const [motiveText, setMotiveText] = useState('')
+  const [newRequestType, setNewRequestType] = useState<'Monitoría' | 'Tutoría' | 'Acompañamiento'>('Monitoría')
+  const [newRequestSubjectId, setNewRequestSubjectId] = useState('')
+  const [newRequestPeriodId, setNewRequestPeriodId] = useState('')
+  const [newRequestStaffRole, setNewRequestStaffRole] = useState<'Tutor' | 'Monitor'>('Monitor')
+  const [newRequestStaffId, setNewRequestStaffId] = useState('')
   const [radicadoCode, setRadicadoCode] = useState(() => `RAD-2026-${Math.floor(1000 + Math.random() * 9000)}`)
 
   const filtered = requests.filter((request) => `${request.student} ${request.subject} ${request.program ?? ''} ${request.motive ?? ''}`.toLowerCase().includes(query.toLowerCase()) && (status === 'Todos los estados' || request.status === status) && (subjectId === 'Todos' || String(request.subjectId) === subjectId))
@@ -1391,6 +1372,7 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
       window.alert('El estudiante seleccionado no tiene un programa académico activo.')
       return
     }
+    let savedRequest: Request
     try {
       const saved = await createAdminRequest(accessToken, {
         studentId,
@@ -1402,7 +1384,28 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
         description: String(form.get('description') ?? ''),
         periodId: Number(form.get('periodId')) || undefined,
       })
-      onChange([saved as Request, ...requests])
+      savedRequest = saved as Request
+      onChange([savedRequest, ...requests])
+      const staffId = Number(form.get('assignedUserId'))
+      if (staffId) {
+        try {
+          const assigned = await assignRequestApi(accessToken, savedRequest.id, {
+            userId: staffId,
+            role: newRequestType === 'Acompañamiento' ? newRequestStaffRole : newRequestType === 'Tutoría' ? 'Tutor' : 'Monitor',
+            date: String(form.get('firstSessionDate')),
+            startTime: String(form.get('firstSessionStart')),
+            endTime: String(form.get('firstSessionEnd')),
+            modality: String(form.get('firstSessionModality')) as 'Presencial' | 'Virtual',
+          })
+          onChange([assigned as Request, ...requests])
+        } catch (assignmentError) {
+          setModal(false)
+          window.alert(`La solicitud quedó creada (#${savedRequest.id}), pero no se pudo asignar el responsable: ${assignmentError instanceof ApiError ? assignmentError.message : 'Error al programar la primera sesión.'} Puedes asignarla luego desde Gestión de solicitudes.`)
+          setSelectedStudentId(null)
+          setMotiveText('')
+          return
+        }
+      }
       setModal(false)
       setSelectedStudentId(null)
       setMotiveText('')
@@ -1413,6 +1416,20 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
   const clearFilters = () => { setQuery(''); setStatus('Todos los estados'); setSubjectId('Todos') }
   const requestTypes = catalogs?.requestTypes.map((item) => item.nombre).filter((name): name is 'Monitoría' | 'Tutoría' | 'Acompañamiento' => ['Monitoría', 'Tutoría', 'Acompañamiento'].includes(name as never)) ?? []
   const currentStudent = catalogs?.students.find((s) => s.id === selectedStudentId)
+  const createAssignmentRole: 'Tutor' | 'Monitor' = newRequestType === 'Acompañamiento' ? newRequestStaffRole : newRequestType === 'Tutoría' ? 'Tutor' : 'Monitor'
+  const createEligibleStaff = catalogs?.staffAssignments.filter((item) => item.subjectId === Number(newRequestSubjectId) && item.periodId === Number(newRequestPeriodId) && item.role === createAssignmentRole) ?? []
+  const eligibleAssignments = catalogs?.staffAssignments.filter((item) => item.subjectId === assigningRequest?.subjectId && item.periodId === assigningRequest?.periodId && item.role === assignmentRole) ?? []
+  const openAssignment = (request: Request) => { setAssigningRequest(request); setAssignmentRole(request.type === 'Tutoría' ? 'Tutor' : 'Monitor'); setAssignmentUserId(''); setAssignmentDate('') }
+  const submitAssignment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!assigningRequest) return
+    const form = new FormData(event.currentTarget)
+    try {
+      const saved = await assignRequestApi(accessToken, assigningRequest.id, { userId: Number(form.get('userId')), role: assignmentRole, date: String(form.get('date')), startTime: String(form.get('startTime')), endTime: String(form.get('endTime')), modality: String(form.get('modality')) as 'Presencial' | 'Virtual' })
+      onChange(requests.map((item) => item.id === assigningRequest.id ? saved as Request : item))
+      setAssigningRequest(null)
+    } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible asignar la solicitud.') }
+  }
 
   return <>
     <PageHeader
@@ -1424,7 +1441,7 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
           <button type="button" className="secondary-button" onClick={() => setCalendarModalOpen(true)}>
             <CalendarDays size={17} /> Ver calendario
           </button>
-          <button type="button" className="primary-button" onClick={() => { setSelectedStudentId(null); setMotiveText(''); setRadicadoCode(`RAD-2026-${Math.floor(1000 + Math.random() * 9000)}`); setModal(true) }}>
+          <button type="button" className="primary-button" onClick={() => { setSelectedStudentId(null); setMotiveText(''); setNewRequestType(requestTypes[0] ?? 'Monitoría'); setNewRequestSubjectId(''); setNewRequestPeriodId(String(catalogs?.periods.find((period) => period.estado === 'Activo')?.id ?? '')); setNewRequestStaffRole('Monitor'); setNewRequestStaffId(''); setRadicadoCode(`RAD-2026-${Math.floor(1000 + Math.random() * 9000)}`); setModal(true) }}>
             <Plus size={18} /> Nueva solicitud
           </button>
         </div>
@@ -1450,10 +1467,12 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
         <button className="secondary-button filter-button" onClick={clearFilters}><RefreshCw size={16} /> Limpiar</button>
       </div>
       <div className="table-meta"><span><strong>{filtered.length}</strong> solicitudes encontradas</span><span><span className="priority-dot" /> Datos persistidos en MariaDB</span></div>
-      <div className="table-scroll"><table><thead><tr><th>SOLICITUD</th><th>PROGRAMA</th><th>TIPO</th><th>PRIORIDAD</th><th>ESTADO</th><th>FECHA</th><th className="align-right">ACCIONES</th></tr></thead><tbody>{filtered.map((request) => <tr key={request.id}><td><div className="request-cell"><div className="request-id">#{String(request.id).padStart(4, '0')}</div><div><strong>{request.subject}</strong><span>{request.student}</span>{request.motive && <small className="table-subtext">{request.motive}</small>}</div></div></td><td>{request.program ?? '—'}</td><td><span className="type-label"><span className={request.type === 'Monitoría' ? 'type-dot blue-dot' : 'type-dot purple-dot'} />{request.type}</span></td><td><span className={`priority ${request.priority.toLowerCase()}`}><span />{request.priority}</span></td><td><RequestStatus status={request.status} /></td><td><span className="muted-cell">{request.date}</span></td><td className="align-right"><div className="actions-inline">{request.status === 'Pendiente' && <><button className="approve-action" onClick={() => updateStatus(request.id, 'Aprobada')} title="Aprobar"><Check size={16} /></button><button className="reject-action" onClick={() => updateStatus(request.id, 'Rechazada')} title="Rechazar"><X size={16} /></button></>}{request.status === 'Aprobada' && <button className="row-action" onClick={() => updateStatus(request.id, 'Asignada')}>Asignar</button>}<button className="delete-action" onClick={() => deleteRequestPermanently(request)} title="Eliminar permanentemente de MariaDB"><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>
+      <div className="table-scroll"><table><thead><tr><th>SOLICITUD</th><th>PROGRAMA</th><th>TIPO</th><th>PRIORIDAD</th><th>ESTADO</th><th>FECHA</th><th className="align-right">ACCIONES</th></tr></thead><tbody>{filtered.map((request) => <tr key={request.id}><td><div className="request-cell"><div className="request-id">#{String(request.id).padStart(4, '0')}</div><div><strong>{request.subject}</strong><span>{request.student}</span>{request.motive && <small className="table-subtext">{request.motive}</small>}</div></div></td><td>{request.program ?? '—'}</td><td><span className="type-label"><span className={request.type === 'Monitoría' ? 'type-dot blue-dot' : 'type-dot purple-dot'} />{request.type}</span></td><td><span className={`priority ${request.priority.toLowerCase()}`}><span />{request.priority}</span></td><td><RequestStatus status={request.status} /></td><td><span className="muted-cell">{request.date}</span></td><td className="align-right"><div className="actions-inline">{request.status === 'Pendiente' && <><button className="approve-action" onClick={() => updateStatus(request.id, 'Aprobada')} title="Aprobar"><Check size={16} /></button><button className="reject-action" onClick={() => updateStatus(request.id, 'Rechazada')} title="Rechazar"><X size={16} /></button></>}{['Pendiente', 'Aprobada'].includes(request.status) && <button className="row-action" onClick={() => openAssignment(request)}>Asignar tutor/monitor</button>}<button className="delete-action" onClick={() => deleteRequestPermanently(request)} title="Eliminar permanentemente de MariaDB"><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>
     </section>
 
     {calendarModalOpen && <CalendarModal requests={requests} onClose={() => setCalendarModalOpen(false)} />}
+
+    {assigningRequest && <Modal title="Asignar acompañamiento" subtitle={`${assigningRequest.student} · ${assigningRequest.subject} · ${assigningRequest.period ?? 'Periodo actual'}`} wide onClose={() => setAssigningRequest(null)}><form className="modal-form" onSubmit={submitAssignment}><div className="form-columns"><label>Rol responsable<select value={assignmentRole} onChange={(event) => { setAssignmentRole(event.target.value as 'Tutor' | 'Monitor'); setAssignmentUserId('') }}><option value="Monitor">Monitor</option><option value="Tutor">Tutor</option></select></label><label>{assignmentRole} con asignación activa<select name="userId" required value={assignmentUserId} onChange={(event) => setAssignmentUserId(event.target.value)}><option value="">Selecciona una persona</option>{eligibleAssignments.map((item) => <option key={`${item.role}-${item.userId}`} value={item.userId}>{item.name} · {item.weeklyHours} h/semana</option>)}</select>{eligibleAssignments.length === 0 && <small className="form-field-hint">No hay {assignmentRole.toLowerCase()} asignados a esta asignatura y periodo. Revisa Gestión de usuarios.</small>}</label></div><div className="form-columns"><label>Fecha de primera sesión<input name="date" type="date" required min={new Date().toISOString().slice(0, 10)} value={assignmentDate} onChange={(event) => setAssignmentDate(event.target.value)} /></label><label>Modalidad<select name="modality"><option>Presencial</option><option>Virtual</option></select></label></div><div className="form-columns"><label>Hora de inicio<input name="startTime" type="time" required /></label><label>Hora de finalización<input name="endTime" type="time" required /></label></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setAssigningRequest(null)}>Cancelar</button><button className="primary-button" type="submit" disabled={!eligibleAssignments.length || !assignmentUserId}><CalendarClock size={17} /> Asignar y programar sesión</button></div></form></Modal>}
 
     {modal && <Modal title="Crear solicitud administrativa" subtitle="Selecciona al estudiante y la asignatura en MariaDB." wide onClose={() => setModal(false)}>
       <form className="modal-form" onSubmit={createRequest}>
@@ -1465,7 +1484,7 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
             </select>
           </label>
           <label>Asignatura de MariaDB
-            <select name="subjectId" required defaultValue="">
+            <select name="subjectId" required value={newRequestSubjectId} onChange={(event) => { setNewRequestSubjectId(event.target.value); setNewRequestStaffId('') }}>
               <option value="">Selecciona una asignatura</option>
               {(catalogs?.subjects ?? []).map((subject) => <option key={subject.id} value={subject.id}>[{subject.codigo}] {subject.nombre}</option>)}
             </select>
@@ -1502,12 +1521,12 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
             <span className="form-field-hint">Código de radicado asignado automáticamente para seguimiento de la solicitud (no editable).</span>
           </label>
           <label>Periodo académico
-            <select name="periodId" defaultValue={catalogs?.periods.find((period) => period.estado === 'Activo')?.id ?? ''}>
+            <select name="periodId" required value={newRequestPeriodId} onChange={(event) => { setNewRequestPeriodId(event.target.value); setNewRequestStaffId('') }}>
               {(catalogs?.periods ?? []).map((period) => <option key={period.id} value={period.id}>{period.nombre} · {period.estado}</option>)}
             </select>
           </label>
           <label>Tipo de acompañamiento
-            <select name="type" defaultValue={requestTypes[0] ?? 'Monitoría'}>
+            <select name="type" value={newRequestType} onChange={(event) => { const nextType = event.target.value as typeof newRequestType; setNewRequestType(nextType); setNewRequestStaffRole(nextType === 'Tutoría' ? 'Tutor' : 'Monitor'); setNewRequestStaffId('') }}>
               {(requestTypes.length ? requestTypes : ['Monitoría', 'Tutoría', 'Acompañamiento']).map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
@@ -1519,6 +1538,19 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
             </select>
           </label>
         </div>
+        {newRequestType === 'Acompañamiento' && <label>Rol responsable
+          <select value={newRequestStaffRole} onChange={(event) => { setNewRequestStaffRole(event.target.value as 'Tutor' | 'Monitor'); setNewRequestStaffId('') }}><option value="Monitor">Monitor</option><option value="Tutor">Tutor</option></select>
+        </label>}
+        {newRequestSubjectId && newRequestPeriodId && <section className="request-assignment-fields" aria-label="Asignación del acompañamiento">
+          <label>{createAssignmentRole} responsable
+            <select name="assignedUserId" required={createEligibleStaff.length > 0} value={newRequestStaffId} onChange={(event) => setNewRequestStaffId(event.target.value)}>
+              <option value="">{createEligibleStaff.length ? `Selecciona ${createAssignmentRole.toLowerCase()}` : `No hay ${createAssignmentRole.toLowerCase()} asignados disponibles`}</option>
+              {createEligibleStaff.map((person) => <option key={`${person.role}-${person.userId}`} value={person.userId}>{person.name} · {person.weeklyHours} h/semana</option>)}
+            </select>
+            {createEligibleStaff.length === 0 && <small className="form-field-hint">Puedes crear la solicitud ahora y asignar el acompañamiento más tarde, cuando exista personal activo para esta materia y periodo.</small>}
+          </label>
+          {newRequestStaffId && <><div className="form-columns"><label>Fecha de primera sesión<input name="firstSessionDate" type="date" required min={new Date().toISOString().slice(0, 10)} /></label><label>Modalidad<select name="firstSessionModality"><option>Presencial</option><option>Virtual</option></select></label></div><div className="form-columns"><label>Hora de inicio<input name="firstSessionStart" type="time" required /></label><label>Hora de finalización<input name="firstSessionEnd" type="time" required /></label></div></>}
+        </section>}
         <label>Motivo principal
           <input
             name="motive"
