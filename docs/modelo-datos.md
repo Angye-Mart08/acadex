@@ -11,7 +11,7 @@ copia paralela como fuente de verdad.
 ### Seguridad
 
 - `Rol`: roles Administrador, Estudiante, Tutor y Monitor.
-- `Usuario`: identidad institucional, correo, documento y estado.
+- `Usuario`: identidad institucional, correo, documento, número de contacto opcional (`telefono`, hasta 20 caracteres) y estado.
 - `Credencial`: relación de acceso del usuario.
 - `UsuarioRol`: relación entre usuarios y roles.
 - `Administrador`: información específica del administrador.

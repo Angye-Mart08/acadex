@@ -27,6 +27,10 @@ const personNameSchema = z.string().trim().min(5).max(160).refine(
   'Escribe al menos un nombre y un apellido.',
 )
 const identityDocumentSchema = z.string().trim().regex(/^\d{5,20}$/, 'El documento debe contener entre 5 y 20 dígitos.')
+const contactPhoneSchema = z.string().trim().max(20).refine(
+  (value) => value === '' || (/^\+?[0-9\s().-]+$/.test(value) && (value.match(/\d/g)?.length ?? 0) >= 7),
+  'Ingresa un número de contacto válido (mínimo 7 dígitos).',
+).transform((value) => value || null).nullable().optional()
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase()
@@ -42,7 +46,7 @@ function userName(row: any) { return `${row.names} ${row.surnames}`.trim() }
 function normalizeUser(row: any, profile: any = {}) {
   const name = userName(row)
   return {
-    id: Number(row.id), code: row.code, name, email: row.email, document: row.document,
+    id: Number(row.id), code: row.code, name, email: row.email, document: row.document, phone: row.phone ?? null,
     roles: String(row.roles ?? '').split(',').filter(Boolean), status: row.status,
     initials: initials(name), profiles: profile,
   }
@@ -51,7 +55,7 @@ function normalizeUser(row: any, profile: any = {}) {
 const userSelect = `
   SELECT u.id_usuario AS id, u.codigo AS code, u.documento AS document,
          u.nombres AS names, u.apellidos AS surnames, u.correo AS email,
-         u.estado AS status,
+         u.telefono AS phone, u.estado AS status,
          GROUP_CONCAT(DISTINCT r.nombre ORDER BY r.id_rol SEPARATOR ',') AS roles
     FROM Usuario u
     LEFT JOIN UsuarioRol ur ON ur.id_usuario = u.id_usuario AND ur.estado = 'Activo'
@@ -190,7 +194,7 @@ const profileSchema = z.object({
   }).strict().optional(),
 }).strict().default({})
 
-const userSchema = z.object({ code: z.string().trim().min(2).max(20), document: identityDocumentSchema, name: personNameSchema, email: institutionalEmailSchema, roles: userRolesSchema, profiles: profileSchema }).strict()
+const userSchema = z.object({ code: z.string().trim().min(2).max(20), document: identityDocumentSchema, name: personNameSchema, email: institutionalEmailSchema, phone: contactPhoneSchema, roles: userRolesSchema, profiles: profileSchema }).strict()
 const userUpdateSchema = userSchema.partial().extend({ status: z.enum(['Activo', 'Inactivo']).optional(), profiles: profileSchema.optional() }).strict().refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo para actualizar.')
 
 function validateProfiles(input: any) {
@@ -259,7 +263,7 @@ export async function createAdminUser(payload: unknown) {
   const { names, surnames } = splitName(input.name); const connection = await pool.getConnection()
   try {
     await connection.beginTransaction(); const roleRows = await roleIds(connection, input.roles)
-    const [result] = await connection.execute('INSERT INTO Usuario (codigo,documento,nombres,apellidos,correo,estado) VALUES (?,?,?,?,? ,\'Activo\')', [input.code, input.document, names, surnames, input.email])
+    const [result] = await connection.execute('INSERT INTO Usuario (codigo,documento,nombres,apellidos,correo,telefono,estado) VALUES (?,?,?,?,?,?,\'Activo\')', [input.code, input.document, names, surnames, input.email, input.phone ?? null])
     const id = result.insertId; const hash = await bcrypt.hash(input.document, 12)
     await connection.execute("INSERT INTO Credencial (usuario,password_hash,ultimo_acceso,primer_inicio,estado,id_usuario) VALUES (?,?,NULL,1,'Activo',?)", [input.email, hash, id])
     for (const role of roleRows) await connection.execute("INSERT INTO UsuarioRol (id_usuario,id_rol,estado) VALUES (?,?, 'Activo')", [id, role.id])
@@ -274,7 +278,7 @@ export async function updateAdminUser(id: number, payload: unknown) {
     await connection.beginTransaction(); const [existing] = await connection.query('SELECT * FROM Usuario WHERE id_usuario=?', [id]); if (!existing.length) throw new DataError(404, 'USER_NOT_FOUND', 'El usuario no existe.')
     const current = await findAdminUser(id); const selectedRoles = input.roles ?? current.roles; if (input.roles !== undefined || profilesProvided) validateProfiles({ roles: selectedRoles, profiles: input.profiles ?? current.profiles, code: input.code ?? current.code, email: input.email ?? current.email })
     const fields: string[] = []; const values: any[] = []
-    for (const [key, column] of [['code','codigo'],['document','documento'],['email','correo'],['status','estado']] as const) if (input[key] !== undefined) { fields.push(`${column}=?`); values.push(input[key]) }
+    for (const [key, column] of [['code','codigo'],['document','documento'],['email','correo'],['phone','telefono'],['status','estado']] as const) if (input[key] !== undefined) { fields.push(`${column}=?`); values.push(input[key]) }
     if (input.name) { const name = splitName(input.name); fields.push('nombres=?','apellidos=?'); values.push(name.names,name.surnames) }
     if (fields.length) { values.push(id); await connection.execute(`UPDATE Usuario SET ${fields.join(',')} WHERE id_usuario=?`, values) }
     if (input.status) {

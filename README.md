@@ -174,6 +174,10 @@ La edición de espacios también valida la dirección final resultante (no solo 
 
 La única combinación multirrol permitida es **Monitor + Estudiante**. Administrador, Tutor y Estudiante pueden asignarse individualmente; Administrador y Tutor no se combinan con otros roles. La interfaz deshabilita opciones incompatibles, y la API/OpenAPI aplican la misma regla para altas y ediciones.
 
+### Número de contacto de usuario
+
+El formulario administrativo de creación y edición incluye el número de contacto guardado en `Usuario.telefono`. El dato es opcional y se puede dejar vacío; si se proporciona, admite dígitos y separadores telefónicos usuales, con un máximo de 20 caracteres. La API conserva el valor durante la edición cuando el campo no se envía y permite borrarlo enviando vacío o `null`.
+
 ### Estructura de códigos institucionales autogenerados (Solo lectura)
 En ningún formulario del software es posible escribir o alterar manualmente el código institucional (`readOnly`). La aplicación genera códigos coherentes y aleatorios según el rol o entidad:
 - **Administrador**: `ADM###` (ej. `ADM482`).

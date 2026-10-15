@@ -222,6 +222,7 @@ El formulario de usuario ofrece una selección única de asignatura para Tutor y
 La API es la validación autoritativa y rechaza propiedades desconocidas en los contratos administrativos. La interfaz aporta restricciones HTML equivalentes para prevenir errores antes del envío.
 
 - Usuarios: correo `@unitropico.edu.co`, normalizado a minúsculas; documento de 5–20 dígitos; nombre completo con nombre y apellido; longitudes alineadas con MariaDB. Código de estudiante sincronizado con el código institucional y correo de perfil Administrador sincronizado con el correo de cuenta.
+- En creación/edición administrativa de usuarios, `phone` es opcional y corresponde a `Usuario.telefono` (`VARCHAR(20)`). Si se informa, admite un número de al menos 7 dígitos con prefijo y separadores telefónicos habituales. Enviar cadena vacía o `null` lo limpia; omitirlo en un PATCH conserva el valor.
 - Perfiles: semestre 1–12; horas semanales enteras y dentro del límite; una asignatura por perfil Tutor/Monitor; límites de tamaño acordes con las columnas.
 - Espacios: código alfanumérico/guiones, tipo permitido, nombre y capacidad entera de 1–1000; texto opcional recortado y limitado a la columna correspondiente. Se aceptan códigos legados al editar.
 - Solicitudes: motivo y descripción no vacíos y con longitudes acotadas. Una sesión asignada debe tener fecha válida, no pasada, horas válidas y caer dentro del periodo de la solicitud.

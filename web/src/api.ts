@@ -5,6 +5,7 @@ export type ApiUser = {
   code: string
   name: string
   email: string
+  phone?: string | null
   roles: Role[]
   status: 'Activo' | 'Inactivo'
   initials: string
@@ -215,11 +216,11 @@ export function listUsers(accessToken: string) {
   return request<Paginated<ApiUser>>('/users?page=1&pageSize=100', authenticatedOptions(accessToken))
 }
 
-export function createUser(accessToken: string, input: { code: string; document: string; name: string; email: string; roles: Role[]; profiles: RoleProfiles }) {
+export function createUser(accessToken: string, input: { code: string; document: string; name: string; email: string; phone?: string | null; roles: Role[]; profiles: RoleProfiles }) {
   return request<ApiUser>('/users', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(input) }))
 }
 
-export function updateUser(accessToken: string, id: number, input: Partial<{ code: string; document: string; name: string; email: string; roles: Role[]; status: 'Activo' | 'Inactivo'; profiles: RoleProfiles }>) {
+export function updateUser(accessToken: string, id: number, input: Partial<{ code: string; document: string; name: string; email: string; phone: string | null; roles: Role[]; status: 'Activo' | 'Inactivo'; profiles: RoleProfiles }>) {
   return request<ApiUser>(`/users/${id}`, authenticatedOptions(accessToken, { method: 'PATCH', body: JSON.stringify(input) }))
 }
 

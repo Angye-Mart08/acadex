@@ -143,6 +143,7 @@ type User = {
   name: string
   email: string
   document?: string
+  phone?: string | null
   roles: Role[]
   status: Status
   initials: string
@@ -952,6 +953,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
       return
     }
     const email = String(form.get('email') ?? '').trim().toLowerCase()
+    const phone = String(form.get('phone') ?? '').trim()
     const document = String(form.get('document') ?? '').trim()
     const code = editingUser ? editingUser.code : (userCode || String(form.get('code') ?? '').trim().toUpperCase())
     const profiles: RoleProfiles = {}
@@ -974,10 +976,10 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
     }
     try {
       if (editingUser) {
-        const saved = await updateUserApi(accessToken, editingUser.id, { code, document, name, email, roles, profiles })
+        const saved = await updateUserApi(accessToken, editingUser.id, { code, document, name, email, phone, roles, profiles })
         onChange(users.map((user) => user.id === editingUser.id ? saved as User : user))
       } else {
-        const saved = await createUserApi(accessToken, { code, document, name, email, roles, profiles })
+        const saved = await createUserApi(accessToken, { code, document, name, email, phone, roles, profiles })
         onChange([saved as User, ...users])
       }
       setModal(false)
@@ -1084,6 +1086,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
         </div>
         <label>Nombre completo<input name="name" required minLength={5} maxLength={160} pattern=".*\s+.*" title="Ingresa al menos un nombre y un apellido." autoComplete="name" defaultValue={editingUser?.name ?? ''} placeholder="Ej. Ana María López" /></label>
         <label>Correo institucional<input type="email" name="email" required maxLength={120} pattern=".+@unitropico[.]edu[.]co" title="Usa tu correo institucional @unitropico.edu.co." autoComplete="email" defaultValue={editingUser?.email ?? ''} placeholder="correo@unitropico.edu.co" /></label>
+        <label>Número de contacto (opcional)<input type="tel" name="phone" maxLength={20} pattern="\+?[0-9\s().-]{7,20}" title="Ingresa al menos 7 dígitos; puedes usar +, espacios, paréntesis, puntos o guiones." autoComplete="tel" defaultValue={editingUser?.phone ?? ''} placeholder="Ej. +57 310 123 4567" /><small className="form-field-hint">Dato de contacto no obligatorio.</small></label>
         <fieldset className="role-options">
           <legend>Roles de acceso</legend>
           {(['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as Role[]).map((availableRole) => (

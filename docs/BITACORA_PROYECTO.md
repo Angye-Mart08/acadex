@@ -655,3 +655,9 @@ Esta actualización deja el código y la documentación preparados para la revis
 - Se deshabilitan los checkboxes incompatibles, se muestran las reglas en el formulario y se vuelve a comprobar la combinación antes del envío. La edición también permite retirar roles ya seleccionados.
 - La API rechaza combinaciones inválidas en `POST /users` y `PATCH /users/{id}`. El contrato OpenAPI refleja las cinco combinaciones mediante `UserRoles`.
 - Verificación: typecheck API, validación OpenAPI y build frontend; casos inválidos rechazados antes de conectar a la base de datos. Sin cambios en MariaDB.
+
+## Número de contacto opcional en el formulario de usuario
+
+- Se incorporó el teléfono de contacto ya existente en `Usuario.telefono` al formulario administrativo de creación y edición; se precarga al editar y no se exige para guardar.
+- La API valida el formato cuando se proporciona, lo persiste en altas y actualizaciones, y permite conservarlo al omitir el campo en PATCH o quitarlo con un valor vacío/null. El contrato OpenAPI y la documentación del modelo/API quedaron sincronizados.
+- No se modificó el esquema de MariaDB porque la columna ya existe.
