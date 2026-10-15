@@ -9,7 +9,10 @@ export const roles = ['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as cons
 export type Role = typeof roles[number]
 
 const loginSchema = z.object({
-  email: z.string().trim().email().max(120),
+  email: z.string().trim().email().max(120).refine(
+    (value) => value.toLowerCase().endsWith('@unitropico.edu.co'),
+    'Usa tu correo institucional @unitropico.edu.co.',
+  ).transform((value) => value.toLowerCase()),
   password: z.string().min(1).max(72).refine((value) => Buffer.byteLength(value, 'utf8') <= 72, 'La contraseña supera el límite admitido.'),
 }).strict()
 

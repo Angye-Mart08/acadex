@@ -5,6 +5,7 @@ export type ApiUser = {
   code: string
   name: string
   email: string
+  phone?: string | null
   roles: Role[]
   status: 'Activo' | 'Inactivo'
   initials: string
@@ -109,6 +110,7 @@ export type AdminReport = {
 }
 
 export type CredentialAccount = { id: number; code: string; email: string; name: string; status: string; roles: Role[] }
+export type TemporaryCredentialExport = { generatedAt: string; role: Role; accounts: Array<Pick<CredentialAccount, 'id' | 'code' | 'email' | 'name' | 'roles'> & { temporaryPassword: string }> }
 export type AppSetting = { id: number; clave: string; valor: string; tipo: string; descripcion?: string; updatedAt?: string }
 
 export type Paginated<T> = {
@@ -214,11 +216,11 @@ export function listUsers(accessToken: string) {
   return request<Paginated<ApiUser>>('/users?page=1&pageSize=100', authenticatedOptions(accessToken))
 }
 
-export function createUser(accessToken: string, input: { code: string; document: string; name: string; email: string; roles: Role[]; profiles: RoleProfiles }) {
+export function createUser(accessToken: string, input: { code: string; document: string; name: string; email: string; phone?: string | null; roles: Role[]; profiles: RoleProfiles }) {
   return request<ApiUser>('/users', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(input) }))
 }
 
-export function updateUser(accessToken: string, id: number, input: Partial<{ code: string; document: string; name: string; email: string; roles: Role[]; status: 'Activo' | 'Inactivo'; profiles: RoleProfiles }>) {
+export function updateUser(accessToken: string, id: number, input: Partial<{ code: string; document: string; name: string; email: string; phone: string | null; roles: Role[]; status: 'Activo' | 'Inactivo'; profiles: RoleProfiles }>) {
   return request<ApiUser>(`/users/${id}`, authenticatedOptions(accessToken, { method: 'PATCH', body: JSON.stringify(input) }))
 }
 
@@ -280,6 +282,10 @@ export function listCredentials(accessToken: string, role = '') {
 
 export function resetCredential(accessToken: string, id: number) {
   return request<{ id: number; temporaryPassword: string }>(`/admin/configuration/credentials/${id}/reset`, authenticatedOptions(accessToken, { method: 'POST' }))
+}
+
+export function exportTemporaryCredentials(accessToken: string, role: Role) {
+  return request<TemporaryCredentialExport>('/admin/configuration/credentials/export', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify({ role }) }))
 }
 
 export function changePassword(accessToken: string, input: { currentPassword: string; newPassword: string; confirmPassword: string }) {

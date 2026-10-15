@@ -5,7 +5,6 @@ import {
   AdminDashboard,
   AdminReport,
   ApiError,
-  AppSetting,
   CredentialAccount,
   DbStatus,
   PortalAvailability,
@@ -22,6 +21,7 @@ import {
   deleteAcademicPeriod,
   deleteSpace as deleteSpaceApi,
   deleteUser as deleteUserApi,
+  exportTemporaryCredentials as exportTemporaryCredentialsApi,
   getAdminCatalogs,
   getAdminDashboard,
   getAdminReport,
@@ -33,7 +33,6 @@ import {
   listPortalAvailability as listPortalAvailabilityApi,
   listPortalSessions as listPortalSessionsApi,
   listRequests as listRequestsApi,
-  listSettings,
   listSpaces as listSpacesApi,
   listSubjects as listSubjectsApi,
   listUsers as listUsersApi,
@@ -43,11 +42,11 @@ import {
   resetCredential,
   selectRole as selectRoleApi,
   updateRequest as updateRequestApi,
-  updateSettings,
   updateAcademicPeriod,
   updateSpace as updateSpaceApi,
   updateUser as updateUserApi,
 } from './api'
+import { logNavigation } from './navigation-log'
 import {
   Activity,
   ArrowRight,
@@ -127,6 +126,12 @@ function generateSpaceCode(type: string, existingCodes: string[] = []): string {
 }
 
 type Role = 'Administrador' | 'Tutor' | 'Monitor' | 'Estudiante'
+function isValidUserRoleSet(roles: Role[]) {
+  if (!roles.length || roles.length > 2) return false
+  if (roles.includes('Administrador') || roles.includes('Tutor')) return roles.length === 1
+  if (roles.includes('Monitor')) return roles.length === 1 || (roles.length === 2 && roles.includes('Estudiante'))
+  return roles.length === 1 && roles[0] === 'Estudiante'
+}
 type PortalRole = Exclude<Role, 'Administrador'>
 type View = 'dashboard' | 'usuarios' | 'espacios' | 'solicitudes' | 'reportes' | 'configuracion'
 type PortalView = 'inicio' | 'disponibilidad' | 'horarios' | 'solicitudes' | 'sesiones' | 'informes' | 'solicitar' | 'mis-solicitudes' | 'mis-sesiones'
@@ -138,6 +143,7 @@ type User = {
   name: string
   email: string
   document?: string
+  phone?: string | null
   roles: Role[]
   status: Status
   initials: string
@@ -206,6 +212,12 @@ function App() {
   const [dashboardData, setDashboardData] = useState<AdminDashboard | null>(null)
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
+  const activeView = selectedRole === 'Administrador' ? view : portalView
+
+  useEffect(() => {
+    if (!authenticated || !selectedRole || currentUser?.mustChangePassword) return
+    logNavigation(selectedRole, activeView)
+  }, [authenticated, currentUser?.mustChangePassword, selectedRole, activeView])
 
   useEffect(() => {
     if (!accessToken) {
@@ -367,7 +379,7 @@ function App() {
       {view === 'espacios' && <SpacesView spaces={spaces} accessToken={accessToken} onChange={setSpaces} />}
       {view === 'solicitudes' && <RequestsView requests={requests} accessToken={accessToken} catalogs={adminCatalogs} onChange={setRequests} />}
       {view === 'reportes' && <ReportsView accessToken={accessToken} catalogs={adminCatalogs} />}
-      {view === 'configuracion' && <ConfigurationView accessToken={accessToken} />}
+      {view === 'configuracion' && <ConfigurationView accessToken={accessToken} currentUser={currentUser} />}
     </AdminShell>
   )
 }
@@ -440,7 +452,7 @@ function LoginPage({ onSubmit, error }: { onSubmit: (event: FormEvent<HTMLFormEl
             <p>Sistema de Gestión de Monitorías y Tutorías Académicas.</p>
           </div>
           <form className="login-form" onSubmit={submitLogin}>
-            <label>Correo institucional<div className="login-input"><Mail size={18} /><input name="email" type="email" placeholder="nombre@unitropico.edu.co" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></label>
+            <label>Correo institucional<div className="login-input"><Mail size={18} /><input name="email" type="email" pattern=".+@unitropico[.]edu[.]co" title="Usa tu correo institucional @unitropico.edu.co." placeholder="nombre@unitropico.edu.co" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></label>
             <label>Contraseña<div className="password-field login-input"><LockKeyhole size={18} /><input name="password" type={showPassword ? 'text' : 'password'} placeholder="Ingresa tu contraseña" autoComplete="current-password" minLength={1} maxLength={72} required /><button type="button" aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
             <div className="form-row"><label className="check-label"><input type="checkbox" checked={rememberEmail} onChange={(event) => setRememberEmail(event.target.checked)} /> <span>Recordarme</span></label></div>
             {error && <div className="form-error"><CircleAlert size={16} />{error}</div>}
@@ -776,6 +788,7 @@ function StudentRequestForm({ accessToken, subjects, user, requests, onChange }:
           <textarea
             name="reason"
             required
+            minLength={5}
             maxLength={500}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -856,7 +869,7 @@ function ActivityRow({ title, description, time, color }: { title: string; descr
   return <div className="activity-row"><span className={`activity-dot ${color}`} /><div><strong>{title}</strong><span>{description}</span></div><time>{time}</time></div>
 }
 
-function RoleProfileFields({ roles, catalogs, user, generatedCode }: { roles: Role[]; catalogs: AdminCatalogs | null; user: User | null; generatedCode: string }) {
+function RoleProfileFields({ roles, catalogs, user }: { roles: Role[]; catalogs: AdminCatalogs | null; user: User | null }) {
   const profiles = user?.profiles ?? {}
   const admin = profiles.administrador
   const student = profiles.estudiante
@@ -868,8 +881,8 @@ function RoleProfileFields({ roles, catalogs, user, generatedCode }: { roles: Ro
   const monitorAssignments = Array.isArray(monitor?.assignments) ? monitor.assignments : []
   return <div className="role-profile-sections">
     <p className="form-section-title">Información específica de los roles seleccionados</p>
-    {roles.includes('Administrador') && <fieldset className="role-profile-fieldset"><legend><ShieldCheck size={15} /> Administrador</legend><div className="form-columns"><label>Cargo<input name="adminCargo" required defaultValue={admin?.cargo ?? ''} placeholder="Coordinación académica" /></label><label>Dependencia<input name="adminDependency" required defaultValue={admin?.dependencia ?? ''} placeholder="Facultad o dependencia" /></label></div><label>Observaciones del rol<textarea name="adminObservations" defaultValue={admin?.observaciones ?? ''} placeholder="Responsabilidades o notas del rol" /></label></fieldset>}
-    {roles.includes('Estudiante') && <fieldset className="role-profile-fieldset"><legend><GraduationCap size={15} /> Estudiante</legend><div className="form-columns"><label>Código estudiantil<input name="studentCode" value={user ? (student?.studentCode || user.code) : generatedCode} readOnly className="readonly-code-input" title="Sincronizado con el código institucional" /><small className="form-field-hint">Sincronizado de forma automática con el código institucional (no editable).</small></label><label>Semestre actual<select name="studentSemester" defaultValue={student?.semestre || 1}>{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((s) => <option key={s} value={s}>Semestre {s}</option>)}</select></label></div><label>Programa académico<select name="studentProgramId" required defaultValue={student?.programId ?? ''}><option value="">Selecciona un programa académico de la universidad</option>{(catalogs?.programs ?? []).map((program) => <option key={program.id} value={program.id}>{program.codigo} · {program.nombre}</option>)}</select></label></fieldset>}
+    {roles.includes('Administrador') && <fieldset className="role-profile-fieldset"><legend><ShieldCheck size={15} /> Administrador</legend><div className="form-columns"><label>Cargo<input name="adminCargo" required minLength={2} maxLength={120} defaultValue={admin?.cargo ?? ''} placeholder="Coordinación académica" /></label><label>Dependencia<input name="adminDependency" required minLength={2} maxLength={120} defaultValue={admin?.dependencia ?? ''} placeholder="Facultad o dependencia" /></label></div><label>Observaciones del rol<textarea name="adminObservations" maxLength={300} defaultValue={admin?.observaciones ?? ''} placeholder="Responsabilidades o notas del rol" /></label></fieldset>}
+    {roles.includes('Estudiante') && <fieldset className="role-profile-fieldset"><legend><GraduationCap size={15} /> Estudiante</legend><div className="form-columns"><label>Semestre actual<select name="studentSemester" defaultValue={student?.semestre || 1}>{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((s) => <option key={s} value={s}>Semestre {s}</option>)}</select></label><label>Programa académico<select name="studentProgramId" required defaultValue={student?.programId ?? ''}><option value="">Selecciona un programa académico de la universidad</option>{(catalogs?.programs ?? []).map((program) => <option key={program.id} value={program.id}>{program.codigo} · {program.nombre}</option>)}</select></label></div></fieldset>}
     {roles.includes('Tutor') && <fieldset className="role-profile-fieldset"><legend><GraduationCap size={15} /> Tutor</legend><div className="form-columns"><label>Categoría docente<select name="tutorCategory" defaultValue={tutor?.teachingCategory ?? 'Profesor Asistente'}><option>Profesor Titular</option><option>Profesor Asociado</option><option>Profesor Asistente</option><option>Profesor Auxiliar</option><option>Docente Ocasional</option><option>Docente Catedrático</option></select></label><label>Tipo de vinculación<select name="tutorEmployment" defaultValue={tutor?.employmentType ?? 'Tiempo completo'}><option>Tiempo completo</option><option>Medio tiempo</option><option>Cátedra</option><option>Planta</option></select></label><label>Periodo académico<select name="tutorPeriodId" required defaultValue={tutorAssignments[0]?.periodId ?? periods.find((period) => period.estado === 'Activo')?.id ?? ''}>{periods.map((period) => <option key={period.id} value={period.id}>{period.nombre} · {period.estado}</option>)}</select></label><label>Horas semanales<input type="number" min="1" max="60" name="tutorHours" required defaultValue={tutor?.weeklyHours ?? 20} /></label></div><SubjectAssignmentSelect label="Asignatura asignada (MariaDB)" name="tutorSubjectIds" subjects={subjects} selectedIds={tutorAssignments.filter((assignment) => assignment.status === 'Activa').map((assignment) => assignment.subjectId)} /><label>Observaciones del tutor<textarea name="tutorObservations" defaultValue={tutor?.observations ?? ''} placeholder="Notas docentes, disponibilidad horaria o restricciones" /></label></fieldset>}
     {roles.includes('Monitor') && <fieldset className="role-profile-fieldset"><legend><BookOpen size={15} /> Monitor</legend><div className="form-columns"><label>Tipo de monitor<select name="monitorType" defaultValue={monitor?.monitorType ?? 'Monitor académico'}><option>Monitor académico</option><option>Monitor de investigación</option><option>Monitor de bienestar</option><option>Monitor de laboratorio</option><option>Monitor par</option></select></label><label>Resolución<input name="monitorResolution" defaultValue={monitor?.resolution ?? ''} placeholder="Ej. Resolución 2026-01" /></label><label>Periodo académico<select name="monitorPeriodId" required defaultValue={monitorAssignments[0]?.periodId ?? periods.find((period) => period.estado === 'Activo')?.id ?? ''}>{periods.map((period) => <option key={period.id} value={period.id}>{period.nombre} · {period.estado}</option>)}</select></label><label>Horas semanales<input type="number" min="1" max="60" name="monitorHours" required defaultValue={monitor?.weeklyHours ?? 10} /></label></div><SubjectAssignmentSelect label="Asignatura de monitoría (MariaDB)" name="monitorSubjectIds" subjects={subjects} selectedIds={monitorAssignments.filter((assignment) => assignment.status === 'Activa').map((assignment) => assignment.subjectId)} /><label>Observaciones del monitor<textarea name="monitorObservations" defaultValue={monitor?.observations ?? ''} placeholder="Notas operativas, horarios asignados" /></label></fieldset>}
   </div>
@@ -900,15 +913,15 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
   const [status, setStatus] = useState('Todos los estados')
   const [modal, setModal] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
-  const [selectedRoles, setSelectedRoles] = useState<Role[]>(['Estudiante'])
+  const [selectedRoles, setSelectedRoles] = useState<Role[]>([])
   const [userCode, setUserCode] = useState('')
 
   const filtered = users.filter((user) => `${user.name} ${user.email} ${user.code} ${user.document ?? ''}`.toLowerCase().includes(query.toLowerCase()) && (role === 'Todos los roles' || user.roles.includes(role as Role)) && (status === 'Todos los estados' || user.status === status))
 
   const openCreate = () => {
     setEditingUser(null)
-    setSelectedRoles(['Estudiante'])
-    setUserCode(generateUserCode(['Estudiante'], users.map((u) => u.code)))
+    setSelectedRoles([])
+    setUserCode('')
     setModal(true)
   }
 
@@ -923,9 +936,10 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
     const next = selectedRoles.includes(availableRole)
       ? selectedRoles.filter((r) => r !== availableRole)
       : [...selectedRoles, availableRole]
+    if (selectedRoles.includes(availableRole) === false && !isValidUserRoleSet(next)) return
     setSelectedRoles(next)
-    if (!editingUser && next.length > 0) {
-      setUserCode(generateUserCode(next, users.map((u) => u.code)))
+    if (!editingUser) {
+      setUserCode(next.length > 0 ? generateUserCode(next, users.map((u) => u.code)) : '')
     }
   }
 
@@ -934,11 +948,12 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
     const form = new FormData(event.currentTarget)
     const name = String(form.get('name') ?? '').trim()
     const roles = selectedRoles
-    if (!roles.length) {
-      window.alert('Selecciona al menos un rol para el usuario.')
+    if (!isValidUserRoleSet(roles)) {
+      window.alert('Selecciona al menos un rol. Combinaciones permitidas: Administrador solo, Tutor solo, Estudiante solo o Monitor con Estudiante.')
       return
     }
     const email = String(form.get('email') ?? '').trim().toLowerCase()
+    const phone = String(form.get('phone') ?? '').trim()
     const document = String(form.get('document') ?? '').trim()
     const code = editingUser ? editingUser.code : (userCode || String(form.get('code') ?? '').trim().toUpperCase())
     const profiles: RoleProfiles = {}
@@ -961,10 +976,10 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
     }
     try {
       if (editingUser) {
-        const saved = await updateUserApi(accessToken, editingUser.id, { code, document, name, email, roles, profiles })
+        const saved = await updateUserApi(accessToken, editingUser.id, { code, document, name, email, phone, roles, profiles })
         onChange(users.map((user) => user.id === editingUser.id ? saved as User : user))
       } else {
-        const saved = await createUserApi(accessToken, { code, document, name, email, roles, profiles })
+        const saved = await createUserApi(accessToken, { code, document, name, email, phone, roles, profiles })
         onChange([saved as User, ...users])
       }
       setModal(false)
@@ -979,7 +994,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
       window.alert('No puedes eliminar tu propia cuenta de usuario en sesión activa.')
       return
     }
-    if (!window.confirm(`¿Estás seguro de que deseas ELIMINAR permanentemente al usuario ${user.name} (${user.code}) de la base de datos?\n\nEsta operación borrará en cascada todas sus credenciales, roles y asignaciones de MariaDB de manera definitiva.`)) {
+    if (!window.confirm(`¿Eliminar permanentemente al usuario ${user.name} (${user.code})?\n\nSolo se permite si no tiene historial académico u operativo y no es el último administrador. Si tiene registros asociados, desactiva la cuenta para conservarlos.`)) {
       return
     }
     try {
@@ -1048,7 +1063,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
             <div className="generated-code-wrapper">
               <input
                 name="code"
-                required
+                required={selectedRoles.length > 0}
                 value={editingUser ? editingUser.code : userCode}
                 readOnly
                 className="readonly-code-input"
@@ -1058,6 +1073,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
                 <button
                   type="button"
                   className="regenerate-code-btn"
+                  disabled={selectedRoles.length === 0}
                   onClick={() => setUserCode(generateUserCode(selectedRoles, users.map((u) => u.code)))}
                   title="Generar otro código aleatorio"
                 >
@@ -1065,12 +1081,13 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
                 </button>
               )}
             </div>
-            <span className="form-field-hint">Código generado automáticamente según el rol seleccionado (no editable).</span>
+            <span className="form-field-hint">{selectedRoles.length ? 'Código generado automáticamente según el rol seleccionado (no editable).' : 'Selecciona un rol para generar el código institucional.'}</span>
           </label>
-          <label>Documento de identidad<input name="document" required defaultValue={editingUser?.document ?? ''} placeholder="Ej. 1093432540" /></label>
+          <label>Documento de identidad<input name="document" required minLength={5} maxLength={20} pattern="[0-9]{5,20}" inputMode="numeric" autoComplete="off" defaultValue={editingUser?.document ?? ''} placeholder="Ej. 1093432540" /></label>
         </div>
-        <label>Nombre completo<input name="name" required defaultValue={editingUser?.name ?? ''} placeholder="Ej. Ana María López" /></label>
-        <label>Correo institucional<input type="email" name="email" required defaultValue={editingUser?.email ?? ''} placeholder="correo@unitropico.edu.co" /></label>
+        <label>Nombre completo<input name="name" required minLength={5} maxLength={160} pattern=".*\s+.*" title="Ingresa al menos un nombre y un apellido." autoComplete="name" defaultValue={editingUser?.name ?? ''} placeholder="Ej. Ana María López" /></label>
+        <label>Correo institucional<input type="email" name="email" required maxLength={120} pattern=".+@unitropico[.]edu[.]co" title="Usa tu correo institucional @unitropico.edu.co." autoComplete="email" defaultValue={editingUser?.email ?? ''} placeholder="correo@unitropico.edu.co" /></label>
+        <label>Número de contacto (opcional)<input type="tel" name="phone" maxLength={20} pattern="\+?[0-9\s().-]{7,20}" title="Ingresa al menos 7 dígitos; puedes usar +, espacios, paréntesis, puntos o guiones." autoComplete="tel" defaultValue={editingUser?.phone ?? ''} placeholder="Ej. +57 310 123 4567" /><small className="form-field-hint">Dato de contacto no obligatorio.</small></label>
         <fieldset className="role-options">
           <legend>Roles de acceso</legend>
           {(['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as Role[]).map((availableRole) => (
@@ -1080,13 +1097,15 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
                 name="roles"
                 value={availableRole}
                 checked={selectedRoles.includes(availableRole)}
+                disabled={!selectedRoles.includes(availableRole) && !isValidUserRoleSet([...selectedRoles, availableRole])}
                 onChange={() => handleRolesToggle(availableRole)}
               />
               <span>{availableRole}</span>
             </label>
           ))}
+          <small className="form-field-hint">Administrador y Tutor son exclusivos. Monitor solo puede combinarse con Estudiante.</small>
         </fieldset>
-        <RoleProfileFields roles={selectedRoles} catalogs={catalogs} user={editingUser} generatedCode={userCode} />
+        <RoleProfileFields roles={selectedRoles} catalogs={catalogs} user={editingUser} />
         <div className="modal-actions">
           <button type="button" className="secondary-button" onClick={() => setModal(false)}>Cancelar</button>
           <button className="primary-button" type="submit">{editingUser ? 'Guardar cambios' : 'Crear usuario'}</button>
@@ -1152,7 +1171,16 @@ function SpacesView({ spaces, accessToken, onChange }: { spaces: Space[]; access
     const floorVal = String(form.get('floor') ?? '').trim()
     const refVal = String(form.get('reference') ?? '').trim()
     const autoLocation = [buildingVal, blockVal && `Bloque ${blockVal}`, roomVal && `Salón ${roomVal}`, floorVal && `Piso ${floorVal}`].filter(Boolean).join(' · ')
-    const location = refVal ? (autoLocation ? `${autoLocation} (${refVal})` : refVal) : (autoLocation || editingSpace?.location || 'Campus Principal')
+    const location = refVal ? (autoLocation ? `${autoLocation} (${refVal})` : refVal) : (autoLocation || editingSpace?.location || (spaceType === 'Virtual' ? 'Virtual' : ''))
+
+    if (spaceType !== 'Virtual' && ![buildingVal, blockVal, roomVal, refVal, editingSpace?.location].some((value) => value?.trim())) {
+      window.alert('Indica al menos el edificio, bloque, salón o una referencia de ubicación para el espacio.')
+      return
+    }
+    if (location.length > 200) {
+      window.alert('La ubicación calculada supera los 200 caracteres. Reduce la referencia o los datos de ubicación.')
+      return
+    }
 
     const spaceData = {
       code: spaceCode.trim().toUpperCase(),
@@ -1184,7 +1212,7 @@ function SpacesView({ spaces, accessToken, onChange }: { spaces: Space[]; access
     }
   }
   const deleteSpacePermanently = async (space: Space) => {
-    if (!window.confirm(`¿Estás seguro de ELIMINAR PERMANENTEMENTE el espacio "${space.name}" (${space.code})? Esta acción no se puede deshacer y borrará todas sus asignaciones y horarios asociados en MariaDB.`)) return
+    if (!window.confirm(`¿Eliminar permanentemente el espacio "${space.name}" (${space.code})?\n\nSolo se permite si no tiene horarios, reservas o sesiones asociadas. Si está en uso, desactívalo para conservar el historial.`)) return
     try {
       await deleteSpaceApi(accessToken, space.id)
       onChange(spaces.filter((item) => item.id !== space.id))
@@ -1204,6 +1232,7 @@ function SpacesView({ spaces, accessToken, onChange }: { spaces: Space[]; access
   const clearFilters = () => { setQuery(''); setStatus('Todos los estados'); setType('Todos los tipos'); setBuilding('Todos los edificios') }
 
   const calculatedLocation = [previewBuilding, previewBlock && `Bloque ${previewBlock}`, previewRoom && `Salón ${previewRoom}`, previewFloor && `Piso ${previewFloor}`].filter(Boolean).join(' · ')
+  const locationPreview = previewRef ? (calculatedLocation ? `${calculatedLocation} (${previewRef})` : previewRef) : calculatedLocation
 
   return <>
     <PageHeader eyebrow="Administración / Espacios" title="Gestión de espacios" description="Registra la ubicación, capacidad, recursos y disponibilidad de los espacios para tutorías y monitorías." action={<button className="primary-button" onClick={openCreate}><Plus size={18} /> Nuevo espacio</button>} />
@@ -1277,20 +1306,21 @@ function SpacesView({ spaces, accessToken, onChange }: { spaces: Space[]; access
             </div>
             <span className="form-field-hint">Código institucional generado automáticamente según el tipo de espacio (no editable).</span>
           </label>
-          <label>Nombre del espacio<input name="name" required defaultValue={editingSpace?.name ?? ''} placeholder="Ej. Laboratorio de sistemas" /></label>
+          <label>Nombre del espacio<input name="name" required minLength={2} maxLength={120} defaultValue={editingSpace?.name ?? ''} placeholder="Ej. Laboratorio de sistemas" /></label>
         </div>
         <div className="form-columns">
-          <label>Edificio<input name="building" defaultValue={editingSpace?.building ?? ''} placeholder="Edificio principal" onChange={(e) => setPreviewBuilding(e.target.value)} /></label>
-          <label>Bloque<input name="block" defaultValue={editingSpace?.block ?? ''} placeholder="A" onChange={(e) => setPreviewBlock(e.target.value)} /></label>
-          <label>Salón / aula<input name="room" defaultValue={editingSpace?.room ?? ''} placeholder="202B" onChange={(e) => setPreviewRoom(e.target.value)} /></label>
-          <label>Piso<input name="floor" defaultValue={editingSpace?.floor ?? ''} placeholder="2" onChange={(e) => setPreviewFloor(e.target.value)} /></label>
+          <label>Edificio<input name="building" maxLength={80} defaultValue={editingSpace?.building ?? ''} placeholder="Edificio principal" onChange={(e) => setPreviewBuilding(e.target.value)} /></label>
+          <label>Bloque<input name="block" maxLength={20} defaultValue={editingSpace?.block ?? ''} placeholder="A" onChange={(e) => setPreviewBlock(e.target.value)} /></label>
+          <label>Salón / aula<input name="room" maxLength={20} defaultValue={editingSpace?.room ?? ''} placeholder="202B" onChange={(e) => setPreviewRoom(e.target.value)} /></label>
+          <label>Piso<input name="floor" maxLength={10} defaultValue={editingSpace?.floor ?? ''} placeholder="2" onChange={(e) => setPreviewFloor(e.target.value)} /></label>
         </div>
         <div className="location-preview-badge">
           <strong>Ubicación calculada:</strong>
-          <span>{calculatedLocation || (editingSpace?.location || 'Se autogenerará según edificio, bloque, salón y piso')}</span>
+          <span>{locationPreview || (editingSpace?.location || 'Se autogenerará según edificio, bloque, salón y piso')}</span>
         </div>
+        {spaceType !== 'Virtual' && <span className="form-field-hint">Para un espacio presencial, registra al menos el edificio, bloque, salón o una referencia de ubicación.</span>}
         <label>Indicación de referencia o acceso (opcional)
-          <input name="reference" defaultValue="" placeholder="Ej. Costado occidental, frente a la cafetería central" onChange={(e) => setPreviewRef(e.target.value)} />
+          <input name="reference" maxLength={200} defaultValue="" placeholder="Ej. Costado occidental, frente a la cafetería central" onChange={(e) => setPreviewRef(e.target.value)} />
           <span className="form-field-hint">Esta referencia complementará de forma automática los datos físicos del espacio sin redundancia.</span>
         </label>
         <div className="form-columns">
@@ -1306,7 +1336,7 @@ function SpacesView({ spaces, accessToken, onChange }: { spaces: Space[]; access
               <option>Otro</option>
             </select>
           </label>
-          <label>Capacidad de estudiantes<input name="capacity" type="number" min="1" max="1000" required defaultValue={editingSpace?.capacity ?? ''} placeholder="30" /></label>
+          <label>Capacidad de estudiantes<input name="capacity" type="number" min="1" max="1000" step="1" required defaultValue={editingSpace?.capacity ?? ''} placeholder="30" /></label>
           <label>Estado operativo
             <select name="status" defaultValue={editingSpace?.status ?? 'Activo'}>
               <option>Activo</option>
@@ -1314,9 +1344,9 @@ function SpacesView({ spaces, accessToken, onChange }: { spaces: Space[]; access
             </select>
           </label>
         </div>
-        <label>Descripción y características<textarea name="description" defaultValue={editingSpace?.description ?? ''} placeholder="Condiciones de iluminación, aire acondicionado, mobiliario..." /></label>
-        <label>Recursos y tecnología disponible<textarea name="resources" defaultValue={editingSpace?.resources ?? ''} placeholder="Video beam, tablero acrílico, computadores con software especializado..." /></label>
-        <label>Observaciones de uso<textarea name="observations" defaultValue={editingSpace?.observations ?? ''} placeholder="Horarios de mantenimiento, solicitud previa de llaves..." /></label>
+        <label>Descripción y características<textarea name="description" maxLength={300} defaultValue={editingSpace?.description ?? ''} placeholder="Condiciones de iluminación, aire acondicionado, mobiliario..." /></label>
+        <label>Recursos y tecnología disponible<textarea name="resources" maxLength={500} defaultValue={editingSpace?.resources ?? ''} placeholder="Video beam, tablero acrílico, computadores con software especializado..." /></label>
+        <label>Observaciones de uso<textarea name="observations" maxLength={300} defaultValue={editingSpace?.observations ?? ''} placeholder="Horarios de mantenimiento, solicitud previa de llaves..." /></label>
         <div className="modal-actions">
           <button type="button" className="secondary-button" onClick={() => setModal(false)}>Cancelar</button>
           <button className="primary-button" type="submit">{editingSpace ? 'Guardar cambios' : 'Crear espacio'}</button>
@@ -1355,7 +1385,7 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
     }
   }
   const deleteRequestPermanently = async (request: Request) => {
-    if (!window.confirm(`¿Estás seguro de ELIMINAR PERMANENTEMENTE la solicitud #${String(request.id).padStart(4, '0')} (${request.student} · ${request.subject})? Esta acción no se puede deshacer y borrará todas sus sesiones e informes asociados en MariaDB.`)) return
+    if (!window.confirm(`¿Eliminar permanentemente la solicitud #${String(request.id).padStart(4, '0')} (${request.student} · ${request.subject})?\n\nSolo se permite para solicitudes no asignadas y sin sesiones ni clasificaciones. Los registros académicos asociados se conservan; cambia el estado para cerrar solicitudes en curso.`)) return
     try {
       await deleteRequestApi(accessToken, request.id)
       onChange(requests.filter((item) => item.id !== request.id))
@@ -1555,13 +1585,15 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
           <input
             name="motive"
             required
+            minLength={3}
+            maxLength={500}
             value={motiveText}
             onChange={(e) => setMotiveText(e.target.value)}
             placeholder="Ej. SAT - tercera vez cursando la asignatura / Alerta temprana académica"
           />
         </label>
         <label>Descripción detallada de la necesidad
-          <textarea name="description" required placeholder="Explica el contexto académico, notas previas, dificultades con los contenidos y apoyo recomendado..." />
+          <textarea name="description" required minLength={3} maxLength={500} placeholder="Explica el contexto académico, notas previas, dificultades con los contenidos y apoyo recomendado..." />
         </label>
         <div className="modal-actions">
           <button type="button" className="secondary-button" onClick={() => setModal(false)}>Cancelar</button>
@@ -1712,7 +1744,7 @@ function AcademicPeriodsPanel({ accessToken }: { accessToken: string }) {
     setForm({ name: period.nombre, startDate: period.startDate ?? '', endDate: period.endDate ?? '', status: period.estado })
   }
   const remove = async (period: AcademicPeriod) => {
-    if (!window.confirm(`¿Eliminar permanentemente el periodo ${period.nombre}? Solo se puede eliminar si no tiene registros asociados.`)) return
+    if (!window.confirm(`¿Eliminar permanentemente el periodo ${period.nombre}? Solo se permite si no está activo y no tiene solicitudes, horarios ni asignaciones asociadas.`)) return
     setError('')
     try { await deleteAcademicPeriod(accessToken, period.id); await load() }
     catch (deleteError) { setError(deleteError instanceof ApiError ? deleteError.message : 'No fue posible eliminar el periodo.') }
@@ -1721,31 +1753,49 @@ function AcademicPeriodsPanel({ accessToken }: { accessToken: string }) {
   return <section className="panel form-panel settings-panel"><div className="panel-heading"><div><h3>Periodos académicos</h3><p>CRUD administrativo. Los periodos vinculados a solicitudes, horarios o asignaciones no se pueden eliminar.</p></div><CalendarDays size={20} /></div>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<form className="settings-form" onSubmit={save}><label>Nombre<input required minLength={4} maxLength={20} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="2026-2" /></label><div className="form-columns"><label>Fecha inicial<input type="date" required value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label><label>Fecha final<input type="date" required value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.target.value })} /></label><label>Estado<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as AcademicPeriod['estado'] })}><option>Planeado</option><option>Activo</option><option>Finalizado</option></select></label></div><div className="modal-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Crear periodo'}</button>{editingId && <button type="button" className="secondary-button" onClick={cancelEdit}>Cancelar edición</button>}</div></form><div className="table-scroll"><table><thead><tr><th>PERIODO</th><th>VIGENCIA</th><th>ESTADO</th><th /></tr></thead><tbody>{periods.map((period) => <tr key={period.id}><td><strong>{period.nombre}</strong></td><td>{period.startDate} — {period.endDate}</td><td>{period.estado}</td><td className="align-right"><button className="row-action" onClick={() => edit(period)}>Editar</button><button className="delete-action" onClick={() => void remove(period)} title="Eliminar periodo"><Trash2 size={16} /></button></td></tr>)}{!periods.length && <tr><td colSpan={4}>{loading ? 'Cargando periodos...' : 'No hay periodos registrados.'}</td></tr>}</tbody></table></div></section>
 }
 
-function ConfigurationView({ accessToken }: { accessToken: string }) {
+function ConfigurationView({ accessToken, currentUser }: { accessToken: string; currentUser: User }) {
   const [role, setRole] = useState('')
   const [accounts, setAccounts] = useState<CredentialAccount[]>([])
-  const [settings, setSettings] = useState<AppSetting[]>([])
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
   const [loading, setLoading] = useState(false)
+  const [exportingSecrets, setExportingSecrets] = useState(false)
   const loadAccounts = async (selectedRole = role) => { setLoading(true); try { setAccounts(await listCredentials(accessToken, selectedRole)) } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cargar las credenciales.') } finally { setLoading(false) } }
-  useEffect(() => { void Promise.all([loadAccounts(''), listSettings(accessToken).then(setSettings).catch(() => undefined)]) }, [accessToken])
-  const reset = async (account: CredentialAccount) => { if (!window.confirm(`¿Generar una clave temporal nueva para ${account.name}?`)) return; try { const result = await resetCredential(accessToken, account.id); window.alert(`Clave temporal de un solo uso:\n\n${result.temporaryPassword}\n\nEntrégala por un canal seguro. Se exigirá cambiarla al iniciar sesión.`) } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible restablecer la credencial.') } }
+  useEffect(() => { void loadAccounts('') }, [accessToken])
+  const reset = async (account: CredentialAccount) => { if(account.id===currentUser.id)return; if (!window.confirm(`¿Generar una clave temporal nueva para ${account.name}? Revocará su contraseña actual y deberá cambiarla al iniciar sesión.`)) return; try { const result = await resetCredential(accessToken, account.id); window.alert(`Clave temporal de un solo uso:\n\n${result.temporaryPassword}\n\nEntrégala por un canal seguro. Se exigirá cambiarla al iniciar sesión.`) } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible restablecer la credencial.') } }
   const savePassword = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { await changePassword(accessToken, passwords); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }); window.alert('Contraseña actualizada correctamente.') } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cambiar la contraseña.') } }
-  const saveSettings = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { setSettings(await updateSettings(accessToken, settings.map((setting) => ({ key: setting.clave, value: setting.valor })))); window.alert('Configuración guardada.') } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible guardar la configuración.') } }
   const exportCredentials = () => downloadCsv(`cuentas${role ? `-${role.toLowerCase()}` : ''}.csv`, accounts.map((account) => ({ nombre: account.name, codigo: account.code, correo: account.email, roles: account.roles.join(' / '), estado: account.status })))
-  return <><PageHeader eyebrow="Administración / Configuración" title="Configuración y credenciales" description="Gestiona contraseñas, parámetros operativos y supervisión de MariaDB." action={<button className="secondary-button" onClick={exportCredentials} disabled={!accounts.length}><Download size={17} /> Exportar cuentas</button>} /><DatabaseControlPanel accessToken={accessToken} /><AcademicPeriodsPanel accessToken={accessToken} /><div className="configuration-grid"><section className="panel table-panel"><div className="panel-heading"><div><h3>Credenciales de usuarios</h3><p>Las claves nunca se muestran ni se exportan.</p></div><KeyRound size={20} /></div><div className="table-toolbar config-toolbar"><select value={role} onChange={(event) => { setRole(event.target.value); void loadAccounts(event.target.value) }}><option value="">Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Tutor</option><option>Monitor</option></select><button className="secondary-button filter-button" onClick={() => void loadAccounts()}><RefreshCw size={16} /> {loading ? 'Cargando...' : 'Actualizar'}</button></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CLAVE</th><th>ESTADO</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td><div className="user-roles">{account.roles.map((item) => <span className="role-pill" key={item}>{item}</span>)}</div></td><td><code className="credential-code">Protegida</code></td><td>{account.status}</td><td className="align-right"><button className="row-action" onClick={() => void reset(account)}>Generar clave temporal</button></td></tr>)}</tbody></table></div></section><section className="panel form-panel"><div className="panel-heading"><div><h3>Cambiar mi contraseña</h3><p>Usa una contraseña nueva de 8 a 72 caracteres.</p></div><LockKeyhole size={20} /></div><form className="portal-form" onSubmit={savePassword}><label>Contraseña actual<input type="password" required value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label><button className="primary-button" type="submit"><KeyRound size={17} /> Cambiar contraseña</button></form></section></div><section className="panel form-panel settings-panel"><div className="panel-heading"><div><h3>Parámetros institucionales</h3><p>Valores almacenados en la tabla Configuracion.</p></div><Settings2 size={20} /></div><form className="settings-form" onSubmit={saveSettings}>{settings.map((setting) => <label key={setting.id}>{setting.descripcion || setting.clave}<input value={setting.valor} onChange={(event) => setSettings(settings.map((item) => item.id === setting.id ? { ...item, valor: event.target.value } : item))} /></label>)}<button className="primary-button" type="submit"><Check size={17} /> Guardar parámetros</button></form></section></>
+  const eligibleForSecretExport = accounts.filter((account) => account.status === 'Activo' && account.id !== currentUser.id && Boolean(role) && account.roles.includes(role as Role))
+  const exportTemporaryPasswords = async () => {
+    if (!role) { window.alert('Selecciona primero un rol para limitar la exportación.'); return }
+    const count = eligibleForSecretExport.length
+    if (!count) { window.alert('No hay cuentas activas de ese rol disponibles para exportar. Tu propia cuenta se excluye.'); return }
+    if (!window.confirm(`Se generarán claves temporales nuevas para ${count} cuentas activas del rol ${role}. Sus contraseñas actuales dejarán de funcionar. Se descargará un CSV con claves de un solo uso y se exigirá cambiarlas al iniciar sesión. Tu cuenta no se incluirá. Comparte el archivo por un canal seguro. ¿Continuar?`)) return
+    setExportingSecrets(true)
+    try {
+      const result = await exportTemporaryCredentialsApi(accessToken, role as Role)
+      downloadCsv(`claves-temporales-${role.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`, result.accounts.map((account) => ({ nombre: account.name, codigo: account.code, correo: account.email, roles: account.roles.join(' / '), clave_temporal_un_solo_uso: account.temporaryPassword, cambiar_al_ingresar: 'Sí' })))
+      window.alert(`Se descargó el archivo para ${result.accounts.length} cuentas. Las claves solo se devuelven en esta respuesta; guárdalo de forma segura y elimínalo después de entregarlas.`)
+    } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible generar la exportación segura.') }
+    finally { setExportingSecrets(false) }
+  }
+  return <><PageHeader eyebrow="Administración / Configuración" title="Configuración y credenciales" description="Gestiona el acceso de usuarios y la operación académica del sistema." action={<button className="secondary-button" onClick={exportCredentials} disabled={!accounts.length}><Download size={17} /> Exportar listado</button>} /><section className="configuration-section"><header className="configuration-section-heading"><span>OPERACIÓN ACADÉMICA</span><h2>Supervisión y periodos</h2><p>Estado de MariaDB y vigencia del calendario académico.</p></header><div className="configuration-stack"><DatabaseControlPanel accessToken={accessToken} /><AcademicPeriodsPanel accessToken={accessToken} /></div></section><section className="configuration-section"><header className="configuration-section-heading"><span>SEGURIDAD</span><h2>Acceso y credenciales</h2><p>Consulta cuentas, restablece claves temporales y actualiza tu contraseña.</p></header><div className="configuration-grid"><section className="panel table-panel"><div className="panel-heading"><div><h3>Credenciales de usuarios</h3><p>Las claves guardadas no se muestran. Solo se exportan claves temporales de un uso.</p></div><KeyRound size={20} /></div><div className="table-toolbar config-toolbar"><select value={role} onChange={(event) => { setRole(event.target.value); void loadAccounts(event.target.value) }}><option value="">Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Tutor</option><option>Monitor</option></select><button className="secondary-button filter-button" onClick={() => void loadAccounts()}><RefreshCw size={16} /> {loading ? 'Cargando...' : 'Actualizar'}</button></div><div className="credential-export-panel"><div><strong>Exportar claves temporales</strong><span>Selecciona un rol. Las claves actuales se revocan y se exige cambiarlas en el primer acceso.</span></div><button className="secondary-button" type="button" onClick={() => void exportTemporaryPasswords()} disabled={!role || loading || !eligibleForSecretExport.length || exportingSecrets}>{exportingSecrets ? 'Generando...' : `Generar CSV (${eligibleForSecretExport.length})`} <Download size={16} /></button></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CLAVE</th><th>ESTADO</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td><div className="user-roles">{account.roles.map((item) => <span className="role-pill" key={item}>{item}</span>)}</div></td><td><code className="credential-code">Protegida</code></td><td>{account.status}</td><td className="align-right"><button className="row-action" disabled={account.id===currentUser.id || account.status!=='Activo'} title={account.id===currentUser.id ? 'Usa el formulario Cambiar mi contraseña' : 'Generar una clave temporal de un solo uso'} onClick={() => void reset(account)}>Generar clave temporal</button></td></tr>)}</tbody></table></div></section><section className="panel form-panel"><div className="panel-heading"><div><h3>Cambiar mi contraseña</h3><p>Usa una contraseña nueva de 8 a 72 caracteres.</p></div><LockKeyhole size={20} /></div><form className="portal-form" onSubmit={savePassword}><label>Contraseña actual<input type="password" required value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label><button className="primary-button" type="submit"><KeyRound size={17} /> Cambiar contraseña</button></form></section></div></section></>
 }
 
 function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
   if (!rows.length) return
   const headers = Object.keys(rows[0])
-  const csv = [headers.join(','), ...rows.map((row) => headers.map((header) => `"${String(row[header] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n')
+  const escapeCell = (value: unknown) => {
+    const raw = String(value ?? '')
+    const safe = /^[\s]*[=+\-@]/.test(raw) ? `'${raw}` : raw
+    return `"${safe.replace(/"/g, '""')}"`
+  }
+  const csv = [headers.map(escapeCell).join(','), ...rows.map((row) => headers.map((header) => escapeCell(row[header])).join(','))].join('\n')
   const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' }))
-  const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url)
+  const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 function StatusPill({ status }: { status: Status }) { return <span className={`status-pill ${status.toLowerCase()}`}><span />{status}</span> }
 function RequestStatus({ status }: { status: Request['status'] }) { return <span className={`request-status ${status.toLowerCase()}`}><span />{status}</span> }
-function Modal({ title, subtitle, children, onClose, wide = false }: { title: string; subtitle: string; children: ReactNode; onClose: () => void; wide?: boolean }) { return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><div className={`modal ${wide ? 'modal-wide' : ''}`}><div className="modal-header"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="modal-close" onClick={onClose} aria-label="Cerrar"><X size={18} /></button></div>{children}</div></div> }
+function Modal({ title, subtitle, children, onClose, wide = false }: { title: string; subtitle: string; children: ReactNode; onClose: () => void; wide?: boolean }) { return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-subtitle"><div className="modal-header"><div><h2 id="modal-title">{title}</h2><p id="modal-subtitle">{subtitle}</p></div><button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar"><X size={18} /></button></div><div className="modal-body">{children}</div></section></div> }
 
 export default App

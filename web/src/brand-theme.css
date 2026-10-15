@@ -163,8 +163,20 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
 .empty-chart svg { color: #91a39a; }
 .configuration-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .8fr); align-items: start; gap: 16px; }
 .configuration-grid > * { min-width: 0; }
+.configuration-section { display: grid; gap: 12px; margin-bottom: 22px; }
+.configuration-stack { display: grid; gap: 16px; min-width: 0; }
+.configuration-section-heading { display: grid; gap: 4px; padding: 2px 2px 4px; }
+.configuration-section-heading > span { color: #75877d; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
+.configuration-section-heading h2 { margin: 0; color: #263e34; font: 750 18px 'Manrope', sans-serif; }
+.configuration-section-heading p { margin: 0; color: #71827a; font-size: 11px; line-height: 1.5; }
+.configuration-section-secondary { margin-top: 24px; }
 .config-toolbar { justify-content: space-between; margin: 18px 0 14px; }
 .config-toolbar select { min-width: 170px; }
+.credential-export-panel { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 12px 0 16px; border: 1px solid #e5ece7; border-radius: 10px; padding: 13px 14px; background: #f8faf8; }
+.credential-export-panel > div { display: grid; gap: 4px; min-width: 0; }
+.credential-export-panel strong { color: #304c3f; font-size: 11px; }
+.credential-export-panel span { color: #71827a; font-size: 10px; line-height: 1.45; }
+.credential-export-panel button { flex: 0 0 auto; }
 .settings-panel { min-width: 0; }
 .settings-form { display: grid; gap: 12px; }
 .settings-form label, .role-profile-fieldset > label, .space-filter-row label { display: grid; gap: 7px; color: #40564b; font-size: 11px; font-weight: 700; }
@@ -211,9 +223,11 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
   form.modal-form:has(input[name='building']) > label:has(input[name='location']) { display: none; }
 .role-options .role-option { justify-content: flex-start; }
 .role-options .role-option input[type='checkbox'] { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; }
-.modal-backdrop { overflow-y: auto; align-items: start; padding: clamp(12px, 3vh, 28px) 16px; }
-.modal { width: min(100%, 520px); max-height: calc(100vh - 32px); overflow-y: auto; padding: clamp(18px, 2.4vw, 26px); }
-.modal-wide { width: min(100%, 820px); max-height: calc(100vh - 32px); overflow: auto; }
+.modal-backdrop { overflow-y: auto; place-items: center; padding: clamp(16px, 4vh, 36px) 18px; }
+.modal { display: flex; flex-direction: column; width: min(100%, 500px); max-height: min(88dvh, 820px); overflow: hidden; padding: clamp(18px, 2.2vw, 24px); }
+.modal-wide { width: min(100%, 740px); }
+.modal-header { flex: 0 0 auto; align-items: flex-start; margin-bottom: 0; border-bottom: 1px solid #e8eee9; padding-bottom: 14px; }
+.modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 3px 2px 0; scrollbar-gutter: stable; }
 .modal-form { gap: 15px; }
 .modal-form .form-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .modal-form label { color: #40564b; font-size: 12px; font-weight: 650; }
@@ -320,9 +334,10 @@ tbody tr:hover { background: #f1f6f2; }
   .configuration-grid { gap: 12px; }
   .config-toolbar { align-items: stretch; }
   .config-toolbar select { min-width: 0; flex: 1; }
+  .credential-export-panel { align-items: stretch; flex-direction: column; }
   .space-filter-row label { grid-template-columns: 1fr; width: 100%; }
   .space-filter-row select { max-width: none; }
-  .modal-wide { max-height: calc(100vh - 24px); }
+  .modal { max-height: min(90dvh, 820px); }
   .metrics-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .metric-card { min-height: 133px; padding: 15px; }
   .metric-icon { margin-bottom: 12px; }
@@ -342,7 +357,8 @@ tbody tr:hover { background: #f1f6f2; }
 }
 @media (max-width: 600px) {
   .modal-backdrop { padding: 10px; }
-  .modal, .modal-wide { width: 100%; max-height: calc(100dvh - 20px); border-radius: 13px; }
+  .modal, .modal-wide { width: 100%; max-height: calc(100dvh - 20px); border-radius: 15px; padding: 17px; }
+  .modal-body { padding-top: 13px; }
   .modal-form .form-columns { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .request-assignment-fields { padding: 11px; }
   .modal-actions { flex-wrap: wrap; }

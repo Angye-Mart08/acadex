@@ -9,7 +9,8 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "db:inspect": "node scripts/inspect-db.mjs"
+    "db:inspect": "node scripts/inspect-db.mjs",
+    "db:audit": "node scripts/audit-db-integrity.mjs"
   },
   "devDependencies": {
     "@stoplight/prism-cli": "^5.15.1",

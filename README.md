@@ -112,6 +112,30 @@ se deben entregar por un canal seguro y cambiar en el primer inicio de sesión.
 No incluyas correos personales, documentos ni contraseñas en el repositorio,
 las diapositivas o las exportaciones de cuentas.
 
+### Inicio de sesión integrado con MariaDB
+
+El formulario ya no utiliza código de usuario como credencial. La regla actual es:
+
+```text
+Correo institucional + documento de identidad
+```
+
+El documento corresponde al campo `documento` de la tabla `Usuario` y al dato asociado en `Credencial`. La API consulta la relación entre `Usuario`, `Credencial`, `UsuarioRol` y `Rol`, y nunca devuelve el documento ni el hash de contraseña.
+
+La primera validación es compatible con los datos base del SQL. Después de un
+login válido, si el valor de `Credencial.password_hash` todavía está en texto
+plano por ser un dato inicial de desarrollo, la API lo reemplaza por un hash
+bcrypt.
+
+Credenciales demo disponibles en el frontend:
+
+```text
+Administrador: jaysonquintero@unitropico.edu.co / 1000000010
+Tutor:         tutormatematica@unitropico.edu.co / 1007418843
+Monitor:       brayhamlindarte.es@unitropico.edu.co / 1093432540
+Estudiante:    mariaamezquita.es@unitropico.edu.co / 1029663952
+```
+
 ## Documentación principal
 
 - [Documentación de la API](./api/README_API.md)
@@ -138,7 +162,23 @@ asociadas quedan protegidos.
 - **Crear**: Registro con validación de esquemas en API (incluyendo perfiles específicos de Estudiante, Tutor y Monitor).
 - **Editar**: Actualización completa de perfiles, capacidades, recursos y datos operativos.
 - **Validar**: Esquemas de entrada, roles, fechas y transiciones de estado se verifican en el servidor.
-- **Eliminar**: `DELETE` elimina físicamente algunos recursos y dependencias; consulta la guía API antes de usarlo con datos que deban conservarse.
+- **Eliminar**: las operaciones `DELETE` se bloquean ante historial/dependencias; usuarios con actividad se desactivan, y espacios/solicitudes en uso conservan sus registros.
+
+### Edición de usuarios y roles
+
+Al editar un usuario, la selección enviada de roles reemplaza exactamente sus membresías activas. Los roles desmarcados dejan de mostrarse y no se reactivan al cambiar el estado general de la cuenta; cuenta activa/inactiva y pertenencia a roles son estados independientes. Al reactivar una cuenta heredada, se reconstruyen solo los roles respaldados por perfiles activos. Los filtros por rol no reducen la lista de roles que se presenta para editar. El cambio fue probado contra MariaDB con un usuario temporal, eliminado tras la prueba.
+
+La edición de espacios también valida la dirección final resultante (no solo el campo aislado): un espacio presencial no puede quedar sin edificio, bloque, salón o referencia. Los cambios se confirman en transacción.
+
+### Combinaciones de roles
+
+La única combinación multirrol permitida es **Monitor + Estudiante**. Administrador, Tutor y Estudiante pueden asignarse individualmente; Administrador y Tutor no se combinan con otros roles. La interfaz deshabilita opciones incompatibles, y la API/OpenAPI aplican la misma regla para altas y ediciones.
+
+### Número de contacto de usuario
+
+El formulario administrativo de creación y edición incluye el número de contacto guardado en `Usuario.telefono`. El dato es opcional y se puede dejar vacío; si se proporciona, admite dígitos y separadores telefónicos usuales, con un máximo de 20 caracteres. La API conserva el valor durante la edición cuando el campo no se envía y permite borrarlo enviando vacío o `null`.
+
+El formulario de alta inicia sin roles marcados. El administrador selecciona explícitamente uno antes de guardar; puede desmarcarlo también, y las combinaciones permitidas se validan al guardar.
 
 ### Estructura de códigos institucionales autogenerados (Solo lectura)
 En ningún formulario del software es posible escribir o alterar manualmente el código institucional (`readOnly`). La aplicación genera códigos coherentes y aleatorios según el rol o entidad:
@@ -162,3 +202,20 @@ Los formularios de creación y edición comparten tamaños compactos, distribuci
 En la creación administrativa de solicitudes, el tipo Monitoría filtra monitores, Tutoría filtra tutores y Acompañamiento permite escoger el rol. El personal disponible se filtra por asignatura y periodo. Si se selecciona una persona, el formulario solicita fecha, hora y modalidad para crear también la primera sesión; si no hay personal elegible, la solicitud puede registrarse y asignarse después.
 
 En pantallas pequeñas se muestra una acción directa «Cerrar sesión» en la barra superior, además del menú del perfil. Los modales se ajustan al ancho y alto disponibles y permiten desplazamiento interno.
+
+## Guía central para el equipo espejo de auditoría
+
+El flujo de auditoría debe avanzar por capas y dejar evidencia para cada mejora. El detalle de cada cambio se conserva en `docs/BITACORA_PROYECTO.md`; este README es el punto de entrada para ejecutar y revisar el sistema.
+
+1. **Validaciones de registros**: formularios del frontend más validación de dominio en la API. Estado: implementadas y verificadas con compilación/typecheck; ver `api/README_API.md`.
+2. **Restricciones en MariaDB**: añadidas al DDL inicial y con migración manual, no destructiva, para instalaciones existentes. Revisar prevalidaciones y respaldar antes de aplicar; no se ejecuta durante el arranque.
+3. **Auditoría de base de datos**: ejecutada en modo de solo lectura con `cd api; npm run db:audit`. La última ejecución detectó 4 credenciales no bcrypt, 5 códigos estudiantiles discrepantes, 1 rol con varias asignaturas activas y 1 sesión con asignatura/periodo discrepante; una ejecución previa documentaba 6 discrepancias de código, por lo que el cambio de conteo está anotado para reconciliar. Revisar los datos antes de usar cuentas reales; aplicar la migración solo si sus prevalidaciones son cero. Detalle en `database/README.md` y `docs/modelo-datos.md`.
+4. **Registro de espacios**: validado y probado con MariaDB; los espacios presenciales requieren ubicación, la persistencia/confirmación es transaccional y el registro temporal de prueba fue eliminado.
+5. **CRUD y eliminación**: validado; los borrados con dependencias/historial o de último administrador se bloquean con `409`, conservando historial y ofreciendo desactivación. Pruebas MariaDB para usuario, espacio, solicitud y periodo en uso pasaron.
+6. **Log de navegación**: implementado en desarrollo; registra en tiempo real rol/vista en consola y emite `acadex:navigation`. No persiste ni transmite identidad, tokens o datos de formularios.
+7. **Modales**: redimensionados y centrados, con cuerpo desplazable y encabezado/acciones accesibles; build verificado, queda inspección visual manual en tamaños móviles reales.
+8. **Configuración y usuario estudiante**: secciones agrupadas por operación/seguridad y eliminado el código estudiantil duplicado del perfil; el código institucional se sincroniza internamente.
+9. **Entrega de credenciales**: exportación por rol de claves temporales nuevas, de un solo uso y con cambio obligatorio; excluye la cuenta administradora. No se exportan claves existentes ni hashes. Correo automático pendiente de SMTP institucional.
+10. **Parámetros institucionales**: apartado retirado de la configuración del administrador. Se conservaron la tabla y los endpoints existentes para proteger datos y compatibilidad; no se eliminaron parámetros almacenados.
+
+Antes de iniciar auditoría, configurar `.env`, ejecutar `npm run dev`, comprobar `http://localhost:3000/health` y verificar que muestre `database: connected`. Para validar el código: `npm run build:web`, `npm run typecheck:api` y `npm --prefix api run validate`. Los cambios CRUD deben probarse con datos de demostración y confirmarse en HeidiSQL o mediante `npm run db:inspect`; no usar datos reales de estudiantes en evidencias.

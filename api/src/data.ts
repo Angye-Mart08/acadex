@@ -46,8 +46,8 @@ const userSelect = `
          u.estado AS status,
          GROUP_CONCAT(DISTINCT r.nombre ORDER BY r.id_rol SEPARATOR ',') AS roles
     FROM Usuario u
-  LEFT JOIN UsuarioRol ur ON ur.id_usuario = u.id_usuario
-  LEFT JOIN Rol r ON r.id_rol = ur.id_rol
+  LEFT JOIN UsuarioRol ur ON ur.id_usuario = u.id_usuario AND ur.estado = 'Activo'
+  LEFT JOIN Rol r ON r.id_rol = ur.id_rol AND r.estado = 'Activo'
 `
 
 function userFilters(search = '', role = '') {
@@ -59,7 +59,7 @@ function userFilters(search = '', role = '') {
     params.push(value, value, value, value)
   }
   if (role && roles.includes(role)) {
-    where.push('r.nombre = ?')
+    where.push(`EXISTS (SELECT 1 FROM UsuarioRol ur_filter JOIN Rol r_filter ON r_filter.id_rol=ur_filter.id_rol WHERE ur_filter.id_usuario=u.id_usuario AND ur_filter.estado='Activo' AND r_filter.estado='Activo' AND r_filter.nombre=?)`)
     params.push(role)
   }
   return { where: where.join(' AND '), params }
@@ -71,10 +71,7 @@ export async function listUsers({ search = '', role = '', page = 1, pageSize = 1
   const offset = (safePage - 1) * safePageSize
   const filters = userFilters(search, role)
   const [countRows] = await pool.query(
-    `SELECT COUNT(DISTINCT u.id_usuario) AS total FROM Usuario u
-     LEFT JOIN UsuarioRol ur ON ur.id_usuario = u.id_usuario
-     LEFT JOIN Rol r ON r.id_rol = ur.id_rol
-     WHERE ${filters.where}`,
+    `SELECT COUNT(*) AS total FROM Usuario u WHERE ${filters.where}`,
     filters.params,
   )
   const [rows] = await pool.query(
@@ -106,6 +103,23 @@ async function getRoleIds(connection: any, names: string[]) {
   )
   if (rows.length !== uniqueNames.length) throw new DataError(422, 'INVALID_ROLES', 'Uno de los roles no está disponible.')
   return rows
+}
+
+async function restoreProfileRoleMemberships(connection: any, userId: number) {
+  const [profileRoles] = await connection.query(`
+    SELECT r.id_rol
+      FROM Rol r
+     WHERE r.estado='Activo'
+       AND (
+         (r.nombre='Administrador' AND EXISTS (SELECT 1 FROM Administrador p WHERE p.id_usuario=? AND p.estado='Activo')) OR
+         (r.nombre='Estudiante' AND EXISTS (SELECT 1 FROM Estudiante p WHERE p.id_usuario=? AND p.estado='Activo')) OR
+         (r.nombre='Tutor' AND EXISTS (SELECT 1 FROM Tutor p WHERE p.id_usuario=? AND p.estado='Activo')) OR
+         (r.nombre='Monitor' AND EXISTS (SELECT 1 FROM Monitor p WHERE p.id_usuario=? AND p.estado='Activo'))
+       )`, [userId,userId,userId,userId])
+  await connection.execute("UPDATE UsuarioRol SET estado='Inactivo' WHERE id_usuario=?", [userId])
+  for (const role of profileRoles) {
+    await connection.execute("UPDATE UsuarioRol SET estado='Activo' WHERE id_usuario=? AND id_rol=?", [userId,role.id_rol])
+  }
 }
 
 const userInputSchema = z.object({
@@ -175,7 +189,7 @@ export async function updateUser(id: number, payload: unknown) {
       await connection.execute(`UPDATE Usuario SET ${fields.join(', ')} WHERE id_usuario = ?`, values)
       if (input.status) {
         await connection.execute('UPDATE Credencial SET estado = ? WHERE id_usuario = ?', [input.status, id])
-        await connection.execute('UPDATE UsuarioRol SET estado = ? WHERE id_usuario = ?', [input.status, id])
+        if (input.status === 'Activo' && input.roles === undefined) await restoreProfileRoleMemberships(connection,id)
       }
     }
     if (input.roles) {

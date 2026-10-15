@@ -246,6 +246,54 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /admin/configuration/credentials/export:
+    post:
+      tags: [Administración]
+      summary: Generar claves temporales y exportarlas una sola vez por rol
+      description: Genera una clave aleatoria distinta por cuenta activa del rol, invalida la anterior y exige cambiarla en el siguiente inicio. Excluye la cuenta administradora que solicita la exportación; nunca devuelve contraseñas existentes ni hashes.
+      operationId: exportTemporaryCredentials
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/Role' }
+      responses:
+        '200':
+          description: Claves temporales incluidas solo en esta respuesta y no registradas en logs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generatedAt, role, accounts]
+                properties:
+                  generatedAt: { type: string, format: date-time }
+                  role: { $ref: '#/components/schemas/Role' }
+                  accounts:
+                    type: array
+                    maxItems: 500
+                    items:
+                      type: object
+                      required: [id, code, email, name, roles, temporaryPassword]
+                      properties:
+                        id: { type: integer, minimum: 1 }
+                        code: { type: string }
+                        email: { type: string, format: email }
+                        name: { type: string }
+                        roles: { type: array, items: { $ref: '#/components/schemas/Role' } }
+                        temporaryPassword: { type: string, minLength: 16 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /admin/configuration/password:
     patch:
       tags: [Autenticación]
@@ -544,7 +592,7 @@ paths:
           $ref: '#/components/responses/ValidationError'
     delete:
       tags: [Usuarios]
-      summary: Eliminar un usuario
+      summary: Eliminar un usuario sin historial académico u operativo
       operationId: deleteUser
       security:
         - bearerAuth: []
@@ -559,6 +607,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
 
@@ -646,7 +696,7 @@ paths:
           $ref: '#/components/responses/ValidationError'
     delete:
       tags: [Espacios]
-      summary: Eliminar un espacio
+      summary: Eliminar un espacio sin horarios, reservas ni sesiones asociadas
       operationId: deleteSpace
       security:
         - bearerAuth: []
@@ -661,6 +711,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /requests:
     get:
@@ -748,7 +800,7 @@ paths:
           $ref: '#/components/responses/ValidationError'
     delete:
       tags: [Solicitudes]
-      summary: Eliminar una solicitud y sus datos operativos asociados
+      summary: Eliminar una solicitud no asignada y sin historial asociado
       operationId: deleteRequest
       security:
         - bearerAuth: []
@@ -759,6 +811,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /requests/{id}/assign:
     post:
@@ -866,6 +919,12 @@ components:
         type: integer
         minimum: 1
   responses:
+    BadRequest:
+      description: La operación no es válida para el estado o contexto actual (por ejemplo, intentar eliminar la propia cuenta).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     Unauthorized:
       description: Token ausente, inválido o expirado.
       content:
@@ -906,6 +965,30 @@ components:
     Role:
       type: string
       enum: [Administrador, Tutor, Monitor, Estudiante]
+    UserRoles:
+      description: "Combinaciones permitidas: Administrador, Tutor o Estudiante de forma individual; Monitor individual o combinado únicamente con Estudiante."
+      oneOf:
+        - type: array
+          minItems: 1
+          maxItems: 1
+          items: { type: string, enum: [Administrador] }
+        - type: array
+          minItems: 1
+          maxItems: 1
+          items: { type: string, enum: [Tutor] }
+        - type: array
+          minItems: 1
+          maxItems: 1
+          items: { type: string, enum: [Monitor] }
+        - type: array
+          minItems: 1
+          maxItems: 1
+          items: { type: string, enum: [Estudiante] }
+        - type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          items: { type: string, enum: [Monitor, Estudiante] }
     Status:
       type: string
       enum: [Activo, Inactivo]
@@ -926,11 +1009,7 @@ components:
         code: { type: string, maxLength: 20 }
         name: { type: string, minLength: 2, maxLength: 160 }
         email: { type: string, format: email, maxLength: 120 }
-        roles:
-          type: array
-          minItems: 1
-          uniqueItems: true
-          items: { $ref: '#/components/schemas/Role' }
+        roles: { $ref: '#/components/schemas/UserRoles' }
         activeRole:
           $ref: '#/components/schemas/Role'
           description: Rol activo asociado al token de sesión, cuando aplica.
@@ -946,6 +1025,7 @@ components:
           required: [document]
           properties:
             document: { type: string, minLength: 5, maxLength: 20, description: Solo visible en endpoints administrativos protegidos. }
+            phone: { type: [string, 'null'], maxLength: 20, description: Número de contacto opcional. }
     CredentialAccount:
       type: object
       required: [id, code, email, name, status, roles]
@@ -1012,11 +1092,7 @@ components:
           allOf:
             - $ref: '#/components/schemas/Role'
           description: Rol actualmente seleccionado para la sesión.
-        roles:
-          type: array
-          minItems: 1
-          uniqueItems: true
-          items: { $ref: '#/components/schemas/Role' }
+        roles: { $ref: '#/components/schemas/UserRoles' }
         user: { $ref: '#/components/schemas/User' }
     AcademicPeriod:
       type: object
@@ -1060,11 +1136,8 @@ components:
         document: { type: string, minLength: 5, maxLength: 20 }
         name: { type: string, minLength: 2, maxLength: 160 }
         email: { type: string, format: email, maxLength: 120 }
-        roles:
-          type: array
-          minItems: 1
-          uniqueItems: true
-          items: { $ref: '#/components/schemas/Role' }
+        phone: { type: [string, 'null'], maxLength: 20, description: Número de contacto opcional. }
+        roles: { $ref: '#/components/schemas/UserRoles' }
         profiles: { type: object, description: Perfiles académicos requeridos por los roles seleccionados. Tutor y Monitor deben declarar exactamente una asignatura en sus asignaciones. }
     UserUpdate:
       type: object
@@ -1075,11 +1148,8 @@ components:
         document: { type: string, minLength: 5, maxLength: 20 }
         name: { type: string, minLength: 2, maxLength: 160 }
         email: { type: string, format: email, maxLength: 120 }
-        roles:
-          type: array
-          minItems: 1
-          uniqueItems: true
-          items: { $ref: '#/components/schemas/Role' }
+        phone: { type: [string, 'null'], maxLength: 20, description: Número de contacto opcional; se puede enviar vacío o null para quitarlo. }
+        roles: { $ref: '#/components/schemas/UserRoles' }
         status: { $ref: '#/components/schemas/Status' }
         profiles: { type: object, description: Perfiles académicos que se deben actualizar. Tutor y Monitor deben declarar exactamente una asignatura en sus asignaciones. }
     Space:

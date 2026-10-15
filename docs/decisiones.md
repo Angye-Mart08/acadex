@@ -83,12 +83,48 @@ no tienen registros relacionados.
 
 Asimismo, se establece que ningún código institucional (usuarios, espacios o radicados) puede ser digitado manualmente en los formularios. Estos se generan de forma determinística en su prefijo pero aleatoria en sus dígitos numéricos (`ADM###`, `TUT###`, `MON###`, `EST###`, `AUL-###`, `LAB-###`, etc.), manteniendo el atributo `readOnly` y ofreciendo un botón de regeneración aleatoria en la interfaz.
 
-## 11. Asignación de solicitudes y consistencia de atención (14 de octubre de 2026)
+## 11. Asignación de solicitudes y consistencia de atención
 
 Se reutiliza la relación existente `Sesion` ↔ `Solicitud` ↔ `AsignacionAcademica` en lugar de agregar una referencia de responsable directamente a `Solicitud`. Así, una asignación administrativa crea en la misma transacción la sesión inicial y cambia el estado a `Asignada`; solo se ofrecen tutores/monitores con rol, asignatura y periodo activos coincidentes. Esta decisión evita datos de asignación incompletos y no requiere migración de la base.
 
 Los formularios comparten tamaños, espaciado, ayudas de validación y acciones accesibles en modales largos, conservando el sistema de marca existente y sus reglas responsivas.
 
-## 12. Una asignatura por rol de Tutor o Monitor (14 de octubre de 2026)
+## 12. Una asignatura por rol de Tutor o Monitor
 
 El alta y la edición de perfil deben elegir una única asignatura para Tutor y una única asignatura para Monitor. Se usa un selector simple en lugar del multiselector anterior y la API aplica validación estricta de un elemento para que la regla no dependa solo del navegador. Si un usuario mantiene ambos roles, puede tener una asignatura propia para cada rol.
+
+## 13. Validación por capas para los registros
+
+Las restricciones de usabilidad se reflejan en atributos HTML, pero la API conserva la autoridad para normalizar y validar los datos, verificar relaciones de negocio y rechazar campos desconocidos. MariaDB aporta la última barrera mediante tipos, restricciones y claves; su auditoría y ajustes se mantienen como una mejora independiente para no alterar datos/esquemas sin revisión.
+
+## 14. Borrado protegido y conservación del historial
+
+El borrado físico se limita a registros sin dependencias académicas ni operativas. Usuarios con actividad se desactivan; espacios en uso se desactivan; solicitudes asignadas/con historial conservan su estado y registros. El sistema bloquea autoeliminación y eliminación del último administrador. Las verificaciones y los borrados permitidos se ejecutan transaccionalmente y las claves foráneas sirven como última defensa.
+
+## 15. Trazas de navegación privadas en desarrollo
+
+La navegación se registra localmente solo en desarrollo, mediante consola y un `CustomEvent` para diagnóstico en tiempo real. La traza contiene rol, vista y hora; excluye identidad, tokens y datos de formularios y no se persiste ni transmite. Así el equipo puede integrar herramientas de prueba sin convertir los accesos a pantallas en un registro personal permanente.
+
+## 16. Proporción accesible de diálogos
+
+Los formularios extensos usan un diálogo centrado con ancho limitado, alto ligado al viewport y scroll interno independiente. El encabezado y las acciones permanecen disponibles mientras se recorre el contenido; en móviles el diálogo se adapta al ancho y a la altura dinámica.
+
+## 17. Un solo código institucional visible por persona
+
+El perfil Estudiante deja de repetir el código estudiantil porque es el mismo código institucional general del usuario. La interfaz elimina el control duplicado y el servicio deriva ese valor del registro principal para mantener la relación existente en MariaDB y evitar discrepancias al registrar.
+
+## 18. Entrega de claves sin revelar secretos persistidos
+
+No se extraen contraseñas actuales ni hashes. Para compartir acceso, el administrador puede generar claves aleatorias temporales, persistir solo sus hashes bcrypt, invalidar las claves previas y forzar rotación en primer inicio. La exportación se limita por rol, excluye al emisor y devuelve los secretos una sola vez; la entrega por correo queda condicionada a disponer de SMTP institucional aprobado.
+
+## 19. Parámetros institucionales fuera de la interfaz administrativa
+
+Se elimina del panel de Configuración la edición de parámetros institucionales porque no aporta al flujo actual del proyecto. Se conserva la tabla y el contrato/API existentes para evitar una migración destructiva, pérdida de datos o una ruptura innecesaria de compatibilidad. Si en el futuro se retira también el recurso de backend, deberá hacerse mediante una decisión y migración independiente.
+
+## 20. Separación entre estado de cuenta y membresías de rol
+
+`Usuario.estado`/`Credencial.estado` representan acceso global; `UsuarioRol.estado` representa membresía. Una edición de roles define el conjunto final seleccionado y desactiva perfiles/membresías omitidos. Desactivar/reactivar la cuenta no debe alterar esa membresía. Los listados y filtros solo proyectan roles activos, y la reactivación de datos heredados restaura únicamente roles con perfil activo. Esta separación evita que una edición muestre roles retirados o los resucite al reactivar la cuenta.
+
+## 21. Combinaciones excluyentes de roles
+
+Un usuario solo puede tener `Administrador`, `Tutor`, `Estudiante` o `Monitor` individualmente, salvo la combinación válida `Monitor + Estudiante`. Administrador y Tutor son mutuamente exclusivos con cualquier otro rol; Monitor solo es compatible con Estudiante. Se aplica la matriz tanto en la interfaz como en el esquema de API y se expresa en OpenAPI mediante `UserRoles`.
