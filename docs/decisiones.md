@@ -120,3 +120,7 @@ No se extraen contraseñas actuales ni hashes. Para compartir acceso, el adminis
 ## 19. Parámetros institucionales fuera de la interfaz administrativa (15 de octubre de 2026)
 
 Se elimina del panel de Configuración la edición de parámetros institucionales porque no aporta al flujo actual del proyecto. Se conserva la tabla y el contrato/API existentes para evitar una migración destructiva, pérdida de datos o una ruptura innecesaria de compatibilidad. Si en el futuro se retira también el recurso de backend, deberá hacerse mediante una decisión y migración independiente.
+
+## 20. Separación entre estado de cuenta y membresías de rol (15 de octubre de 2026)
+
+`Usuario.estado`/`Credencial.estado` representan acceso global; `UsuarioRol.estado` representa membresía. Una edición de roles define el conjunto final seleccionado y desactiva perfiles/membresías omitidos. Desactivar/reactivar la cuenta no debe alterar esa membresía. Los listados y filtros solo proyectan roles activos, y la reactivación de datos heredados restaura únicamente roles con perfil activo. Esta separación evita que una edición muestre roles retirados o los resucite al reactivar la cuenta.

@@ -164,6 +164,12 @@ asociadas quedan protegidos.
 - **Validar**: Esquemas de entrada, roles, fechas y transiciones de estado se verifican en el servidor.
 - **Eliminar**: las operaciones `DELETE` se bloquean ante historial/dependencias; usuarios con actividad se desactivan, y espacios/solicitudes en uso conservan sus registros.
 
+### Edición de usuarios y roles
+
+Al editar un usuario, la selección enviada de roles reemplaza exactamente sus membresías activas. Los roles desmarcados dejan de mostrarse y no se reactivan al cambiar el estado general de la cuenta; cuenta activa/inactiva y pertenencia a roles son estados independientes. Al reactivar una cuenta heredada, se reconstruyen solo los roles respaldados por perfiles activos. Los filtros por rol no reducen la lista de roles que se presenta para editar. El cambio fue probado contra MariaDB con un usuario temporal, eliminado tras la prueba.
+
+La edición de espacios también valida la dirección final resultante (no solo el campo aislado): un espacio presencial no puede quedar sin edificio, bloque, salón o referencia. Los cambios se confirman en transacción.
+
 ### Estructura de códigos institucionales autogenerados (Solo lectura)
 En ningún formulario del software es posible escribir o alterar manualmente el código institucional (`readOnly`). La aplicación genera códigos coherentes y aleatorios según el rol o entidad:
 - **Administrador**: `ADM###` (ej. `ADM482`).
@@ -193,7 +199,7 @@ El flujo de auditoría debe avanzar por capas y dejar evidencia para cada mejora
 
 1. **Validaciones de registros**: formularios del frontend más validación de dominio en la API. Estado: implementadas y verificadas con compilación/typecheck; ver `api/README_API.md`.
 2. **Restricciones en MariaDB**: añadidas al DDL inicial y con migración manual, no destructiva, para instalaciones existentes. Revisar prevalidaciones y respaldar antes de aplicar; no se ejecuta durante el arranque.
-3. **Auditoría de base de datos**: ejecutada en modo de solo lectura con `cd api; npm run db:audit`. Detectó 4 credenciales no bcrypt, 6 códigos estudiantiles discrepantes, 1 rol con varias asignaturas activas y 1 sesión con asignatura/periodo discrepante. Revisar y remediar los datos antes de usar cuentas reales; aplicar la migración solo si sus propios conteos de prevalidación son cero. Detalle en `database/README.md` y `docs/modelo-datos.md`.
+3. **Auditoría de base de datos**: ejecutada en modo de solo lectura con `cd api; npm run db:audit`. La última ejecución detectó 4 credenciales no bcrypt, 5 códigos estudiantiles discrepantes, 1 rol con varias asignaturas activas y 1 sesión con asignatura/periodo discrepante; una ejecución previa documentaba 6 discrepancias de código, por lo que el cambio de conteo está anotado para reconciliar. Revisar los datos antes de usar cuentas reales; aplicar la migración solo si sus prevalidaciones son cero. Detalle en `database/README.md` y `docs/modelo-datos.md`.
 4. **Registro de espacios**: validado y probado con MariaDB; los espacios presenciales requieren ubicación, la persistencia/confirmación es transaccional y el registro temporal de prueba fue eliminado.
 5. **CRUD y eliminación**: validado; los borrados con dependencias/historial o de último administrador se bloquean con `409`, conservando historial y ofreciendo desactivación. Pruebas MariaDB para usuario, espacio, solicitud y periodo en uso pasaron.
 6. **Log de navegación**: implementado en desarrollo; registra en tiempo real rol/vista en consola y emite `acadex:navigation`. No persiste ni transmite identidad, tokens o datos de formularios.

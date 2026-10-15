@@ -168,6 +168,8 @@ horarios ni asignaciones.
 - Las contraseñas se guardan con bcrypt. Las claves temporales se devuelven una sola vez al restablecerlas y se debe exigir su cambio antes de usar otras rutas.
 - Los tokens de acceso se guardan en el cliente. `POST /auth/logout` exige un token y el frontend lo elimina, pero el servidor no revoca el JWT; este continúa válido hasta su expiración.
 - `POST /users` y `PATCH /users/{id}` reciben `roles[]`, con mínimo un rol y sin valores repetidos.
+- En `PATCH /users/{id}`, `roles[]` representa el conjunto final de roles: las membresías seleccionadas se activan y las omitidas se inactivan. Las respuestas/listados solo exponen roles activos, y filtrar por un rol no oculta los demás roles activos de la cuenta. El estado de `Usuario`/`Credencial` es independiente del estado de membresía en `UsuarioRol`; reactivar una cuenta heredada recupera solo roles con perfiles activos.
+- `PATCH /spaces/{id}` combina el parche con los datos persistidos y valida el estado final del espacio. Si queda como físico, requiere ubicación; el cambio de fila se hace dentro de una transacción.
 - Los listados nunca devuelven claves actuales, hashes ni documentos. La exportación de credenciales solo incluye claves temporales aleatorias, por una única respuesta, revoca la clave previa y fuerza cambio al entrar; se limita a un rol y excluye al administrador solicitante.
 - El backend debe aplicar autorización por rol, además de validar el JWT.
 - Las solicitudes siguen transiciones permitidas: Pendiente → Aprobada/Rechazada/Cancelada; Aprobada → Asignada/Cancelada; Asignada → Atendida/Cancelada; Atendida → Finalizada/Cancelada. Rechazada, Cancelada y Finalizada son terminales.

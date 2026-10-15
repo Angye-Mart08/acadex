@@ -43,8 +43,8 @@ const userSelect = `
          u.estado AS status,
          GROUP_CONCAT(DISTINCT r.nombre ORDER BY r.id_rol SEPARATOR ',') AS roles
     FROM Usuario u
-    LEFT JOIN UsuarioRol ur ON ur.id_usuario = u.id_usuario
-    LEFT JOIN Rol r ON r.id_rol = ur.id_rol
+    LEFT JOIN UsuarioRol ur ON ur.id_usuario = u.id_usuario AND ur.estado = 'Activo'
+    LEFT JOIN Rol r ON r.id_rol = ur.id_rol AND r.estado = 'Activo'
 `
 
 function filters(query: any = {}) {
@@ -56,7 +56,10 @@ function filters(query: any = {}) {
     const value = `%${search}%`
     params.push(value, value, value, value)
   }
-  if (roleNames.includes(query.role)) { where.push('r.nombre = ?'); params.push(query.role) }
+  if (roleNames.includes(query.role)) {
+    where.push(`EXISTS (SELECT 1 FROM UsuarioRol ur_filter JOIN Rol r_filter ON r_filter.id_rol=ur_filter.id_rol WHERE ur_filter.id_usuario=u.id_usuario AND ur_filter.estado='Activo' AND r_filter.estado='Activo' AND r_filter.nombre=?)`)
+    params.push(query.role)
+  }
   if (query.status === 'Activo' || query.status === 'Inactivo') { where.push('u.estado = ?'); params.push(query.status) }
   return { sql: where.join(' AND '), params }
 }
@@ -91,7 +94,7 @@ export async function listAdminUsers(query: any = {}) {
   const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 100))
   const offset = (page - 1) * pageSize
   const condition = filters(query)
-  const [countRows] = await pool.query(`SELECT COUNT(DISTINCT u.id_usuario) AS total FROM Usuario u LEFT JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario LEFT JOIN Rol r ON r.id_rol=ur.id_rol WHERE ${condition.sql}`, condition.params)
+  const [countRows] = await pool.query(`SELECT COUNT(*) AS total FROM Usuario u WHERE ${condition.sql}`, condition.params)
   const [rows] = await pool.query(`${userSelect} WHERE ${condition.sql} GROUP BY u.id_usuario ORDER BY u.id_usuario LIMIT ? OFFSET ?`, [...condition.params, pageSize, offset])
   const total = Number(countRows[0]?.total ?? 0)
   return { data: await normalizeUsers(rows), pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) } }
@@ -110,6 +113,23 @@ async function roleIds(connection: any, selectedRoles: string[]) {
   const [rows] = await connection.query(`SELECT id_rol AS id, nombre FROM Rol WHERE estado='Activo' AND nombre IN (${unique.map(() => '?').join(',')})`, unique)
   if (rows.length !== unique.length) throw new DataError(422, 'INVALID_ROLES', 'Uno de los roles seleccionados no está activo.')
   return rows
+}
+
+async function restoreProfileRoleMemberships(connection: any, userId: number) {
+  const [profileRoles] = await connection.query(`
+    SELECT r.id_rol
+      FROM Rol r
+     WHERE r.estado='Activo'
+       AND (
+         (r.nombre='Administrador' AND EXISTS (SELECT 1 FROM Administrador p WHERE p.id_usuario=? AND p.estado='Activo')) OR
+         (r.nombre='Estudiante' AND EXISTS (SELECT 1 FROM Estudiante p WHERE p.id_usuario=? AND p.estado='Activo')) OR
+         (r.nombre='Tutor' AND EXISTS (SELECT 1 FROM Tutor p WHERE p.id_usuario=? AND p.estado='Activo')) OR
+         (r.nombre='Monitor' AND EXISTS (SELECT 1 FROM Monitor p WHERE p.id_usuario=? AND p.estado='Activo'))
+       )`, [userId,userId,userId,userId])
+  await connection.execute("UPDATE UsuarioRol SET estado='Inactivo' WHERE id_usuario=?", [userId])
+  for (const role of profileRoles) {
+    await connection.execute("UPDATE UsuarioRol SET estado='Activo' WHERE id_usuario=? AND id_rol=?", [userId,role.id_rol])
+  }
 }
 
 const assignmentSchema = z.object({
@@ -206,7 +226,7 @@ async function upsertProfiles(connection: any, id: number, selectedRoles: string
     const s = p.estudiante
     await connection.execute(`INSERT INTO Estudiante (id_usuario,codigo_estudiantil,semestre,estado) VALUES (?,?,?,'Activo') ON DUPLICATE KEY UPDATE codigo_estudiantil=VALUES(codigo_estudiantil),semestre=VALUES(semestre),estado='Activo'`, [id, s.studentCode, s.semester])
     const [studentRows] = await connection.query('SELECT id_estudiante FROM Estudiante WHERE id_usuario=?', [id])
-    await connection.execute("UPDATE EstudiantePrograma SET principal=0 WHERE id_estudiante=?", [studentRows[0].id_estudiante])
+    await connection.execute("UPDATE EstudiantePrograma SET principal=0,estado='Inactivo' WHERE id_estudiante=? AND id_programa<>?", [studentRows[0].id_estudiante,s.programId])
     await connection.execute(`INSERT INTO EstudiantePrograma (id_estudiante,id_programa,principal,fecha_ingreso,estado) VALUES (?,?,1,CURDATE(),'Activo') ON DUPLICATE KEY UPDATE principal=1,estado='Activo'`, [studentRows[0].id_estudiante, s.programId])
   } else await connection.execute("UPDATE Estudiante SET estado='Inactivo' WHERE id_usuario=?", [id])
   if (selectedRoles.includes('Tutor')) {
@@ -237,17 +257,21 @@ export async function createAdminUser(payload: unknown) {
 }
 
 export async function updateAdminUser(id: number, payload: unknown) {
+  const profilesProvided = typeof payload === 'object' && payload !== null && Object.prototype.hasOwnProperty.call(payload, 'profiles')
   const input = userUpdateSchema.parse(payload); const connection = await pool.getConnection()
   try {
     await connection.beginTransaction(); const [existing] = await connection.query('SELECT * FROM Usuario WHERE id_usuario=?', [id]); if (!existing.length) throw new DataError(404, 'USER_NOT_FOUND', 'El usuario no existe.')
-    const current = await findAdminUser(id); const selectedRoles = input.roles ?? current.roles; if (input.roles || input.profiles) validateProfiles({ roles: selectedRoles, profiles: input.profiles ?? current.profiles, code: input.code ?? current.code, email: input.email ?? current.email })
+    const current = await findAdminUser(id); const selectedRoles = input.roles ?? current.roles; if (input.roles !== undefined || profilesProvided) validateProfiles({ roles: selectedRoles, profiles: input.profiles ?? current.profiles, code: input.code ?? current.code, email: input.email ?? current.email })
     const fields: string[] = []; const values: any[] = []
     for (const [key, column] of [['code','codigo'],['document','documento'],['email','correo'],['status','estado']] as const) if (input[key] !== undefined) { fields.push(`${column}=?`); values.push(input[key]) }
     if (input.name) { const name = splitName(input.name); fields.push('nombres=?','apellidos=?'); values.push(name.names,name.surnames) }
     if (fields.length) { values.push(id); await connection.execute(`UPDATE Usuario SET ${fields.join(',')} WHERE id_usuario=?`, values) }
-    if (input.status) { await connection.execute('UPDATE Credencial SET estado=? WHERE id_usuario=?', [input.status,id]); await connection.execute('UPDATE UsuarioRol SET estado=? WHERE id_usuario=?', [input.status,id]) }
+    if (input.status) {
+      await connection.execute('UPDATE Credencial SET estado=? WHERE id_usuario=?', [input.status,id])
+      if (input.status === 'Activo' && !input.roles) await restoreProfileRoleMemberships(connection,id)
+    }
     if (input.roles) { const roleRows = await roleIds(connection,input.roles); await connection.execute("UPDATE UsuarioRol SET estado='Inactivo' WHERE id_usuario=?",[id]); for (const role of roleRows) await connection.execute("INSERT INTO UsuarioRol (id_usuario,id_rol,estado) VALUES (?,?, 'Activo') ON DUPLICATE KEY UPDATE estado='Activo'",[id,role.id]) }
-    if (input.profiles || input.roles) await upsertProfiles(connection,id,selectedRoles,input.profiles ?? current.profiles)
+    if (profilesProvided || input.roles !== undefined) await upsertProfiles(connection,id,selectedRoles,input.profiles ?? current.profiles)
     await connection.commit(); return findAdminUser(id)
   } catch (error) { await connection.rollback(); if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_USER','El código, documento, correo o perfil ya está registrado.'); throw error } finally { connection.release() }
 }
@@ -385,18 +409,28 @@ export async function createAdminSpace(payload:any) {
 }
 export async function updateAdminSpace(id:number,payload:any){
   const input=spaceFieldsSchema.partial().strict().refine((value)=>Object.keys(value).length>0,'Debe enviar al menos un campo.').parse(payload)
-  const [existing]=await pool.query('SELECT id_espacio,codigo,tipo FROM Espacio WHERE id_espacio=?',[id])
-  if(!existing.length)throw new DataError(404,'SPACE_NOT_FOUND','El espacio no existe.')
-  const map:any={code:'codigo',name:'nombre',building:'edificio',block:'bloque',room:'salon',floor:'piso',location:'ubicacion',description:'descripcion',resources:'recursos',observations:'observaciones',capacity:'capacidad',type:'tipo',status:'estado'}
-  const fields:string[]=[];const values:any[]=[]
-  for(const key of Object.keys(map))if(input[key]!==undefined){fields.push(`${map[key]}=?`);values.push(input[key])}
-  values.push(id)
+  const connection=await pool.getConnection()
   try{
-    await pool.execute(`UPDATE Espacio SET ${fields.join(',')} WHERE id_espacio=?`,values)
+    await connection.beginTransaction()
+    const [rows]=await connection.query('SELECT codigo,nombre,edificio,bloque,salon,piso,ubicacion,descripcion,recursos,observaciones,capacidad,tipo,estado FROM Espacio WHERE id_espacio=? FOR UPDATE',[id])
+    if(!rows.length)throw new DataError(404,'SPACE_NOT_FOUND','El espacio no existe.')
+    const current={code:rows[0].codigo,name:rows[0].nombre,building:rows[0].edificio??'',block:rows[0].bloque??'',room:rows[0].salon??'',floor:rows[0].piso??'',location:rows[0].ubicacion??'',description:rows[0].descripcion??'',resources:rows[0].recursos??'',observations:rows[0].observaciones??'',capacity:rows[0].capacidad,type:rows[0].tipo,status:rows[0].estado}
+    const merged=spaceFieldsSchema.parse({...current,...input})
+    const locationFields=['type','building','block','room','location']
+    if(locationFields.some((field)=>input[field]!==undefined)&&merged.type!=='Virtual'&&![merged.building,merged.block,merged.room,merged.location].some((value)=>value?.trim())){
+      throw new DataError(422,'SPACE_LOCATION_REQUIRED','Indica al menos el edificio, bloque, salón o una referencia de ubicación para un espacio presencial.')
+    }
+    const map:any={code:'codigo',name:'nombre',building:'edificio',block:'bloque',room:'salon',floor:'piso',location:'ubicacion',description:'descripcion',resources:'recursos',observations:'observaciones',capacity:'capacidad',type:'tipo',status:'estado'}
+    const fields:string[]=[];const values:any[]=[]
+    for(const key of Object.keys(map))if(input[key]!==undefined){fields.push(`${map[key]}=?`);values.push(input[key])}
+    values.push(id)
+    await connection.execute(`UPDATE Espacio SET ${fields.join(',')} WHERE id_espacio=?`,values)
+    await connection.commit()
   }catch(error:any){
+    await connection.rollback()
     if(error?.code==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_SPACE','El código del espacio ya está registrado.')
     throw error
-  }
+  }finally{connection.release()}
   return (await listAdminSpaces()).find((row)=>row.id===id)
 }
 export async function deleteAdminSpace(id: number) {
@@ -775,9 +809,9 @@ export async function adminDashboard(){const report=await aggregateReport();cons
 export async function adminReport(query:any={}){return {generatedAt:new Date().toISOString(),filters:{subjectId:query.subjectId??null,from:query.from??null,to:query.to??null},...(await aggregateReport(query))}}
 
 export async function listCredentials(role?:string){
-  const condition=roleNames.includes(role)?'AND r.nombre=?':''
+  const condition=roleNames.includes(role)?`AND EXISTS (SELECT 1 FROM UsuarioRol ur_filter JOIN Rol r_filter ON r_filter.id_rol=ur_filter.id_rol WHERE ur_filter.id_usuario=u.id_usuario AND ur_filter.estado='Activo' AND r_filter.estado='Activo' AND r_filter.nombre=?)`:''
   const params:any[]=roleNames.includes(role)?[role]:[]
-  const [rows]=await pool.query(`SELECT u.id_usuario AS id,u.codigo AS code,u.correo AS email,CONCAT(u.nombres,' ',u.apellidos) AS name,u.estado AS status,GROUP_CONCAT(DISTINCT r.nombre ORDER BY r.id_rol SEPARATOR ',') AS roles FROM Usuario u JOIN Credencial c ON c.id_usuario=u.id_usuario LEFT JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario LEFT JOIN Rol r ON r.id_rol=ur.id_rol WHERE 1=1 ${condition} GROUP BY u.id_usuario ORDER BY u.id_usuario`,params)
+  const [rows]=await pool.query(`SELECT u.id_usuario AS id,u.codigo AS code,u.correo AS email,CONCAT(u.nombres,' ',u.apellidos) AS name,u.estado AS status,GROUP_CONCAT(DISTINCT r.nombre ORDER BY r.id_rol SEPARATOR ',') AS roles FROM Usuario u JOIN Credencial c ON c.id_usuario=u.id_usuario LEFT JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.estado='Activo' LEFT JOIN Rol r ON r.id_rol=ur.id_rol AND r.estado='Activo' WHERE 1=1 ${condition} GROUP BY u.id_usuario ORDER BY u.id_usuario`,params)
   return rows.map((row:any)=>({...row,id:Number(row.id),roles:String(row.roles??'').split(',').filter(Boolean)}))
 }
 

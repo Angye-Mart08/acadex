@@ -96,6 +96,14 @@ como un dato único del usuario; pertenece al contexto de la sesión y se elige
 después del login. Por eso el contrato utiliza `roles[]` y contempla
 `POST /auth/select-role`.
 
+El estado global de la cuenta (`Usuario.estado` y `Credencial.estado`) no debe
+reescribir el estado de `UsuarioRol`: desactivar el acceso no elimina la
+membresía; quitar un rol sí inactiva esa relación y su perfil operativo. Así,
+una edición de roles reemplaza únicamente las membresías explícitamente
+seleccionadas, y reactivar una cuenta no resucita roles retirados. Para cuentas
+antiguas que desactivaban ambas capas, la reactivación infiere membresías solo
+de los perfiles de rol que continúan activos.
+
 ## Nota de integración del 14 de octubre de 2026
 
 La asignación de una solicitud no agrega columnas a `Solicitud`: se representa mediante una fila en `Sesion` que enlaza `Sesion.id_solicitud` con `Sesion.id_asignacion`. Esta última referencia `AsignacionAcademica`, cuya persona, rol, asignatura y periodo deben estar activos y coincidir con la solicitud. La atención cierra la sesión como `Realizada` y la solicitud como `Atendida`. El flujo no requiere migración SQL.
@@ -113,3 +121,5 @@ Para instalaciones anteriores, aplicar únicamente después de respaldo y con co
 La auditoría de solo lectura reportó 36 tablas InnoDB, 55 claves foráneas, 26 restricciones `UNIQUE` y cero referencias huérfanas en esas relaciones. Tampoco detectó correos fuera del dominio institucional, perfiles activos sin rol, estudiantes sin programa relacionado ni horarios con fin anterior al inicio.
 
 Quedan hallazgos que requieren revisión: 4 credenciales almacenadas en un formato que no parece bcrypt; 6 perfiles de Estudiante con código distinto al de `Usuario`; una persona con más de una asignatura activa dentro del mismo rol; y una sesión cuyo responsable se relaciona con una asignatura o periodo diferente al de su solicitud. Además, la instalación todavía carece de las nuevas restricciones `CHECK` propuestas (14 adicionales; el horario de `Disponibilidad` y `Sesion` ya contaba con checks anteriores). No se imprimieron valores personales y no se alteró ningún registro. Resolver los hallazgos relevantes y repetir `npm run db:audit` antes de usar información real; ejecutar la migración únicamente si sus propios conteos de prevalidación son cero.
+
+En una reauditoría de solo lectura posterior (15 de octubre de 2026), el conteo de códigos estudiantiles discrepantes fue 5 en lugar de 6. La prueba de edición usó y eliminó un usuario temporal y no modificó registros existentes deliberadamente; la diferencia entre cortes debe reconciliarse antes de cualquier reparación de datos. Los demás hallazgos principales se mantuvieron estables.
