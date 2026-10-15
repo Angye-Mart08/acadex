@@ -126,6 +126,12 @@ function generateSpaceCode(type: string, existingCodes: string[] = []): string {
 }
 
 type Role = 'Administrador' | 'Tutor' | 'Monitor' | 'Estudiante'
+function isValidUserRoleSet(roles: Role[]) {
+  if (!roles.length || roles.length > 2) return false
+  if (roles.includes('Administrador') || roles.includes('Tutor')) return roles.length === 1
+  if (roles.includes('Monitor')) return roles.length === 1 || (roles.length === 2 && roles.includes('Estudiante'))
+  return roles.length === 1 && roles[0] === 'Estudiante'
+}
 type PortalRole = Exclude<Role, 'Administrador'>
 type View = 'dashboard' | 'usuarios' | 'espacios' | 'solicitudes' | 'reportes' | 'configuracion'
 type PortalView = 'inicio' | 'disponibilidad' | 'horarios' | 'solicitudes' | 'sesiones' | 'informes' | 'solicitar' | 'mis-solicitudes' | 'mis-sesiones'
@@ -929,6 +935,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
     const next = selectedRoles.includes(availableRole)
       ? selectedRoles.filter((r) => r !== availableRole)
       : [...selectedRoles, availableRole]
+    if (!isValidUserRoleSet(next)) return
     setSelectedRoles(next)
     if (!editingUser && next.length > 0) {
       setUserCode(generateUserCode(next, users.map((u) => u.code)))
@@ -940,8 +947,8 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
     const form = new FormData(event.currentTarget)
     const name = String(form.get('name') ?? '').trim()
     const roles = selectedRoles
-    if (!roles.length) {
-      window.alert('Selecciona al menos un rol para el usuario.')
+    if (!isValidUserRoleSet(roles)) {
+      window.alert('Roles permitidos: Administrador solo, Tutor solo, Estudiante solo o Monitor con Estudiante.')
       return
     }
     const email = String(form.get('email') ?? '').trim().toLowerCase()
@@ -1086,11 +1093,13 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
                 name="roles"
                 value={availableRole}
                 checked={selectedRoles.includes(availableRole)}
+                disabled={!selectedRoles.includes(availableRole) && !isValidUserRoleSet([...selectedRoles, availableRole])}
                 onChange={() => handleRolesToggle(availableRole)}
               />
               <span>{availableRole}</span>
             </label>
           ))}
+          <small className="form-field-hint">Administrador y Tutor son exclusivos. Monitor solo puede combinarse con Estudiante.</small>
         </fieldset>
         <RoleProfileFields roles={selectedRoles} catalogs={catalogs} user={editingUser} />
         <div className="modal-actions">

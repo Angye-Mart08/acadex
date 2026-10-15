@@ -459,8 +459,6 @@ Para erradicar por completo el fallo reportado en el inicio de sesión («No fue
      * Apertura del modal cronológico de solicitudes (`CalendarModal`) desde el botón «Ver calendario».
      * Carga del panel **Control y Observación de MariaDB** en Configuración, confirmando motor `connected`, 36 tablas activas y conteos en vivo.
 
-
-
 ## 22. Corrección del registro de usuarios, completitud del CRUD con eliminación definitiva y códigos institucionales autogenerados
 
 Para atender los requerimientos de corrección del registro de usuarios, culminar el CRUD administrativo con la operación de eliminación física y estandarizar la generación coherente y no editable de códigos institucionales en todos los formularios, se implementaron las siguientes soluciones:
@@ -525,7 +523,7 @@ Para cumplir la directriz de que ningún usuario pueda escribir manualmente el c
   4. **Sincronización de perfil de estudiante**: En el formulario de perfiles específicos, el campo «Código estudiantil» permanece sincronizado en modo solo lectura con el código institucional asignado.
   5. **Formulario de solicitud estudiantil**: Muestra el código institucional asignado a la cuenta del estudiante en solo lectura para verificación de identidad antes del envío.
 
-## Actualización del 13 de octubre de 2026: preparación del MVP
+## Actualización: preparación del MVP
 
 Se alineó el backend y la documentación con los requisitos de entrega del MVP:
 
@@ -539,7 +537,7 @@ Se alineó el backend y la documentación con los requisitos de entrega del MVP:
 
 Esta actualización deja el código y la documentación preparados para la revisión del MVP. La demostración funcional en vivo y las dos cápsulas técnicas de los grupos 1 y 4 todavía deben prepararse y realizarse el jueves 15 de octubre.
 
-## Actualización del 14 de octubre de 2026: formularios, espacios y solicitudes asignadas
+## Actualización: formularios, espacios y solicitudes asignadas
 
 - Se refinó la presentación de formularios modales: espaciado más claro, controles de lectura cómodos, indicaciones visibles, acciones accesibles al desplazarse y adaptación a pantallas estrechas. Se mantienen los estilos comunes para evitar diferencias visuales entre módulos.
 - El alta de espacios ahora recupera el registro directamente por la clave primaria generada después del `INSERT`, sin depender del listado para confirmar la respuesta. Se añadieron respuestas de validación entendibles para duplicados y formatos rechazados por MariaDB.
@@ -548,7 +546,7 @@ Esta actualización deja el código y la documentación preparados para la revis
 - Se documentaron ambas operaciones nuevas en OpenAPI 3.1. La asignación reutiliza `Sesion.id_solicitud` y `Sesion.id_asignacion`; no requiere migración del esquema.
 - Validación pendiente de entorno: confirmar el flujo completo con cuentas que tengan asignaciones activas de prueba y verificar en MariaDB una creación/edición/eliminación de espacio y la asignación/atención de una solicitud.
 
-## Actualización del 14 de octubre de 2026: formularios adaptables y asignación al radicar
+## Actualización: formularios adaptables y asignación al radicar
 
 - Se estandarizaron los tamaños de formularios de creación y edición (incluidos los CRUD), el ancho de modales, controles, espaciado y acciones para móvil/escritorio. Los formularios extensos conservan scroll accesible sin desbordar la ventana.
 - Los campos marcados `required` muestran `*` y cada formulario con campos requeridos incluye la leyenda «* Campo obligatorio».
@@ -565,7 +563,7 @@ Esta actualización deja el código y la documentación preparados para la revis
 - Se aplica una presentación común a los formularios con validación nativa: controles compactos, rejilla adaptable y asterisco/leyenda de obligatoriedad.
 - Verificación de esta actualización: `npm run build` en `web`, `npm run typecheck` en `api`, `npm run validate` del contrato OpenAPI y `git diff --check` finalizaron correctamente. No se ejecutó una comprobación visual manual en varios tamaños de pantalla ni se escribieron datos en MariaDB.
 
-## Mejora 1 de 10 (15 de octubre de 2026): validaciones de formularios y API
+## Mejora 1 de 10: validaciones de formularios y API
 
 - Se alinearon las validaciones del navegador y los esquemas de API para los datos de usuario, perfiles, solicitudes, espacios, periodos y programación de sesiones.
 - Las cuentas nuevas y el inicio de sesión validan correo institucional `@unitropico.edu.co`; se normaliza a minúsculas. Documento de identidad: entre 5 y 20 dígitos; nombre: al menos nombre y apellido; los campos de perfil se limitan a los máximos del esquema.
@@ -574,7 +572,7 @@ Esta actualización deja el código y la documentación preparados para la revis
 - Los esquemas anidados del CRUD administrativo ahora rechazan campos desconocidos y datos fuera de sus límites.
 - Verificación de la mejora 1: compilación de producción del frontend (`npm run build`) y revisión de tipos de API (`npm run typecheck`) correctas. La validación con registros reales de MariaDB se deja para la mejora 2 y auditoría de la base; no se escribieron datos durante esta mejora.
 
-## Mejora 2 de 10 (15 de octubre de 2026): restricciones de integridad en MariaDB
+## Mejora 2 de 10: restricciones de integridad en MariaDB
 
 - Se reforzó el DDL principal con límites para semestres, créditos, horas semanales, capacidad y duración, además de coherencia de fechas y horarios en asignaciones, espacios, sesiones, reportes, recuperaciones y compromisos.
 - Se agregó `database/migrations/001_integridad_datos.sql` para instalaciones que ya existen. Incluye consultas previas de solo lectura y ALTER explícitos; requiere respaldo, conteos en cero y aplicación manual una sola vez. No recrea la base ni borra o transforma datos.
@@ -582,7 +580,7 @@ Esta actualización deja el código y la documentación preparados para la revis
 - Documentación de aplicación y límites en `database/README.md` y `docs/modelo-datos.md`.
 - Verificación: inspección de consistencia de reglas/DDL y `git diff --check`; no se ejecutó la migración ni se modificó la base local. La comprobación de datos existentes queda para la mejora 3 (auditoría), antes de recomendar su aplicación.
 
-## Mejora 3 de 10 (15 de octubre de 2026): auditoría de base de datos
+## Mejora 3 de 10: auditoría de base de datos
 
 - Se creó `api/scripts/audit-db-integrity.mjs` y el comando `npm run db:audit`. La auditoría corre con transacción de solo lectura y no muestra PII ni contraseñas/hashes.
 - Resultado medido en MariaDB 12.3.3: 36 tablas (todas InnoDB), 55 claves foráneas, 26 restricciones `UNIQUE`, cero referencias huérfanas y seis restricciones `CHECK` instaladas.
@@ -590,14 +588,14 @@ Esta actualización deja el código y la documentación preparados para la revis
 - La instalación no contiene 14 nuevas restricciones `CHECK`; se conservan dos validaciones horarias preexistentes. Remediar inconsistencias antes de usar datos reales; aplicar la migración solo si sus conteos de prevalidación son cero.
 - No se corrigieron datos automáticamente: los cambios a credenciales y relaciones operativas requieren un proceso de remediación revisado. Resultados agregados documentados en `database/README.md`, `api/README_API.md` y `docs/modelo-datos.md`.
 
-## Mejora 4 de 10 (15 de octubre de 2026): registro de espacios
+## Mejora 4 de 10: registro de espacios
 
 - El formulario ya no inventa `Campus Principal` como ubicación para un espacio físico sin ubicación. Exige al menos edificio, bloque, salón o referencia; los espacios Virtuales pueden omitirse. La vista previa ahora incorpora la referencia y el frontend impide superar los 200 caracteres de `Espacio.ubicacion`.
 - La API valida rangos, tipo, formato y longitudes de cada campo. La creación inserta y recupera por ID dentro de una única transacción, evitando informar error después de haber dejado el registro guardado. Conserva el mensaje específico para código duplicado.
 - Verificación: typecheck y compilación de producción correctos; el API rechazó ubicación física vacía; prueba integrada con MariaDB creó y leyó un espacio temporal, y luego eliminó ese mismo registro. No quedan datos de prueba.
 - Documentación actualizada en `api/README_API.md` y `database/README.md`.
 
-## Mejora 5 de 10 (15 de octubre de 2026): validación de borrados CRUD
+## Mejora 5 de 10: validación de borrados CRUD
 
 - Los borrados de usuario ya no purgan sesiones, solicitudes, informes ni seguimiento. Se permiten únicamente sin historial/dependencias; bloquean autoeliminación, el último Administrador activo y las relaciones académicas, con mensajes que indican desactivar la cuenta para preservar datos.
 - El espacio se elimina solo si no tiene horarios, reservas ni sesiones. Una solicitud solo si no está asignada/atendida/finalizada y no tiene sesiones ni clasificaciones. Un periodo no se elimina si está Activo o tiene asignaciones, horarios o solicitudes.
@@ -606,28 +604,28 @@ Esta actualización deja el código y la documentación preparados para la revis
 - Verificación integrada en MariaDB: el borrado de un usuario con historial, un espacio en uso, una solicitud con sesión y un periodo en uso devolvió `409` en los cuatro casos, sin borrar registros. Typecheck API, build web y contrato OpenAPI correctos.
 - Se corrigió la guía de eliminación que antes describía borrado en cascada; la bitácora histórica se conserva y esta entrada documenta el cambio de política.
 
-## Mejora 6 de 10 (15 de octubre de 2026): log de navegación en tiempo real
+## Mejora 6 de 10: log de navegación en tiempo real
 
 - Se agregó `web/src/navigation-log.ts` y su integración en el componente principal. Cada cambio efectivo de vista, una vez autenticado y con rol seleccionado, emite una traza con timestamp ISO, rol y clave de vista.
 - En modo desarrollo la traza aparece en consola como `[Acadex navigation]` y dispara el evento de navegador `acadex:navigation` para que herramientas locales puedan suscribirse en tiempo real.
 - Por privacidad, el evento no contiene nombre, correo, ID de usuario, tokens, query strings ni contenido de formularios; no se guarda en base de datos ni se envía a servicios externos. No corre en build de producción.
 - La verificación de compilación del frontend se ejecutará junto con la validación general de esta secuencia.
 
-## Mejora 7 de 10 (15 de octubre de 2026): proporción y tamaño de modales
+## Mejora 7 de 10: proporción y tamaño de modales
 
 - Los modales usan un ancho compacto (500 px) o ancho de formulario (740 px), centrado y limitado al 88–90 % de la altura disponible. En móvil ocupan el ancho útil y respetan el alto del viewport dinámico.
 - El encabezado queda fijo/visible, el contenido del formulario tiene scroll propio y las acciones sticky permanecen accesibles; se evita que formularios extensos se conviertan en un bloque vertical que salga de pantalla.
 - Se reforzó la semántica accesible del diálogo con `role=dialog`, `aria-modal`, título y descripción asociados.
 - Verificación de compilación de producción del frontend correcta. Falta inspección visual manual en dispositivo/emulador pequeño; el navegador nativo no se usó en esta revisión.
 
-## Mejora 8 de 10 (15 de octubre de 2026): organización de configuración y perfil Estudiante
+## Mejora 8 de 10: organización de configuración y perfil Estudiante
 
 - Configuración se agrupó por propósito en **Operación académica** (estado de MariaDB y periodos) y **Seguridad** (credenciales/cambio de contraseña), con jerarquía visual y encabezados descriptivos.
 - Se eliminó del formulario Estudiante el campo visible de código estudiantil, duplicado del código institucional general. Al guardar, la API sigue recibiendo el mismo código sincronizado del usuario para preservar compatibilidad del modelo, pero el usuario ya no lo digita ni lo ve repetido.
 - Los controles de semestre y programa quedan juntos en la misma ficha de rol. El panel de parámetros se conserva por ahora; su eliminación corresponde al punto 10.
 - Verificación: `npm run build` del frontend (TypeScript y Vite) correcto. No se alteró la estructura de la base para retirar el control redundante.
 
-## Mejora 9 de 10 (15 de octubre de 2026): entrega segura de credenciales
+## Mejora 9 de 10: entrega segura de credenciales
 
 - Se añadió `POST /admin/configuration/credentials/export`, limitado a un rol y 500 cuentas activas por operación. La administración confirma el alcance antes de proceder.
 - Se generan claves aleatorias nuevas por cuenta dentro de una transacción; la contraseña anterior queda invalidada, se guarda solo el hash bcrypt y el primer acceso exige cambiarla. El administrador solicitante queda excluido; se mantiene separado el listado CSV sin secretos.
@@ -636,13 +634,13 @@ Esta actualización deja el código y la documentación preparados para la revis
 - No se configuró envío de correo: el proyecto no tiene SMTP institucional autorizado. El equipo debe solicitar host/puerto/cuenta/gestión de secretos antes de habilitar correo automático.
 - Verificación de tipo/API/OpenAPI/frontend registrada al cierre; no se rotaron credenciales reales en MariaDB para probar exportación masiva, pues eso invalidaría contraseñas de cuentas activas. La ruta está versionada y validada por contrato.
 
-## Mejora 10 de 10 (15 de octubre de 2026): retiro de parámetros institucionales de la interfaz
+## Mejora 10 de 10: retiro de parámetros institucionales de la interfaz
 
 - Se retiró de Configuración del administrador el panel «Parámetros institucionales» y la carga/guardado de esos valores desde la vista React. La pantalla queda enfocada en operación académica, credenciales y cambio de contraseña.
 - Se conservaron deliberadamente la tabla `Configuracion`, los endpoints de configuración y sus datos en MariaDB. Esta mejora es de alcance visual/funcional de la interfaz: no incluye migraciones ni borrados de datos ni de contrato.
 - Verificación: build, typecheck, contrato y `git diff --check` correctos; migración no aplicada y exportación masiva no ejecutada para no rotar credenciales reales.
 
-## Corrección CRUD de edición: sincronización de roles y validación de parches (15 de octubre de 2026)
+## Corrección CRUD de edición: sincronización de roles y validación de parches
 
 - Causa del fallo de Usuarios: las consultas incluían filas `UsuarioRol` inactivas. El formulario las interpretaba como seleccionadas; además, el cambio de estado global de la cuenta también modificaba todos los vínculos de rol y podía reactivar membresías ya retiradas.
 - Los listados, búsqueda por rol y credenciales ahora consideran únicamente las membresías activas; filtrar por un rol no reduce el conjunto de roles activos devuelto para editar. El PATCH sustituye el conjunto seleccionado, deja inactivos los vínculos quitados y actualiza/inactiva los perfiles asociados.
@@ -650,3 +648,10 @@ Esta actualización deja el código y la documentación preparados para la revis
 - Revisión de otras ediciones: espacios ahora combinan el PATCH con los datos almacenados, verifican que un espacio presencial mantenga una ubicación válida y confirman el cambio en transacción. Periodos ya completaban parches contra los valores actuales y validaban el rango; solicitudes ya verificaban transiciones permitidas. No se encontró el mismo defecto de reactivación de roles en esos CRUD.
 - Prueba integrada MariaDB: se creó un usuario temporal, se agregó y retiró Administrador dejando Estudiante; se comprobó la fila retirada como `Inactivo`, se desactivó/reactivó la cuenta y se confirmó que Administrador no reapareció. El usuario temporal se eliminó correctamente. Typecheck API, build web y validación OpenAPI correctos.
 - La auditoría de solo lectura posterior volvió a reportar cuatro credenciales con formato no bcrypt, una asignación con varias materias activas y una sesión discrepante; informó cinco códigos estudiantiles inconsistentes, frente a los seis del corte previo documentado. No se atribuyó ni corrigió esa diferencia; queda pendiente reconciliarla antes de remediar datos reales. Permanecen cero referencias huérfanas y las 14 restricciones recomendadas siguen pendientes de migración manual.
+
+## Combinaciones válidas de roles en el formulario de usuario
+
+- El formulario permite Administrador, Tutor, Estudiante o Monitor individualmente; Monitor puede combinarse únicamente con Estudiante.
+- Se deshabilitan los checkboxes incompatibles, se muestran las reglas en el formulario y se vuelve a comprobar la combinación antes del envío. La edición también permite retirar roles ya seleccionados.
+- La API rechaza combinaciones inválidas en `POST /users` y `PATCH /users/{id}`. El contrato OpenAPI refleja las cinco combinaciones mediante `UserRoles`.
+- Verificación: typecheck API, validación OpenAPI y build frontend; casos inválidos rechazados antes de conectar a la base de datos. Sin cambios en MariaDB.

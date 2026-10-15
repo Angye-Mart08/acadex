@@ -169,6 +169,7 @@ horarios ni asignaciones.
 - Los tokens de acceso se guardan en el cliente. `POST /auth/logout` exige un token y el frontend lo elimina, pero el servidor no revoca el JWT; este continúa válido hasta su expiración.
 - `POST /users` y `PATCH /users/{id}` reciben `roles[]`, con mínimo un rol y sin valores repetidos.
 - En `PATCH /users/{id}`, `roles[]` representa el conjunto final de roles: las membresías seleccionadas se activan y las omitidas se inactivan. Las respuestas/listados solo exponen roles activos, y filtrar por un rol no oculta los demás roles activos de la cuenta. El estado de `Usuario`/`Credencial` es independiente del estado de membresía en `UsuarioRol`; reactivar una cuenta heredada recupera solo roles con perfiles activos.
+- Las combinaciones válidas para `roles[]` son `Administrador`, `Tutor`, `Estudiante`, `Monitor` o `Monitor + Estudiante`. Administrador y Tutor son exclusivos; ningún otro rol se puede combinar con ellos. El frontend deshabilita opciones inválidas y la API rechaza cualquier combinación no permitida tanto al crear como al editar. El esquema `UserRoles` refleja esta matriz en OpenAPI.
 - `PATCH /spaces/{id}` combina el parche con los datos persistidos y valida el estado final del espacio. Si queda como físico, requiere ubicación; el cambio de fila se hace dentro de una transacción.
 - Los listados nunca devuelven claves actuales, hashes ni documentos. La exportación de credenciales solo incluye claves temporales aleatorias, por una única respuesta, revoca la clave previa y fuerza cambio al entrar; se limita a un rol y excluye al administrador solicitante.
 - El backend debe aplicar autorización por rol, además de validar el JWT.
@@ -199,7 +200,7 @@ demostración, inicia sesión, crea un registro temporal, consulta, actualiza y
 elimínalo; verifica el cambio en MariaDB. El panel administrativo mostrará
 “Sin datos” si no puede consultar la base y no presentará conteos de ejemplo.
 
-## Asignación y atención de solicitudes (14 de octubre de 2026)
+## Asignación y atención de solicitudes
 
 - `POST /api/v1/requests/{id}/assign` (Administrador) recibe `userId`, `role` (`Tutor` o `Monitor`), `date`, `startTime`, `endTime` y `modality`. Solo acepta personal activo con una asignación académica activa que coincida con la asignatura y el periodo de la solicitud. En una transacción crea la primera fila de `Sesion` y cambia la solicitud a `Asignada`.
 - `PATCH /api/v1/requests/{id}/attendance` recibe `{ "status": "Atendida" }`. Solo el Tutor o Monitor que tenga asignada la sesión bajo el rol activo puede cerrar la atención; actualiza la solicitud a `Atendida` y la sesión a `Realizada`.
@@ -212,11 +213,11 @@ Los modales comparten tamaños de control, espaciado y acciones accesibles al de
 
 La interfaz filtra `staffAssignments` por asignatura, periodo y rol inferido del tipo de acompañamiento. Para Monitoría presenta monitores; para Tutoría, tutores; para Acompañamiento permite escoger el rol. Si se selecciona un responsable, el frontend crea primero la solicitud mediante `POST /requests` y luego invoca `POST /requests/{id}/assign` con fecha, hora y modalidad para abrir la sesión inicial. Si falla la segunda operación, la solicitud ya creada permanece Pendiente y puede asignarse desde el módulo administrativo.
 
-## Regla de asignatura por perfil (14 de octubre de 2026)
+## Regla de asignatura por perfil
 
 El formulario de usuario ofrece una selección única de asignatura para Tutor y otra para Monitor. La API valida el límite al crear o editar el perfil; los perfiles deben tener exactamente una asignatura por cada uno de esos roles seleccionados. Si un usuario heredado tiene varias, al editar se precarga la primera como selección inicial y se debe revisar cuál debe quedar activa antes de guardar.
 
-## Mejora 1: validaciones de integridad de entradas (15 de octubre de 2026)
+## Mejora 1: validaciones de integridad de entradas
 
 La API es la validación autoritativa y rechaza propiedades desconocidas en los contratos administrativos. La interfaz aporta restricciones HTML equivalentes para prevenir errores antes del envío.
 
@@ -228,13 +229,13 @@ La API es la validación autoritativa y rechaza propiedades desconocidas en los 
 
 Verificación de esta mejora: `npm run build` (web) y `npm run typecheck` (api) exitosos. La validación de constraints físicos, datos preexistentes y persistencia se realiza en los pasos de base de datos/auditoría; no se ejecutaron escrituras contra MariaDB en este cambio.
 
-## Auditoría de MariaDB (15 de octubre de 2026)
+## Auditoría de MariaDB
 
 Ejecuta `npm run db:audit` desde `api/`. La consulta es estrictamente de solo lectura, informa conteos/metadatos y nunca imprime valores de credenciales ni atributos personales. No corrige hallazgos ni ejecuta migraciones.
 
 En la auditoría local se observaron 36 tablas InnoDB, 55 claves foráneas, 26 restricciones `UNIQUE` y ninguna referencia huérfana. Hallazgos: 4 credenciales que no parecen bcrypt; 6 códigos de estudiante distintos del código institucional; una persona con más de una asignatura activa para un rol; y una sesión con asignatura o periodo distinto al de su solicitud. Las restricciones `CHECK` añadidas en la mejora 2 aún no estaban instaladas. Revisar y remediar los datos antes de usar información real; ejecutar la migración solo si sus conteos de prevalidación son cero.
 
-## Registro de espacios (15 de octubre de 2026)
+## Registro de espacios
 
 El alta administrativa valida tipo, código, nombre, capacidad y longitudes contra el esquema MariaDB. Los espacios físicos deben indicar edificio, bloque, salón o referencia; las ubicaciones virtuales se admiten sin dirección física. Se limita la ubicación calculada a 200 caracteres antes del envío. El `INSERT` y la lectura de confirmación se ejecutan en una transacción: un error de lectura revierte el alta y no deja un registro persistido con respuesta fallida. Los duplicados se devuelven como `409 DUPLICATE_SPACE`.
 

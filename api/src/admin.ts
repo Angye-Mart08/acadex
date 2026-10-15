@@ -7,6 +7,17 @@ import { DataError } from './data.js'
 
 const roleNames = ['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as const
 const roleSchema = z.enum(roleNames)
+function isValidRoleCombination(roles: string[]) {
+  if (!roles.length || roles.length > 2) return false
+  if (roles.includes('Administrador') || roles.includes('Tutor')) return roles.length === 1
+  if (roles.includes('Monitor')) return roles.length === 1 || (roles.length === 2 && roles.includes('Estudiante'))
+  return roles.length === 1 && roles[0] === 'Estudiante'
+}
+const userRolesSchema = z.array(roleSchema)
+  .min(1, 'Selecciona al menos un rol.')
+  .max(2, 'Solo se permite la combinación Monitor + Estudiante.')
+  .refine((items) => new Set(items).size === items.length, 'No se permiten roles repetidos.')
+  .refine(isValidRoleCombination, 'Administrador y Tutor son roles exclusivos; Monitor solo puede combinarse con Estudiante.')
 const institutionalEmailSchema = z.string().trim().email().max(120).refine(
   (value) => value.toLowerCase().endsWith('@unitropico.edu.co'),
   'Usa un correo institucional @unitropico.edu.co.',
@@ -179,7 +190,7 @@ const profileSchema = z.object({
   }).strict().optional(),
 }).strict().default({})
 
-const userSchema = z.object({ code: z.string().trim().min(2).max(20), document: identityDocumentSchema, name: personNameSchema, email: institutionalEmailSchema, roles: z.array(roleSchema).min(1).max(roleNames.length).refine((items) => new Set(items).size === items.length, 'No se permiten roles repetidos.'), profiles: profileSchema }).strict()
+const userSchema = z.object({ code: z.string().trim().min(2).max(20), document: identityDocumentSchema, name: personNameSchema, email: institutionalEmailSchema, roles: userRolesSchema, profiles: profileSchema }).strict()
 const userUpdateSchema = userSchema.partial().extend({ status: z.enum(['Activo', 'Inactivo']).optional(), profiles: profileSchema.optional() }).strict().refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo para actualizar.')
 
 function validateProfiles(input: any) {

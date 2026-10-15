@@ -965,6 +965,30 @@ components:
     Role:
       type: string
       enum: [Administrador, Tutor, Monitor, Estudiante]
+    UserRoles:
+      description: "Combinaciones permitidas: Administrador, Tutor o Estudiante de forma individual; Monitor individual o combinado únicamente con Estudiante."
+      oneOf:
+        - type: array
+          minItems: 1
+          maxItems: 1
+          items: { type: string, enum: [Administrador] }
+        - type: array
+          minItems: 1
+          maxItems: 1
+          items: { type: string, enum: [Tutor] }
+        - type: array
+          minItems: 1
+          maxItems: 1
+          items: { type: string, enum: [Monitor] }
+        - type: array
+          minItems: 1
+          maxItems: 1
+          items: { type: string, enum: [Estudiante] }
+        - type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          items: { type: string, enum: [Monitor, Estudiante] }
     Status:
       type: string
       enum: [Activo, Inactivo]
@@ -985,11 +1009,7 @@ components:
         code: { type: string, maxLength: 20 }
         name: { type: string, minLength: 2, maxLength: 160 }
         email: { type: string, format: email, maxLength: 120 }
-        roles:
-          type: array
-          minItems: 1
-          uniqueItems: true
-          items: { $ref: '#/components/schemas/Role' }
+        roles: { $ref: '#/components/schemas/UserRoles' }
         activeRole:
           $ref: '#/components/schemas/Role'
           description: Rol activo asociado al token de sesión, cuando aplica.
@@ -1071,11 +1091,7 @@ components:
           allOf:
             - $ref: '#/components/schemas/Role'
           description: Rol actualmente seleccionado para la sesión.
-        roles:
-          type: array
-          minItems: 1
-          uniqueItems: true
-          items: { $ref: '#/components/schemas/Role' }
+        roles: { $ref: '#/components/schemas/UserRoles' }
         user: { $ref: '#/components/schemas/User' }
     AcademicPeriod:
       type: object
@@ -1119,11 +1135,7 @@ components:
         document: { type: string, minLength: 5, maxLength: 20 }
         name: { type: string, minLength: 2, maxLength: 160 }
         email: { type: string, format: email, maxLength: 120 }
-        roles:
-          type: array
-          minItems: 1
-          uniqueItems: true
-          items: { $ref: '#/components/schemas/Role' }
+        roles: { $ref: '#/components/schemas/UserRoles' }
         profiles: { type: object, description: Perfiles académicos requeridos por los roles seleccionados. Tutor y Monitor deben declarar exactamente una asignatura en sus asignaciones. }
     UserUpdate:
       type: object
@@ -1134,11 +1146,7 @@ components:
         document: { type: string, minLength: 5, maxLength: 20 }
         name: { type: string, minLength: 2, maxLength: 160 }
         email: { type: string, format: email, maxLength: 120 }
-        roles:
-          type: array
-          minItems: 1
-          uniqueItems: true
-          items: { $ref: '#/components/schemas/Role' }
+        roles: { $ref: '#/components/schemas/UserRoles' }
         status: { $ref: '#/components/schemas/Status' }
         profiles: { type: object, description: Perfiles académicos que se deben actualizar. Tutor y Monitor deben declarar exactamente una asignatura en sus asignaciones. }
     Space:

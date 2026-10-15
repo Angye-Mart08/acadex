@@ -170,6 +170,10 @@ Al editar un usuario, la selección enviada de roles reemplaza exactamente sus m
 
 La edición de espacios también valida la dirección final resultante (no solo el campo aislado): un espacio presencial no puede quedar sin edificio, bloque, salón o referencia. Los cambios se confirman en transacción.
 
+### Combinaciones de roles
+
+La única combinación multirrol permitida es **Monitor + Estudiante**. Administrador, Tutor y Estudiante pueden asignarse individualmente; Administrador y Tutor no se combinan con otros roles. La interfaz deshabilita opciones incompatibles, y la API/OpenAPI aplican la misma regla para altas y ediciones.
+
 ### Estructura de códigos institucionales autogenerados (Solo lectura)
 En ningún formulario del software es posible escribir o alterar manualmente el código institucional (`readOnly`). La aplicación genera códigos coherentes y aleatorios según el rol o entidad:
 - **Administrador**: `ADM###` (ej. `ADM482`).
