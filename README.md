@@ -112,6 +112,30 @@ se deben entregar por un canal seguro y cambiar en el primer inicio de sesión.
 No incluyas correos personales, documentos ni contraseñas en el repositorio,
 las diapositivas o las exportaciones de cuentas.
 
+### Inicio de sesión integrado con MariaDB
+
+El formulario ya no utiliza código de usuario como credencial. La regla actual es:
+
+```text
+Correo institucional + documento de identidad
+```
+
+El documento corresponde al campo `documento` de la tabla `Usuario` y al dato asociado en `Credencial`. La API consulta la relación entre `Usuario`, `Credencial`, `UsuarioRol` y `Rol`, y nunca devuelve el documento ni el hash de contraseña.
+
+La primera validación es compatible con los datos base del SQL. Después de un
+login válido, si el valor de `Credencial.password_hash` todavía está en texto
+plano por ser un dato inicial de desarrollo, la API lo reemplaza por un hash
+bcrypt.
+
+Credenciales demo disponibles en el frontend:
+
+```text
+Administrador: jaysonquintero@unitropico.edu.co / 1000000010
+Tutor:         tutormatematica@unitropico.edu.co / 1007418843
+Monitor:       brayhamlindarte.es@unitropico.edu.co / 1093432540
+Estudiante:    mariaamezquita.es@unitropico.edu.co / 1029663952
+```
+
 ## Documentación principal
 
 - [Documentación de la API](./api/README_API.md)
