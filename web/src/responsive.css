@@ -1,0 +1,169 @@
+/* Shared sizing rules follow the brand theme so every portal uses the same contract. */
+:root {
+  --touch-target: 2.75rem;
+  --form-width: 32rem;
+  --form-wide-width: 42rem;
+  --form-gap: .875rem;
+  --form-padding: clamp(1rem, 2vw, 1.5rem);
+}
+body { min-width: 0; }
+*, *::before, *::after { box-sizing: border-box; }
+img { max-width: 100%; height: auto; }
+button, input, select, textarea { font: inherit; }
+button { min-width: var(--touch-target); min-height: var(--touch-target); white-space: normal; }
+button > svg { flex-shrink: 0; }
+:where(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  width: 100%; min-width: 0; max-width: 100%; min-height: var(--touch-target);
+}
+/* Keep control text at 16 CSS pixels with the default root size, including on iOS. */
+:is(.login-form, .modal-form, .portal-form, .settings-form, .report-filters, .table-toolbar, .space-filter-row) :is(input, select, textarea) {
+  font-size: 1rem;
+}
+:is(.login-form, .modal-form, .portal-form, .settings-form, .report-filters, .table-toolbar, .space-filter-row)
+  :is(input:not([type='checkbox']):not([type='radio']), select, textarea) { min-height: var(--touch-target); }
+.mobile-logout-button, .login-button { min-height: var(--touch-target); }
+textarea { resize: vertical; }
+/* Entered values use regular weight; labels keep their visual hierarchy. */
+input, select, textarea,
+:is(.modal-form, .portal-form, .settings-form, .role-profile-fieldset, .report-filters, .table-toolbar, .space-filter-row) :is(input, select, textarea) { font-weight: 400; }
+.readonly-code-input { font-weight: 700 !important; }
+.login-form input { font-weight: 700; }
+:where(label, fieldset, .panel, .page-header > *, .panel-heading > *, .modal-header > *,
+  .role-card > *, .activity-row > div, .schedule-main, .login-panel-inner,
+  .db-status-title, .db-status-title > div, .calendar-card-body, .generated-code-wrapper,
+  .topbar-actions, .profile-details, .quick-actions button > span) { min-width: 0; }
+:where(.page-content, .modal, .role-selector-card, .login-panel-inner, .sidebar) { overflow-wrap: anywhere; }
+.app-shell, .login-page { min-height: 100dvh; }
+.page-content { width: 100%; max-width: 91.25rem; padding: clamp(1.25rem, 3vw, 3rem) clamp(.75rem, 3vw, 3.75rem) 4rem; }
+.sidebar { width: 16.5rem; flex-basis: 16.5rem; }
+.page-header, .panel-heading, .table-toolbar, .table-meta, .db-status-header,
+.db-terminal-tip, .calendar-card-header, .calendar-card-footer, .hero-brand-row,
+.hero-footer, .schedule-row, .credential-export-panel { flex-wrap: wrap; gap: .75rem; }
+.topbar { height: auto; min-height: 4.625rem; padding-block: .5rem; flex-wrap: wrap; }
+.topbar-actions { flex-wrap: wrap; gap: .75rem; }
+.search-input { min-width: 0; flex: 1 1 14rem; }
+.table-toolbar select { min-width: 0; max-width: 100%; flex: 1 1 10rem; }
+.search-input svg { top: 50%; transform: translateY(-50%); }
+.table-scroll { min-width: 0; max-width: 100%; overflow: auto; overscroll-behavior-x: contain; }
+/* Wide data tables scroll locally, without enlarging the page. */
+.table-scroll table { min-width: 46.875rem; }
+.admin-report-tables table { min-width: 0; }
+.metrics-grid, .space-grid, .db-overview-cards, .calendar-stats-row {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+}
+.db-tables-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); }
+.period-details-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); }
+.dashboard-grid, .admin-chart-grid, .configuration-grid, .report-grid, .admin-report-tables {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+}
+/* Container sizing also handles a narrow panel inside a wide desktop window. */
+.form-panel, .report-filters, .modal-body { container-type: inline-size; }
+.form-columns, .modal-form .form-columns, .report-filters .form-columns {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}
+/* Short forms and forms with paired fields share two measured width limits. */
+.portal-form, .settings-form {
+  width: 100%; max-width: var(--form-width); display: grid; gap: var(--form-gap);
+}
+.portal-form:has(.form-columns), .settings-form:has(.form-columns) { max-width: var(--form-wide-width); }
+.form-panel { width: 100%; max-width: calc(var(--form-wide-width) + 3rem); padding: var(--form-padding); }
+.form-panel:has(.portal-form):not(:has(.form-columns)) { max-width: calc(var(--form-width) + 3rem); }
+.modal { width: min(100%, var(--form-width)); padding: var(--form-padding); }
+.modal-wide { width: min(100%, var(--form-wide-width)); }
+.modal-form, .role-profile-fieldset, .role-profile-sections { gap: var(--form-gap); }
+.form-columns, .modal-form .form-columns { gap: var(--form-gap); align-items: start; }
+:is(.modal-form, .portal-form, .settings-form) label { gap: .4375rem; line-height: 1.45; }
+:is(.modal-form, .portal-form, .settings-form) :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  padding: .625rem .75rem; border-radius: .5rem;
+}
+:is(.modal-form, .portal-form, .settings-form) textarea { min-height: 5.5rem; }
+.portal-form > .primary-button { justify-self: start; max-width: 100%; }
+.login-panel-inner { width: min(100%, var(--form-width)); }
+.modal-actions, .period-modal-footer, .role-selector-actions { flex-wrap: wrap; }
+.modal-actions button, .period-modal-footer button { flex: 0 1 auto; }
+.modal-header { flex-shrink: 0; }
+.modal-close { flex-shrink: 0; }
+.modal-backdrop, .role-selector-backdrop { padding: clamp(.5rem, 2vw, 1.5rem); }
+.modal, .role-selector-card { max-height: calc(100dvh - 3rem); max-width: 100%; }
+.role-selector-card { overflow-y: auto; }
+.role-card-icon, .period-icon, .db-status-icon { flex-shrink: 0; }
+.profile-dropdown { min-width: min(11.875rem, 80vw); max-width: calc(100vw - 1.5rem); }
+.bar-column small, .horizontal-bar > div:first-child span, .table-subtext {
+  white-space: normal; overflow: visible; overflow-wrap: anywhere;
+}
+.subject-dropdown-option span { flex-wrap: wrap; }
+/* The enclosing label provides the full touch target for small native checkmarks. */
+.check-label, .role-options .role-option, .subject-check-grid .role-option,
+.subject-dropdown-option { min-height: var(--touch-target); min-width: var(--touch-target); cursor: pointer; }
+.role-options .role-option, .subject-check-grid .role-option { display: flex; }
+input[type='checkbox'], input[type='radio'] { flex-shrink: 0; }
+.role-options, .subject-check-grid, .subject-dropdown-options { gap: .5rem; }
+.actions-inline { gap: .5rem; }
+.login-input.password-field button { margin-right: -.5rem; }
+:is(button, a, input, select, textarea, summary):focus-visible { outline: .125rem solid var(--brand-green); outline-offset: .125rem; }
+.subject-dropdown summary { min-height: var(--touch-target); }
+
+@container (max-width: 32rem) {
+  .form-columns, .modal-form .form-columns, .report-filters .form-columns { grid-template-columns: minmax(0, 1fr); }
+  .modal-actions { flex-direction: column; }
+  .modal-actions button { width: 100%; }
+}
+
+@media (max-width: 62.5rem) {
+  .login-page { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero-brand-row { margin-right: 0; }
+  .hero-brand-row .university-signature.on-green { max-width: 100%; }
+  .breadcrumb { display: none; }
+  .topbar-actions { margin-left: auto; }
+}
+@media (max-width: 47.5rem) {
+  .login-page { display: block; }
+  .sidebar { max-width: 100%; max-height: 100dvh; overflow-y: auto; }
+  .period-chip.interactive { display: none; }
+  .login-hero, .login-panel { padding: clamp(1rem, 5vw, 2rem); }
+  .login-panel-inner { padding: clamp(1rem, 5vw, 1.75rem); }
+  .hero-copy h1 { font-size: clamp(1.75rem, 7vw, 2.5rem); }
+  .schedule-day { min-width: 0; flex: 1 1 7rem; }
+  .schedule-main { flex: 1 1 12rem; }
+  .db-status-panel { padding: 1rem; }
+}
+@media (max-width: 37.5rem) {
+  .form-columns, .modal-form .form-columns, .report-filters .form-columns,
+  .role-overview, .role-selector-grid { grid-template-columns: minmax(0, 1fr); }
+  .modal, .modal-wide, .role-selector-card { max-height: calc(100dvh - 1rem); padding: 1rem; }
+  .modal-actions, .period-modal-footer { flex-direction: column; }
+  .modal-actions button, .period-modal-footer button { width: 100%; }
+  .table-toolbar > select, .table-toolbar > button { flex: 1 1 100%; }
+  .period-status-card { flex-wrap: wrap; padding: 1rem; }
+  .role-overview-card { grid-template-columns: minmax(0, 1fr); }
+}
+/* Prioritize sign-in in tablets, split-screen windows and short landscape views. */
+@media (max-width: 62.5rem), (max-height: 40rem) {
+  .login-page { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .login-hero { display: none; }
+  .login-panel {
+    min-width: 0;
+    min-height: 100dvh;
+    align-items: safe center;
+    padding: clamp(.75rem, 3vw, 1.5rem);
+  }
+  .login-panel-inner { width: min(100%, var(--form-width)); padding: clamp(1rem, 4vw, 2rem); }
+  .mobile-login-brand {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .75rem; margin-bottom: 1.5rem;
+  }
+  .mobile-login-brand .acadex-symbol { width: 2.5rem; height: 2.5rem; flex-basis: 2.5rem; }
+  .mobile-login-brand .acadex-wordmark strong { font-size: 1.25rem; }
+  .mobile-login-brand .acadex-wordmark small { font-size: .625rem; }
+  .mobile-login-brand .university-signature {
+    width: 7rem; min-height: 0; padding: 0; border: 0; background: transparent;
+  }
+  .login-panel-inner > .login-heading { margin: 0 0 1.25rem; }
+  .login-heading h2 { font-size: clamp(1.5rem, 5vw, 2rem); }
+  .login-form { gap: 1rem; }
+  .login-note { margin-top: 1rem; }
+  .login-footer-quote { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
