@@ -446,6 +446,7 @@ function LoginPage({ onSubmit, error }: { onSubmit: (event: FormEvent<HTMLFormEl
 
       <section className="login-panel">
         <div className="login-panel-inner">
+          <div className="mobile-login-brand"><AcadexBrand /><UniversitySignature /></div>
           <div className="login-heading">
             <span className="eyebrow">Acceso institucional</span>
             <h2>Bienvenido a Acadex</h2>
@@ -1056,7 +1057,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
         </tr>)}</tbody>
       </table></div>
     </section>
-    {modal && <Modal title={editingUser ? 'Editar usuario' : 'Nuevo usuario'} subtitle="Los campos específicos aparecen según el o los roles seleccionados." onClose={() => setModal(false)}>
+    {modal && <Modal title={editingUser ? 'Editar usuario' : 'Nuevo usuario'} subtitle="Los campos específicos aparecen según el o los roles seleccionados." wide onClose={() => setModal(false)}>
       <form className="modal-form" onSubmit={saveUser} key={editingUser?.id ?? 'new'}>
         <div className="form-columns">
           <label>Código institucional
