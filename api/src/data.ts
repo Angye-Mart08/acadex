@@ -125,7 +125,7 @@ async function restoreProfileRoleMemberships(connection: any, userId: number) {
 const userInputSchema = z.object({
   code: z.string().trim().min(2).max(20),
   document: z.string().trim().min(5).max(20),
-  name: z.string().trim().min(2).max(160),
+  name: z.string().trim().min(2).max(160).refine((value) => /^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+)+$/u.test(value), 'Escribe un nombre y apellido usando solo letras, espacios, apóstrofes o guiones.'),
   email: z.string().trim().email().max(120),
   roles: z.array(z.enum(roles as [string, ...string[]])).min(1).max(4),
 })
@@ -228,10 +228,11 @@ function normalizeSpace(row: any) {
   }
 }
 
+const integerInput = (schema: z.ZodType) => z.preprocess((value) => typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value, schema)
 const spaceSchema = z.object({
   code: z.string().trim().min(2).max(20), name: z.string().trim().min(2).max(120),
   type: z.enum(['Aula', 'Laboratorio', 'Sala', 'Biblioteca', 'Virtual', 'Otro']),
-  location: z.string().trim().min(2).max(200), capacity: z.coerce.number().int().min(1).max(1000),
+  location: z.string().trim().min(2).max(200), capacity: integerInput(z.number().int().min(1).max(1000)),
 })
 
 export async function listSpaces({ search = '', status = '' } = {}) {

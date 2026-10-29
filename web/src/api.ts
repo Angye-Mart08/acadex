@@ -83,6 +83,7 @@ export type PortalAvailability = {
 
 export type AdminCatalogs = {
   programs: Array<{ id: number; codigo: string; nombre: string; facultyName?: string }>
+  faculties: Array<{ id: number; nombre: string }>
   subjects: Array<{ id: number; codigo: string; nombre: string }>
   periods: Array<{ id: number; nombre: string; estado: string }>
   students: Array<{ id: number; name: string; studentCode: string; programId?: number; programName?: string }>
@@ -184,8 +185,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { code?: string; message?: string } | null
-    throw new ApiError(response.status, body?.code ?? 'API_ERROR', body?.message ?? 'La solicitud no pudo ser procesada.')
+    const body = await response.json().catch(() => null) as { code?: string; message?: string; details?: Array<{ path?: Array<string | number>; message?: string }> } | null
+    const fieldNames: Record<string,string> = { name:'Nombre', roles:'Roles', code:'Código', document:'Documento', email:'Correo', phone:'Número de contacto', credits:'Créditos', capacity:'Capacidad', semester:'Semestre', programId:'Programa', facultyId:'Facultad', weeklyHours:'Horas semanales', subjectIds:'Asignatura', startDate:'Fecha inicial', endDate:'Fecha final', status:'Estado', location:'Ubicación', type:'Tipo' }
+    const details = body?.details?.map((issue) => {
+      const path = issue.path?.map((part) => fieldNames[String(part)] ?? String(part)).join(' → ')
+      return path ? `${path}: ${issue.message ?? 'valor inválido'}` : issue.message
+    }).filter(Boolean)
+    const message = [body?.message ?? 'La solicitud no pudo ser procesada.', ...(details ?? [])].join(' ')
+    throw new ApiError(response.status, body?.code ?? 'API_ERROR', message)
   }
 
   if (response.status === 204) return undefined as T
@@ -275,6 +282,18 @@ export function getAdminReport(accessToken: string, query = '') {
 export function getAdminCatalogs(accessToken: string) {
   return request<AdminCatalogs>('/admin/catalogs', authenticatedOptions(accessToken))
 }
+
+export type AdminSubject = { id: number; code: string; name: string; credits: number | null; description: string | null; status: 'Activo' | 'Inactivo' }
+export type AdminProgram = { id: number; code: string; name: string; snies: string | null; facultyId: number; facultyName: string; status: 'Activo' | 'Inactivo' }
+export type AdminFaculty = { id: number; name: string }
+export function listAdminSubjects(accessToken: string) { return request<AdminSubject[]>('/admin/subjects', authenticatedOptions(accessToken)) }
+export function createAdminSubject(accessToken: string, input: Omit<AdminSubject,'id'>) { return request<AdminSubject>('/admin/subjects', authenticatedOptions(accessToken,{method:'POST',body:JSON.stringify(input)})) }
+export function updateAdminSubject(accessToken: string, id: number, input: Partial<Omit<AdminSubject,'id'>>) { return request<AdminSubject>(`/admin/subjects/${id}`, authenticatedOptions(accessToken,{method:'PATCH',body:JSON.stringify(input)})) }
+export function deleteAdminSubject(accessToken: string, id: number) { return request<void>(`/admin/subjects/${id}`, authenticatedOptions(accessToken,{method:'DELETE'})) }
+export function listAdminPrograms(accessToken: string) { return request<{data:AdminProgram[];faculties:AdminFaculty[]}>('/admin/programs', authenticatedOptions(accessToken)) }
+export function createAdminProgram(accessToken: string, input: Omit<AdminProgram,'id'|'facultyName'>) { return request<AdminProgram>('/admin/programs', authenticatedOptions(accessToken,{method:'POST',body:JSON.stringify(input)})) }
+export function updateAdminProgram(accessToken: string, id: number, input: Partial<Omit<AdminProgram,'id'|'facultyName'>>) { return request<AdminProgram>(`/admin/programs/${id}`, authenticatedOptions(accessToken,{method:'PATCH',body:JSON.stringify(input)})) }
+export function deleteAdminProgram(accessToken: string, id: number) { return request<void>(`/admin/programs/${id}`, authenticatedOptions(accessToken,{method:'DELETE'})) }
 
 export function listCredentials(accessToken: string, role = '') {
   return request<CredentialAccount[]>(`/admin/configuration/credentials${role ? `?role=${encodeURIComponent(role)}` : ''}`, authenticatedOptions(accessToken))

@@ -191,6 +191,102 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /admin/subjects:
+    get:
+      tags: [Administración]
+      summary: Listar asignaturas para su gestión administrativa
+      operationId: listAdminSubjects
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Catálogo completo de asignaturas. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Administración]
+      summary: Registrar una asignatura
+      operationId: createAdminSubject
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubjectInput' }
+      responses:
+        '201': { description: Asignatura creada. }
+        '409': { description: Código duplicado. }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /admin/subjects/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    patch:
+      tags: [Administración]
+      summary: Editar una asignatura
+      operationId: updateAdminSubject
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubjectUpdate' }
+      responses:
+        '200': { description: Asignatura actualizada. }
+        '409': { description: Código duplicado. }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Administración]
+      summary: Eliminar una asignatura sin referencias
+      operationId: deleteAdminSubject
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Asignatura eliminada. }
+        '409': { description: La asignatura tiene referencias y debe desactivarse. }
+  /admin/programs:
+    get:
+      tags: [Administración]
+      summary: Listar programas y facultades disponibles
+      operationId: listAdminPrograms
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Catálogo de programas y facultades activas. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Administración]
+      summary: Registrar un programa académico
+      operationId: createAdminProgram
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProgramInput' }
+      responses:
+        '201': { description: Programa creado. }
+        '409': { description: Código o nombre duplicado. }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /admin/programs/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    patch:
+      tags: [Administración]
+      summary: Editar un programa académico
+      operationId: updateAdminProgram
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProgramUpdate' }
+      responses:
+        '200': { description: Programa actualizado. }
+        '409': { description: Código o nombre duplicado. }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Administración]
+      summary: Eliminar un programa sin referencias
+      operationId: deleteAdminProgram
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Programa eliminado. }
+        '409': { description: El programa tiene referencias y debe desactivarse. }
   /admin/db-status:
     get:
       tags: [Administración]
@@ -989,6 +1085,56 @@ components:
           maxItems: 2
           uniqueItems: true
           items: { type: string, enum: [Monitor, Estudiante] }
+    Subject:
+      type: object
+      required: [id, code, name, status]
+      properties:
+        id: { type: integer }
+        code: { type: string, maxLength: 20 }
+        name: { type: string, minLength: 2, maxLength: 150 }
+        credits: { type: [integer, 'null'], minimum: 1, maximum: 30 }
+        description: { type: [string, 'null'], maxLength: 300 }
+        status: { $ref: '#/components/schemas/Status' }
+    SubjectInput:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code: { type: string, minLength: 2, maxLength: 20, pattern: '^[A-Za-z0-9][A-Za-z0-9-]*$' }
+        name: { type: string, minLength: 2, maxLength: 150 }
+        credits: { type: [integer, 'null'], minimum: 1, maximum: 30 }
+        description: { type: string, maxLength: 300 }
+        status: { $ref: '#/components/schemas/Status' }
+    SubjectUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        code: { type: string, minLength: 2, maxLength: 20, pattern: '^[A-Za-z0-9][A-Za-z0-9-]*$' }
+        name: { type: string, minLength: 2, maxLength: 150 }
+        credits: { type: [integer, 'null'], minimum: 1, maximum: 30 }
+        description: { type: string, maxLength: 300 }
+        status: { $ref: '#/components/schemas/Status' }
+    ProgramInput:
+      type: object
+      additionalProperties: false
+      required: [code, name, facultyId]
+      properties:
+        code: { type: string, minLength: 2, maxLength: 20, pattern: '^[A-Za-z0-9][A-Za-z0-9-]*$' }
+        name: { type: string, minLength: 2, maxLength: 120 }
+        snies: { type: string, maxLength: 30 }
+        facultyId: { type: integer, minimum: 1 }
+        status: { $ref: '#/components/schemas/Status' }
+    ProgramUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        code: { type: string, minLength: 2, maxLength: 20, pattern: '^[A-Za-z0-9][A-Za-z0-9-]*$' }
+        name: { type: string, minLength: 2, maxLength: 120 }
+        snies: { type: string, maxLength: 30 }
+        facultyId: { type: integer, minimum: 1 }
+        status: { $ref: '#/components/schemas/Status' }
     Status:
       type: string
       enum: [Activo, Inactivo]
@@ -1334,4 +1480,8 @@ components:
         requestId: { type: string }
         details:
           type: array
-          items: { type: object, additionalProperties: true }
+          items:
+            type: object
+            properties:
+              path: { type: array, items: { type: [string, integer] } }
+              message: { type: string }

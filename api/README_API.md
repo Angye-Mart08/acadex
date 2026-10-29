@@ -241,3 +241,16 @@ En la auditoría local se observaron 36 tablas InnoDB, 55 claves foráneas, 26 r
 El alta administrativa valida tipo, código, nombre, capacidad y longitudes contra el esquema MariaDB. Los espacios físicos deben indicar edificio, bloque, salón o referencia; las ubicaciones virtuales se admiten sin dirección física. Se limita la ubicación calculada a 200 caracteres antes del envío. El `INSERT` y la lectura de confirmación se ejecutan en una transacción: un error de lectura revierte el alta y no deja un registro persistido con respuesta fallida. Los duplicados se devuelven como `409 DUPLICATE_SPACE`.
 
 Verificación: prueba de rechazo de una ubicación presencial vacía; prueba integrada en MariaDB creó un registro temporal, lo recuperó por el ID insertado y eliminó ese registro de prueba. No quedan registros temporales.
+
+## CRUD de asignaturas y programas académicos
+
+Operaciones administrativas (requieren rol `Administrador`):
+
+- Asignaturas: `GET/POST /api/v1/admin/subjects`, `PATCH/DELETE /api/v1/admin/subjects/{id}`. Se gestionan código, nombre, créditos opcionales (1–30), descripción y estado.
+- Programas: `GET/POST /api/v1/admin/programs`, `PATCH/DELETE /api/v1/admin/programs/{id}`. El listado incluye facultades activas; el formulario relaciona cada programa a una facultad existente y permite registrar SNIES opcional.
+- Los códigos deben ser alfanuméricos con guiones; nombres vacíos o compuestos solo por números se rechazan. Duplicados responden `409`. El borrado físico responde `409 SUBJECT_IN_USE` o `409 PROGRAM_IN_USE` si existen dependencias; usar `PATCH` para desactivar sin perder historial.
+- `POST` requiere los campos principales; `PATCH` aplica solo los enviados y rechaza cuerpos vacíos. OpenAPI diferencia esquemas de alta y edición.
+
+## Avisos y validación de integridad
+
+El frontend presenta errores y validaciones en notificaciones accesibles, cerrables y temporizadas; los secretos temporales conservan un diálogo explícito. Las respuestas `422` devuelven `details` por ruta y mensaje, y el cliente las convierte en avisos que identifican el campo. La API valida nombres personales sin dígitos, enteros sin letras/notación exponencial, límites numéricos, formatos, longitudes y relaciones de negocio antes de persistir.

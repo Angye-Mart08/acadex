@@ -7,7 +7,7 @@ import { AuthError, currentUserFromToken, login, selectRole } from './auth.js'
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
 import { DataError, createRequest, dashboard, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects } from './data.js'
-import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminPeriod, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminPeriod, deleteAdminRequest, deleteAdminSpace, deleteAdminUser, exportTemporaryCredentials, listAdminPeriods, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminPeriod, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
+import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminPeriods, listAdminPrograms, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
 
 const app = express()
 app.disable('x-powered-by')
@@ -132,6 +132,31 @@ router.get('/admin/reports', requireSession, requireRole('Administrador'), async
 
 router.get('/admin/catalogs', requireSession, requireRole('Administrador'), async (_req, res, next) => {
   try { res.json(await adminCatalogs()) } catch (error) { next(error) }
+})
+
+router.get('/admin/subjects', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listAdminSubjects()) } catch (error) { next(error) }
+})
+router.post('/admin/subjects', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.status(201).json(await createAdminSubject(req.body)) } catch (error) { next(error) }
+})
+router.patch('/admin/subjects/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await updateAdminSubject(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+router.delete('/admin/subjects/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { await deleteAdminSubject(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+router.get('/admin/programs', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listAdminPrograms()) } catch (error) { next(error) }
+})
+router.post('/admin/programs', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.status(201).json(await createAdminProgram(req.body)) } catch (error) { next(error) }
+})
+router.patch('/admin/programs/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await updateAdminProgram(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+router.delete('/admin/programs/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { await deleteAdminProgram(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
 })
 
 router.get('/admin/configuration/credentials', requireSession, requireRole('Administrador'), async (req, res, next) => {

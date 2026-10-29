@@ -29,6 +29,8 @@ copia paralela como fuente de verdad.
 - `PeriodoAcademico`.
 - `TipoSolicitud` y `TipoClasificacion`.
 
+Los catálogos `Programa` y `Asignatura` tienen CRUD administrativo. Un programa requiere una facultad existente. Los borrados se bloquean si hay filas relacionadas en `EstudiantePrograma`, `ProgramaAsignatura`, `AsignacionAcademica` o `Solicitud`; la desactivación conserva la historia y excluye el elemento de los selectores operativos. Los créditos de asignatura, cuando se informan, son enteros de 1 a 30.
+
 ### Operación de acompañamientos
 
 - `Solicitud`: petición de tutoría o monitoría realizada por un estudiante.

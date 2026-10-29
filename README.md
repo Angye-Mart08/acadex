@@ -170,6 +170,10 @@ Al editar un usuario, la selección enviada de roles reemplaza exactamente sus m
 
 La edición de espacios también valida la dirección final resultante (no solo el campo aislado): un espacio presencial no puede quedar sin edificio, bloque, salón o referencia. Los cambios se confirman en transacción.
 
+### Catálogos académicos y validación de formularios
+
+El panel administrativo incorpora CRUD de asignaturas (código, nombre, créditos, descripción y estado) y programas (código, nombre, SNIES, facultad y estado). Los códigos y nombres duplicados se rechazan; no se permite borrar físicamente un catálogo con programas, asignaciones, estudiantes o solicitudes relacionadas: se debe desactivar para preservar el historial. Los formularios muestran avisos accesibles y los errores de validación identifican el campo problemático. Nombres personales aceptan letras y separadores nominales, no dígitos; valores numéricos se validan como enteros dentro de sus rangos tanto en interfaz como en API.
+
 ### Combinaciones de roles
 
 La única combinación multirrol permitida es **Monitor + Estudiante**. Administrador, Tutor y Estudiante pueden asignarse individualmente; Administrador y Tutor no se combinan con otros roles. La interfaz deshabilita opciones incompatibles, y la API/OpenAPI aplican la misma regla para altas y ediciones.

@@ -1,6 +1,8 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react'
 import {
   AcademicPeriod,
+  AdminProgram,
+  AdminSubject,
   AdminCatalogs,
   AdminDashboard,
   AdminReport,
@@ -13,12 +15,16 @@ import {
   assignRequest as assignRequestApi,
   changePassword,
   createAcademicPeriod,
+  createAdminProgram,
+  createAdminSubject,
   createAdminRequest,
   createRequest as createRequestApi,
   createSpace as createSpaceApi,
   createUser as createUserApi,
   deleteRequest as deleteRequestApi,
   deleteAcademicPeriod,
+  deleteAdminProgram,
+  deleteAdminSubject,
   deleteSpace as deleteSpaceApi,
   deleteUser as deleteUserApi,
   exportTemporaryCredentials as exportTemporaryCredentialsApi,
@@ -29,6 +35,8 @@ import {
   getDbStatus,
   listCredentials,
   listAdminPeriods,
+  listAdminPrograms,
+  listAdminSubjects,
   listPeriods as listPeriodsApi,
   listPortalAvailability as listPortalAvailabilityApi,
   listPortalSessions as listPortalSessionsApi,
@@ -43,6 +51,8 @@ import {
   selectRole as selectRoleApi,
   updateRequest as updateRequestApi,
   updateAcademicPeriod,
+  updateAdminProgram,
+  updateAdminSubject,
   updateSpace as updateSpaceApi,
   updateUser as updateUserApi,
 } from './api'
@@ -103,6 +113,31 @@ function generateUserCode(roles: Role[], existingCodes: string[] = []): string {
   return code
 }
 
+type Notice = { id: number; message: string; kind: 'error' | 'success' | 'info' }
+function NoticeHost() {
+  const [notices, setNotices] = useState<Notice[]>([])
+  useEffect(() => {
+    const emit = (message: string) => {
+      const kind: Notice['kind'] = /correctamente|fue eliminado|se descargó/i.test(message) ? 'success' : 'error'
+      const id = Date.now() + Math.random()
+      setNotices((items) => [...items.slice(-3), { id, message, kind }])
+      window.setTimeout(() => setNotices((items) => items.filter((item) => item.id !== id)), kind === 'success' ? 5000 : 8000)
+    }
+    const originalAlert = window.alert.bind(window)
+    const customAlert = (message?: unknown) => {
+      const text = String(message ?? '')
+      // Las claves temporales se mantienen en un diálogo explícito para evitar que desaparezcan como una notificación efímera.
+      if (text.startsWith('Clave temporal de un solo uso:')) originalAlert(text)
+      else emit(text)
+    }
+    window.alert = customAlert
+    const listener = (event: Event) => emit(String((event as CustomEvent<string>).detail ?? ''))
+    window.addEventListener('acadex:notice', listener)
+    return () => { window.alert = originalAlert; window.removeEventListener('acadex:notice', listener) }
+  }, [])
+  return <div className="notice-stack" aria-live="polite" aria-relevant="additions removals">{notices.map((notice) => <div key={notice.id} className={`app-notice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}><span className="notice-icon">{notice.kind === 'success' ? <Check size={18}/> : <CircleAlert size={18}/>}</span><p>{notice.message}</p><button type="button" aria-label="Cerrar aviso" onClick={()=>setNotices((items)=>items.filter((item)=>item.id!==notice.id))}><X size={17}/></button></div>)}</div>
+}
+
 function generateSpaceCode(type: string, existingCodes: string[] = []): string {
   const prefixes: Record<string, string> = {
     Aula: 'AUL',
@@ -133,7 +168,7 @@ function isValidUserRoleSet(roles: Role[]) {
   return roles.length === 1 && roles[0] === 'Estudiante'
 }
 type PortalRole = Exclude<Role, 'Administrador'>
-type View = 'dashboard' | 'usuarios' | 'espacios' | 'solicitudes' | 'reportes' | 'configuracion'
+type View = 'dashboard' | 'usuarios' | 'asignaturas' | 'programas' | 'espacios' | 'solicitudes' | 'reportes' | 'configuracion'
 type PortalView = 'inicio' | 'disponibilidad' | 'horarios' | 'solicitudes' | 'sesiones' | 'informes' | 'solicitar' | 'mis-solicitudes' | 'mis-sesiones'
 type Status = 'Activo' | 'Inactivo'
 
@@ -345,19 +380,19 @@ function App() {
     setPortalView('inicio')
   }
 
-  if (hydratingSession) return <div className="session-loading">Validando sesión...</div>
-  if (!authenticated || !currentUser) return <LoginPage onSubmit={handleLogin} error={loginError} />
+  if (hydratingSession) return <><div className="session-loading">Validando sesión...</div><NoticeHost /></>
+  if (!authenticated || !currentUser) return <><LoginPage onSubmit={handleLogin} error={loginError} /><NoticeHost /></>
 
-  if (!selectedRole) return <RoleSelector user={currentUser} onSelect={(role) => { void handleRoleSelect(role); setPortalView('inicio') }} onLogout={logout} error={loginError} />
+  if (!selectedRole) return <><RoleSelector user={currentUser} onSelect={(role) => { void handleRoleSelect(role); setPortalView('inicio') }} onLogout={logout} error={loginError} /><NoticeHost /></>
 
-  if (currentUser.mustChangePassword) return <FirstPasswordChange accessToken={accessToken} onLogout={logout} onComplete={(user) => { setCurrentUser(user); setSessionVersion((version) => version + 1) }} />
+  if (currentUser.mustChangePassword) return <><FirstPasswordChange accessToken={accessToken} onLogout={logout} onComplete={(user) => { setCurrentUser(user); setSessionVersion((version) => version + 1) }} /><NoticeHost /></>
 
   if (selectedRole !== 'Administrador') {
-    return <RoleShell user={currentUser} activeRole={selectedRole} periodName={currentPeriod} periods={periods} view={portalView} onNavigate={setPortalView} onLogout={logout} onChangeRole={() => { setSelectedRole(null); setPortalView('inicio') }} accessToken={accessToken} requests={requests} subjects={subjects} sessions={portalSessions} availability={availability} dataError={dataError} dataLoading={dataLoading} onRequestsChange={setRequests} />
+    return <><RoleShell user={currentUser} activeRole={selectedRole} periodName={currentPeriod} periods={periods} view={portalView} onNavigate={setPortalView} onLogout={logout} onChangeRole={() => { setSelectedRole(null); setPortalView('inicio') }} accessToken={accessToken} requests={requests} subjects={subjects} sessions={portalSessions} availability={availability} dataError={dataError} dataLoading={dataLoading} onRequestsChange={setRequests} /><NoticeHost /></>
   }
 
   return (
-    <AdminShell
+    <><AdminShell
       user={currentUser}
       periodName={currentPeriod}
       periods={periods}
@@ -376,11 +411,13 @@ function App() {
       {dataLoading && <div className="data-loading">Actualizando datos desde MariaDB...</div>}
       {view === 'dashboard' && <Dashboard users={users} spaces={spaces} requests={requests} data={dashboardData} onNavigate={setView} />}
       {view === 'usuarios' && <UsersView users={users} accessToken={accessToken} catalogs={adminCatalogs} onChange={setUsers} />}
+      {view === 'asignaturas' && <AcademicCatalogView kind="subjects" accessToken={accessToken} catalogs={adminCatalogs} onCatalogsChange={setAdminCatalogs} />}
+      {view === 'programas' && <AcademicCatalogView kind="programs" accessToken={accessToken} catalogs={adminCatalogs} onCatalogsChange={setAdminCatalogs} />}
       {view === 'espacios' && <SpacesView spaces={spaces} accessToken={accessToken} onChange={setSpaces} />}
       {view === 'solicitudes' && <RequestsView requests={requests} accessToken={accessToken} catalogs={adminCatalogs} onChange={setRequests} />}
       {view === 'reportes' && <ReportsView accessToken={accessToken} catalogs={adminCatalogs} />}
       {view === 'configuracion' && <ConfigurationView accessToken={accessToken} currentUser={currentUser} />}
-    </AdminShell>
+    </AdminShell><NoticeHost /></>
   )
 }
 
@@ -489,6 +526,8 @@ function AdminShell({ user, activeRole, periodName, periods, children, view, onN
   const navItems: { id: View; label: string; icon: ReactNode }[] = [
     { id: 'dashboard', label: 'Resumen general', icon: <LayoutDashboard size={19} /> },
     { id: 'usuarios', label: 'Gestión de usuarios', icon: <UsersRound size={19} /> },
+    { id: 'asignaturas', label: 'Gestión de asignaturas', icon: <BookOpen size={19} /> },
+    { id: 'programas', label: 'Programas académicos', icon: <GraduationCap size={19} /> },
     { id: 'espacios', label: 'Gestión de espacios', icon: <Building2 size={19} /> },
     { id: 'solicitudes', label: 'Gestión de solicitudes', icon: <CalendarDays size={19} /> },
     { id: 'reportes', label: 'Reportes', icon: <BarChart3 size={19} /> },
@@ -1085,7 +1124,7 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
           </label>
           <label>Documento de identidad<input name="document" required minLength={5} maxLength={20} pattern="[0-9]{5,20}" inputMode="numeric" autoComplete="off" defaultValue={editingUser?.document ?? ''} placeholder="Ej. 1093432540" /></label>
         </div>
-        <label>Nombre completo<input name="name" required minLength={5} maxLength={160} pattern=".*\s+.*" title="Ingresa al menos un nombre y un apellido." autoComplete="name" defaultValue={editingUser?.name ?? ''} placeholder="Ej. Ana María López" /></label>
+        <label>Nombre completo<input name="name" required minLength={5} maxLength={160} pattern="[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+)+" title="Ingresa nombre y apellido usando letras, espacios, apóstrofes o guiones; no se admiten números." autoComplete="name" defaultValue={editingUser?.name ?? ''} placeholder="Ej. Ana María López" /></label>
         <label>Correo institucional<input type="email" name="email" required maxLength={120} pattern=".+@unitropico[.]edu[.]co" title="Usa tu correo institucional @unitropico.edu.co." autoComplete="email" defaultValue={editingUser?.email ?? ''} placeholder="correo@unitropico.edu.co" /></label>
         <label>Número de contacto (opcional)<input type="tel" name="phone" maxLength={20} pattern="\+?[0-9\s().-]{7,20}" title="Ingresa al menos 7 dígitos; puedes usar +, espacios, paréntesis, puntos o guiones." autoComplete="tel" defaultValue={editingUser?.phone ?? ''} placeholder="Ej. +57 310 123 4567" /><small className="form-field-hint">Dato de contacto no obligatorio.</small></label>
         <fieldset className="role-options">
@@ -1112,6 +1151,59 @@ function UsersView({ users, accessToken, catalogs, onChange, currentUserId }: { 
         </div>
       </form>
     </Modal>}
+  </>
+}
+
+function AcademicCatalogView({ kind, accessToken, catalogs, onCatalogsChange }: { kind: 'subjects' | 'programs'; accessToken: string; catalogs: AdminCatalogs | null; onCatalogsChange: (catalogs: AdminCatalogs) => void }) {
+  const [subjects, setSubjects] = useState<AdminSubject[]>([])
+  const [programs, setPrograms] = useState<AdminProgram[]>([])
+  const [faculties, setFaculties] = useState<Array<{ id: number; name: string }>>([])
+  const [query, setQuery] = useState('')
+  const [modal, setModal] = useState(false)
+  const [editing, setEditing] = useState<AdminSubject | AdminProgram | null>(null)
+  const [loading, setLoading] = useState(false)
+  const isSubjects = kind === 'subjects'
+  const load = async () => {
+    setLoading(true)
+    try {
+      if (isSubjects) setSubjects(await listAdminSubjects(accessToken))
+      else { const result = await listAdminPrograms(accessToken); setPrograms(result.data); setFaculties(result.faculties) }
+    } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cargar el catálogo académico.') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { void load() }, [accessToken, kind])
+  const rows = (isSubjects ? subjects : programs).filter((item) => `${item.code} ${item.name}`.toLowerCase().includes(query.toLowerCase()))
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const status = String(form.get('status')) as 'Activo' | 'Inactivo'
+    try {
+      if (isSubjects) {
+        const input = { code: String(form.get('code')).trim(), name: String(form.get('name')).trim(), credits: String(form.get('credits') ?? '') ? Number(form.get('credits')) : null, description: String(form.get('description') ?? '').trim(), status }
+        const saved = editing ? await updateAdminSubject(accessToken, editing.id, input) : await createAdminSubject(accessToken, input)
+        const next = editing ? subjects.map((row) => row.id === saved.id ? saved : row) : [saved, ...subjects]
+        setSubjects(next)
+        if (catalogs) onCatalogsChange({ ...catalogs, subjects: next.filter((row) => row.status === 'Activo').map(({ id, code, name }) => ({ id, codigo: code, nombre: name })) })
+      } else {
+        const input = { code: String(form.get('code')).trim(), name: String(form.get('name')).trim(), snies: String(form.get('snies') ?? '').trim(), facultyId: Number(form.get('facultyId')), status }
+        const saved = editing ? await updateAdminProgram(accessToken, editing.id, input) : await createAdminProgram(accessToken, input)
+        const next = editing ? programs.map((row) => row.id === saved.id ? saved : row) : [saved, ...programs]
+        setPrograms(next)
+        if (catalogs) onCatalogsChange({ ...catalogs, programs: next.filter((row) => row.status === 'Activo').map(({ id, code, name, facultyId, facultyName }) => ({ id, codigo: code, nombre: name, facultyId, facultyName })) })
+      }
+      setModal(false); setEditing(null)
+    } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible guardar el registro académico.') }
+  }
+  const remove = async (item: AdminSubject | AdminProgram) => {
+    if (!window.confirm(`¿Eliminar ${isSubjects ? 'la asignatura' : 'el programa'} «${item.name}»? Si tiene registros relacionados, deberás desactivarlo para conservar el historial.`)) return
+    try {
+      if (isSubjects) { await deleteAdminSubject(accessToken,item.id); const next=subjects.filter((row)=>row.id!==item.id); setSubjects(next); if(catalogs) onCatalogsChange({...catalogs,subjects:next.filter((row)=>row.status==='Activo').map(({id,code,name})=>({id,codigo:code,nombre:name}))}) }
+      else { await deleteAdminProgram(accessToken,item.id); const next=programs.filter((row)=>row.id!==item.id); setPrograms(next); if(catalogs) onCatalogsChange({...catalogs,programs:next.filter((row)=>row.status==='Activo').map(({id,code,name,facultyId,facultyName})=>({id,codigo:code,nombre:name,facultyId,facultyName}))}) }
+    } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible eliminar el registro.') }
+  }
+  return <><PageHeader eyebrow="Administración / Catálogos" title={isSubjects ? 'Gestión de asignaturas' : 'Gestión de programas académicos'} description={isSubjects ? 'Administra códigos, nombres, créditos y descripciones de las asignaturas.' : 'Administra programas, códigos SNIES y facultades asociadas.'} action={<button className="primary-button" onClick={() => { setEditing(null); setModal(true) }}><Plus size={17} /> Nuevo {isSubjects ? 'asignatura' : 'programa'}</button>} />
+    <section className="panel table-panel"><div className="table-toolbar"><div className="search-input"><Search size={17} /><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder={`Buscar ${isSubjects ? 'asignatura' : 'programa'}...`} /></div><button className="secondary-button" onClick={()=>void load()} disabled={loading}><RefreshCw size={16}/>{loading?'Actualizando...':'Actualizar'}</button></div><div className="table-scroll"><table><thead><tr><th>CÓDIGO</th><th>NOMBRE</th>{isSubjects?<><th>CRÉDITOS</th><th>DESCRIPCIÓN</th></>:<><th>SNIES</th><th>FACULTAD</th></>}<th>ESTADO</th><th className="align-right">ACCIONES</th></tr></thead><tbody>{rows.map((item)=>{const subject=isSubjects?item as AdminSubject:null; const program=isSubjects?null:item as AdminProgram; return <tr key={item.id}><td><strong>{item.code}</strong></td><td>{item.name}</td>{subject?<><td>{subject.credits??'—'}</td><td>{subject.description||'—'}</td></>:<><td>{program?.snies||'—'}</td><td>{program?.facultyName||'—'}</td></>}<td>{item.status}</td><td className="align-right"><div className="actions-inline"><button className="row-action" onClick={()=>{setEditing(item);setModal(true)}}>Editar</button><button className="delete-action" onClick={()=>void remove(item)} title="Eliminar"> <Trash2 size={16}/></button></div></td></tr>})}{!rows.length&&<tr><td colSpan={6}>No se encontraron registros.</td></tr>}</tbody></table></div></section>
+    {modal&&<Modal title={`${editing?'Editar':'Nueva'} ${isSubjects?'asignatura':'programa'}`} subtitle="Los datos se validan antes de guardarse en MariaDB." onClose={()=>{setModal(false);setEditing(null)}}><form className="modal-form" onSubmit={save}><div className="form-columns"><label>Código<input name="code" required maxLength={20} minLength={2} pattern="[A-Za-z0-9][A-Za-z0-9-]*" defaultValue={editing?.code??''} placeholder={isSubjects?'MAT-101':'ING-SIS'}/></label><label>Nombre<input name="name" required minLength={2} maxLength={isSubjects?150:120} defaultValue={editing?.name??''}/></label></div>{isSubjects?<><div className="form-columns"><label>Créditos (opcional)<input name="credits" type="number" min={1} max={30} step={1} defaultValue={(editing as AdminSubject|null)?.credits??''}/></label><label>Estado<select name="status" defaultValue={editing?.status??'Activo'}><option>Activo</option><option>Inactivo</option></select></label></div><label>Descripción<textarea name="description" maxLength={300} defaultValue={(editing as AdminSubject|null)?.description??''}/></label></>:<><div className="form-columns"><label>Registro SNIES (opcional)<input name="snies" maxLength={30} defaultValue={(editing as AdminProgram|null)?.snies??''}/></label><label>Facultad<select name="facultyId" required defaultValue={(editing as AdminProgram|null)?.facultyId??''}><option value="">Selecciona una facultad</option>{faculties.map((faculty)=><option key={faculty.id} value={faculty.id}>{faculty.name}</option>)}</select></label></div><label>Estado<select name="status" defaultValue={editing?.status??'Activo'}><option>Activo</option><option>Inactivo</option></select></label></>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={()=>{setModal(false);setEditing(null)}}>Cancelar</button><button className="primary-button" type="submit">{editing?'Guardar cambios':'Registrar'}</button></div></form></Modal>}
   </>
 }
 
@@ -1336,7 +1428,7 @@ function SpacesView({ spaces, accessToken, onChange }: { spaces: Space[]; access
               <option>Otro</option>
             </select>
           </label>
-          <label>Capacidad de estudiantes<input name="capacity" type="number" min="1" max="1000" step="1" required defaultValue={editingSpace?.capacity ?? ''} placeholder="30" /></label>
+          <label>Capacidad de estudiantes<input name="capacity" type="number" min="1" max="1000" step="1" inputMode="numeric" required defaultValue={editingSpace?.capacity ?? ''} placeholder="30" /></label>
           <label>Estado operativo
             <select name="status" defaultValue={editingSpace?.status ?? 'Activo'}>
               <option>Activo</option>

@@ -23,10 +23,11 @@ const institutionalEmailSchema = z.string().trim().email().max(120).refine(
   'Usa un correo institucional @unitropico.edu.co.',
 ).transform((value) => value.toLowerCase())
 const personNameSchema = z.string().trim().min(5).max(160).refine(
-  (value) => value.split(/\s+/).length >= 2,
-  'Escribe al menos un nombre y un apellido.',
+  (value) => /^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+)+$/u.test(value),
+  'Escribe un nombre y apellido usando solo letras, espacios, apóstrofes o guiones.',
 )
 const identityDocumentSchema = z.string().trim().regex(/^\d{5,20}$/, 'El documento debe contener entre 5 y 20 dígitos.')
+const integerInput = (schema: z.ZodType) => z.preprocess((value) => typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value, schema)
 const contactPhoneSchema = z.string().trim().max(20).refine(
   (value) => value === '' || (/^\+?[0-9\s().-]+$/.test(value) && (value.match(/\d/g)?.length ?? 0) >= 7),
   'Ingresa un número de contacto válido (mínimo 7 dígitos).',
@@ -148,16 +149,16 @@ async function restoreProfileRoleMemberships(connection: any, userId: number) {
 }
 
 const assignmentSchema = z.object({
-  subjectIds: z.array(z.coerce.number().int().positive()).min(1, 'Selecciona una asignatura.').max(1, 'Tutor y monitor solo pueden tener una asignatura asignada.'),
-  periodId: z.preprocess((val) => (val && Number(val) > 0 ? Number(val) : undefined), z.number().int().positive().optional()),
-  weeklyHours: z.preprocess((val) => (val && Number(val) > 0 ? Number(val) : undefined), z.number().int().positive().max(60).optional()),
+  subjectIds: z.array(integerInput(z.number().int().positive())).min(1, 'Selecciona una asignatura.').max(1, 'Tutor y monitor solo pueden tener una asignatura asignada.'),
+  periodId: integerInput(z.number().int().positive().optional()),
+  weeklyHours: integerInput(z.number().int().positive().max(60).optional()),
 }).strict()
 
 const studentProfileSchema = z.object({
   studentCode: z.string().trim().min(2).max(30),
-  semester: z.preprocess((val) => (val !== undefined && val !== null ? Number(val) : undefined), z.number().int().min(1).max(12).optional()),
-  semestre: z.preprocess((val) => (val !== undefined && val !== null ? Number(val) : undefined), z.number().int().min(1).max(12).optional()),
-  programId: z.coerce.number().int().positive(),
+  semester: integerInput(z.number().int().min(1).max(12).optional()),
+  semestre: integerInput(z.number().int().min(1).max(12).optional()),
+  programId: integerInput(z.number().int().positive()),
 }).strict().transform((val) => {
   const sem = val.semester ?? val.semestre ?? 1
   return {
@@ -180,7 +181,7 @@ const profileSchema = z.object({
     teachingCategory: z.string().trim().min(2).max(80),
     employmentType: z.string().trim().min(2).max(80),
     currentPeriod: z.string().trim().min(1).max(20),
-    weeklyHours: z.coerce.number().int().positive().max(60),
+    weeklyHours: integerInput(z.number().int().positive().max(60)),
     observations: z.string().max(300).optional().default(''),
     assignments: assignmentSchema.default({}),
   }).strict().optional(),
@@ -188,7 +189,7 @@ const profileSchema = z.object({
     monitorType: z.string().trim().min(2).max(80).default('Monitor académico'),
     resolution: z.string().max(80).optional().default(''),
     currentPeriod: z.string().trim().min(1).max(20),
-    weeklyHours: z.coerce.number().int().positive().max(60),
+    weeklyHours: integerInput(z.number().int().positive().max(60)),
     observations: z.string().max(300).optional().default(''),
     assignments: assignmentSchema.default({}),
   }).strict().optional(),
@@ -380,10 +381,10 @@ function normalizeSpace(row: any) {
 const optionalText = (maxLength: number) => z.string().trim().max(maxLength).optional().default('')
 const spaceFieldsSchema = z.object({
   code: z.string().trim().min(2).max(20).regex(/^[A-Za-z0-9-]+$/, 'El código solo puede contener letras, números y guiones.'),
-  name: z.string().trim().min(2).max(120),
+  name: z.string().trim().min(2).max(120).refine((value) => /[\p{L}\p{N}]/u.test(value) && !/[\u0000-\u001f]/.test(value), 'Ingresa un nombre de espacio válido.'),
   building: optionalText(80), block: optionalText(20), room: optionalText(20), floor: optionalText(10),
   location: optionalText(200), description: optionalText(300), resources: optionalText(500), observations: optionalText(300),
-  capacity: z.coerce.number().int().min(1).max(1000),
+  capacity: integerInput(z.number().int().min(1).max(1000)),
   type: z.enum(['Aula','Laboratorio','Sala','Sala de informática','Biblioteca','Salón de reuniones','Otro','Virtual']),
   status: z.enum(['Activo','Inactivo']).optional(),
 }).strict()
@@ -514,7 +515,7 @@ export async function listAdminRequests(query: any = {}) {
     pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
   }
 }
-const adminRequestSchema=z.object({studentId:z.coerce.number().int().positive(),programId:z.coerce.number().int().positive(),subjectId:z.coerce.number().int().positive(),type:z.enum(['Monitoría','Tutoría','Acompañamiento']),priority:z.enum(['Alta','Media','Baja']),motive:z.string().trim().min(3).max(500),description:z.string().trim().min(3).max(500),periodId:z.coerce.number().int().positive().optional()}).strict()
+const adminRequestSchema=z.object({studentId:integerInput(z.number().int().positive()),programId:integerInput(z.number().int().positive()),subjectId:integerInput(z.number().int().positive()),type:z.enum(['Monitoría','Tutoría','Acompañamiento']),priority:z.enum(['Alta','Media','Baja']),motive:z.string().trim().min(3).max(500),description:z.string().trim().min(3).max(500),periodId:integerInput(z.number().int().positive().optional())}).strict()
 export async function createAdminRequest(payload:unknown){
   const input=adminRequestSchema.parse(payload)
   const [students]=await pool.query("SELECT e.id_estudiante AS studentId,ep.id_programa AS programId FROM Estudiante e LEFT JOIN EstudiantePrograma ep ON ep.id_estudiante=e.id_estudiante AND ep.principal=1 AND ep.estado='Activo' WHERE e.id_usuario=? AND e.estado='Activo'",[input.studentId])
@@ -536,7 +537,7 @@ export async function createAdminRequest(payload:unknown){
 }
 
 const requestAssignmentSchema = z.object({
-  userId: z.coerce.number().int().positive(),
+  userId: integerInput(z.number().int().positive()),
   role: z.enum(['Tutor', 'Monitor']),
   date: z.string().refine(isoDateIsValid, 'La fecha debe ser válida y usar el formato AAAA-MM-DD.').refine((value) => {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -737,12 +738,86 @@ export async function deleteAdminPeriod(id:number){
 
 export async function adminCatalogs(){
   const [programs]=await pool.query("SELECT p.id_programa AS id,p.codigo,p.nombre,p.id_facultad AS facultyId,f.nombre AS facultyName FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad WHERE p.estado='Activo' ORDER BY p.nombre")
+  const [faculties]=await pool.query("SELECT id_facultad AS id,nombre AS nombre FROM Facultad WHERE estado='Activo' ORDER BY nombre")
   const [subjects]=await pool.query("SELECT id_asignatura AS id,codigo,nombre FROM Asignatura WHERE estado='Activo' ORDER BY nombre")
   const [periods]=await pool.query('SELECT id_periodo AS id,nombre,estado FROM PeriodoAcademico ORDER BY fecha_inicio DESC')
   const [students]=await pool.query("SELECT u.id_usuario AS id,CONCAT(u.nombres,' ',u.apellidos) AS name,e.codigo_estudiantil AS studentCode,ep.id_programa AS programId,p.nombre AS programName FROM Estudiante e JOIN Usuario u ON u.id_usuario=e.id_usuario LEFT JOIN EstudiantePrograma ep ON ep.id_estudiante=e.id_estudiante AND ep.principal=1 AND ep.estado='Activo' LEFT JOIN Programa p ON p.id_programa=ep.id_programa WHERE e.estado='Activo' AND u.estado='Activo' ORDER BY u.nombres,u.apellidos")
   const [types]=await pool.query("SELECT id_tipo_solicitud AS id,nombre FROM TipoSolicitud WHERE estado='Activo' ORDER BY nombre")
   const [staffAssignments]=await pool.query("SELECT aa.id_usuario AS userId,CONCAT(u.nombres,' ',u.apellidos) AS name,r.nombre AS role,aa.id_asignatura AS subjectId,aa.id_periodo AS periodId,aa.horas_semanales AS weeklyHours FROM AsignacionAcademica aa JOIN Rol r ON r.id_rol=aa.id_rol JOIN Usuario u ON u.id_usuario=aa.id_usuario JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.id_rol=r.id_rol WHERE r.nombre IN ('Tutor','Monitor') AND aa.estado='Activa' AND u.estado='Activo' AND ur.estado='Activo' ORDER BY u.apellidos,u.nombres")
-  return {programs,subjects,periods,students,requestTypes:types,staffAssignments}
+  return {programs,subjects,faculties,periods,students,requestTypes:types,staffAssignments}
+}
+
+const catalogName = z.string().trim().min(2).max(150).refine((value) => /[\p{L}]/u.test(value), 'El nombre debe contener letras.')
+const catalogCode = z.string().trim().min(2).max(20).regex(/^[A-Za-z0-9][A-Za-z0-9-]*$/, 'El código solo admite letras, números y guiones.')
+const subjectInput = z.object({ code: catalogCode, name: catalogName, credits: integerInput(z.number().int().min(1).max(30).nullable().optional()), description: z.string().trim().max(300).optional().default(''), status: z.enum(['Activo','Inactivo']).optional().default('Activo') }).strict()
+const programInput = z.object({ code: catalogCode, name: catalogName.max(120), snies: z.string().trim().max(30).optional().default(''), facultyId: integerInput(z.number().int().positive()), status: z.enum(['Activo','Inactivo']).optional().default('Activo') }).strict()
+
+export async function listAdminSubjects() {
+  const [rows] = await pool.query('SELECT id_asignatura AS id,codigo AS code,nombre AS name,creditos AS credits,descripcion AS description,estado AS status FROM Asignatura ORDER BY nombre')
+  return rows
+}
+export async function createAdminSubject(payload: unknown) {
+  const input = subjectInput.parse(payload)
+  try {
+    const [result] = await pool.execute('INSERT INTO Asignatura (codigo,nombre,creditos,descripcion,estado) VALUES (?,?,?,?,?)', [input.code,input.name,input.credits ?? null,input.description || null,input.status])
+    return (await pool.query('SELECT id_asignatura AS id,codigo AS code,nombre AS name,creditos AS credits,descripcion AS description,estado AS status FROM Asignatura WHERE id_asignatura=?', [result.insertId]))[0][0]
+  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_SUBJECT','El código de asignatura ya existe.'); throw error }
+}
+export async function updateAdminSubject(id: number, payload: unknown) {
+  const input = subjectInput.partial().strict().refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo para actualizar.').parse(payload)
+  const [existing] = await pool.query('SELECT id_asignatura FROM Asignatura WHERE id_asignatura=?', [id])
+  if (!existing.length) throw new DataError(404,'SUBJECT_NOT_FOUND','La asignatura no existe.')
+  try {
+    const columns: Record<string,string> = { code:'codigo',name:'nombre',credits:'creditos',description:'descripcion',status:'estado' }
+    const fields = Object.entries(input).map(([key]) => `${columns[key]}=?`)
+    const values = Object.entries(input).map(([key,value]) => key === 'description' ? (value || null) : value)
+    await pool.execute(`UPDATE Asignatura SET ${fields.join(',')} WHERE id_asignatura=?`, [...values,id])
+    return (await pool.query('SELECT id_asignatura AS id,codigo AS code,nombre AS name,creditos AS credits,descripcion AS description,estado AS status FROM Asignatura WHERE id_asignatura=?', [id]))[0][0]
+  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_SUBJECT','El código de asignatura ya existe.'); throw error }
+}
+export async function deleteAdminSubject(id: number) {
+  const [rows] = await pool.query('SELECT id_asignatura FROM Asignatura WHERE id_asignatura=?', [id])
+  if (!rows.length) throw new DataError(404,'SUBJECT_NOT_FOUND','La asignatura no existe.')
+  const [usage] = await pool.query('SELECT (SELECT COUNT(*) FROM ProgramaAsignatura WHERE id_asignatura=?)+(SELECT COUNT(*) FROM AsignacionAcademica WHERE id_asignatura=?)+(SELECT COUNT(*) FROM Solicitud WHERE id_asignatura=?) AS total', [id,id,id])
+  if (Number(usage[0]?.total ?? 0)) throw new DataError(409,'SUBJECT_IN_USE','La asignatura tiene programas, asignaciones o solicitudes relacionadas; desactívala para conservar el historial.')
+  await pool.execute('DELETE FROM Asignatura WHERE id_asignatura=?', [id])
+}
+
+export async function listAdminPrograms() {
+  const [rows] = await pool.query('SELECT p.id_programa AS id,p.codigo AS code,p.nombre AS name,p.registro_snies AS snies,p.id_facultad AS facultyId,f.nombre AS facultyName,p.estado AS status FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad ORDER BY p.nombre')
+  const [faculties] = await pool.query("SELECT id_facultad AS id,nombre AS name FROM Facultad WHERE estado='Activo' ORDER BY nombre")
+  return { data: rows, faculties }
+}
+export async function createAdminProgram(payload: unknown) {
+  const input = programInput.parse(payload)
+  const [faculty] = await pool.query("SELECT id_facultad FROM Facultad WHERE id_facultad=? AND estado='Activo'", [input.facultyId])
+  if (!faculty.length) throw new DataError(422,'FACULTY_NOT_FOUND','Selecciona una facultad activa.')
+  try {
+    const [result] = await pool.execute('INSERT INTO Programa (codigo,nombre,registro_snies,estado,id_facultad) VALUES (?,?,?,?,?)', [input.code,input.name,input.snies || null,input.status,input.facultyId])
+    return (await pool.query('SELECT p.id_programa AS id,p.codigo AS code,p.nombre AS name,p.registro_snies AS snies,p.id_facultad AS facultyId,f.nombre AS facultyName,p.estado AS status FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad WHERE p.id_programa=?', [result.insertId]))[0][0]
+  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_PROGRAM','El código o nombre de programa ya existe.'); throw error }
+}
+export async function updateAdminProgram(id: number, payload: unknown) {
+  const input = programInput.partial().strict().refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo para actualizar.').parse(payload)
+  const [existing] = await pool.query('SELECT id_programa FROM Programa WHERE id_programa=?', [id])
+  if (!existing.length) throw new DataError(404,'PROGRAM_NOT_FOUND','El programa académico no existe.')
+  if (input.facultyId !== undefined) {
+    const [faculty] = await pool.query("SELECT id_facultad FROM Facultad WHERE id_facultad=? AND estado='Activo'", [input.facultyId])
+    if (!faculty.length) throw new DataError(422,'FACULTY_NOT_FOUND','Selecciona una facultad activa.')
+  }
+  try {
+    const columns: Record<string,string> = { code:'codigo',name:'nombre',snies:'registro_snies',facultyId:'id_facultad',status:'estado' }
+    const entries = Object.entries(input)
+    await pool.execute(`UPDATE Programa SET ${entries.map(([key]) => `${columns[key]}=?`).join(',')} WHERE id_programa=?`, [...entries.map(([,value]) => value || null),id])
+    return (await pool.query('SELECT p.id_programa AS id,p.codigo AS code,p.nombre AS name,p.registro_snies AS snies,p.id_facultad AS facultyId,f.nombre AS facultyName,p.estado AS status FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad WHERE p.id_programa=?', [id]))[0][0]
+  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_PROGRAM','El código o nombre de programa ya existe.'); throw error }
+}
+export async function deleteAdminProgram(id: number) {
+  const [rows] = await pool.query('SELECT id_programa FROM Programa WHERE id_programa=?', [id])
+  if (!rows.length) throw new DataError(404,'PROGRAM_NOT_FOUND','El programa académico no existe.')
+  const [usage] = await pool.query('SELECT (SELECT COUNT(*) FROM EstudiantePrograma WHERE id_programa=?)+(SELECT COUNT(*) FROM ProgramaAsignatura WHERE id_programa=?)+(SELECT COUNT(*) FROM Solicitud WHERE id_programa=?) AS total', [id,id,id])
+  if (Number(usage[0]?.total ?? 0)) throw new DataError(409,'PROGRAM_IN_USE','El programa tiene estudiantes, asignaturas o solicitudes relacionadas; desactívalo para conservar el historial.')
+  await pool.execute('DELETE FROM Programa WHERE id_programa=?', [id])
 }
 
 async function aggregateReport(filters: any = {}) {

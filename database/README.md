@@ -196,3 +196,9 @@ Auditoría local del 15 de octubre de 2026: 36/36 tablas InnoDB, 55 claves forá
 `Usuario.estado` y `Credencial.estado` controlan el acceso global; `UsuarioRol.estado` controla si una membresía específica está activa. Por ello, desactivar una cuenta no cambia sus roles. En `PATCH /users/{id}`, el arreglo `roles` es el conjunto final: los seleccionados quedan activos y los quitados se inactivan junto con su perfil operativo. Los listados usan solo membresías activas; los filtros no alteran el conjunto que devuelve la respuesta. La actualización de Estudiante desactiva las relaciones de programa anteriores cuando se cambia el programa principal.
 
 La reauditoría de solo lectura posterior a la prueba integrada de edición reportó 5 códigos estudiantiles discrepantes, frente a los 6 del corte anterior documentado. La prueba temporal fue eliminada y no se ejecutó una remediación de registros existentes. Reconciliar los cortes antes de corregir los datos; el detalle permanece en `docs/BITACORA_PROYECTO.md`.
+
+## Catálogos académicos y validaciones de integridad
+
+No fue necesario modificar el DDL ni aplicar una migración: las tablas `Asignatura`, `Programa`, `Facultad` y sus relaciones ya existían. Los nuevos endpoints administrativos validan tipos, rangos, facultad y duplicados antes de guardar. Las eliminaciones consultan referencias operativas y responden conflicto en vez de borrar historial; el administrador puede cambiar el estado a `Inactivo`.
+
+La API rechaza nombres personales con dígitos y entradas no enteras en campos numéricos; créditos, semestre, horas y capacidad respetan sus rangos funcionales. Se probaron CRUD temporales de asignatura y programa con creación, edición y eliminación; también se confirmó que referencias existentes bloquean el borrado. Los registros temporales fueron limpiados y no se modificaron datos preexistentes.

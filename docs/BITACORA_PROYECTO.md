@@ -662,6 +662,24 @@ Esta actualización deja el código y la documentación preparados para la revis
 - La API valida el formato cuando se proporciona, lo persiste en altas y actualizaciones, y permite conservarlo al omitir el campo en PATCH o quitarlo con un valor vacío/null. El contrato OpenAPI y la documentación del modelo/API quedaron sincronizados.
 - No se modificó el esquema de MariaDB porque la columna ya existe.
 
+## CRUD administrativo de asignaturas
+
+- Se agregaron la pantalla y las rutas protegidas para listar, crear, editar y borrar asignaturas con código, nombre, créditos, descripción y estado.
+- API y OpenAPI validan formato, longitudes y créditos enteros entre 1 y 30. Si hay programas, asignaciones o solicitudes relacionadas, `DELETE` devuelve conflicto y se conserva la opción de inactivar.
+- Verificación MariaDB: un registro temporal se creó, editó y eliminó; se confirmó además que una asignatura ya referenciada no puede borrarse.
+
+## CRUD administrativo de programas académicos
+
+- Se agregaron la pantalla y las rutas protegidas para listar, crear, editar y borrar programas con código, nombre, SNIES opcional, facultad y estado. El formulario usa facultades activas existentes.
+- Se validan tipos, longitudes, facultad válida y duplicados. Si existen estudiantes, asignaturas vinculadas o solicitudes, el borrado físico se bloquea para conservar la relación histórica.
+- Verificación MariaDB: un programa temporal se creó, editó y eliminó; se comprobó además que un programa ya referenciado no puede borrarse.
+
+## Avisos y validaciones de integridad en formularios
+
+- Los avisos del frontend se presentan en una bandeja accesible, cerrable y adaptable, en lugar de interrumpir el flujo con diálogos nativos. Los errores `422` incluyen campo y mensaje legibles. La entrega de claves temporales conserva un diálogo explícito para que el secreto no desaparezca automáticamente.
+- El nombre real de una persona se valida en interfaz y API para permitir letras, espacios, apóstrofes y guiones, y rechazar dígitos. Los datos numéricos de perfiles, catálogos, solicitudes y espacios rechazan letras, decimales o notación exponencial y aplican sus rangos.
+- Verificación: build web, typecheck API y contrato OpenAPI correctos; pruebas negativas para nombre con dígitos, capacidad con letras, créditos en notación exponencial y facultad textual fueron rechazadas antes de persistir. El CRUD integrado de ambas entidades y la protección de borrado con referencias pasaron; los registros de prueba se eliminaron.
+
 ## Selección explícita de roles al crear usuarios
 
 - El alta de usuario inicia con todas las casillas de rol desmarcadas y no genera el código institucional hasta que se selecciona un rol.

@@ -128,3 +128,11 @@ Se elimina del panel de Configuración la edición de parámetros institucionale
 ## 21. Combinaciones excluyentes de roles
 
 Un usuario solo puede tener `Administrador`, `Tutor`, `Estudiante` o `Monitor` individualmente, salvo la combinación válida `Monitor + Estudiante`. Administrador y Tutor son mutuamente exclusivos con cualquier otro rol; Monitor solo es compatible con Estudiante. Se aplica la matriz tanto en la interfaz como en el esquema de API y se expresa en OpenAPI mediante `UserRoles`.
+
+## 22. CRUD de catálogos académicos con borrado protegido
+
+Asignaturas y programas se administran mediante rutas protegidas para Administrador. Una asignatura en uso o un programa con estudiantes, asignaturas o solicitudes asociadas no se elimina físicamente: el sistema devuelve conflicto y conserva la opción de desactivar. Esta política preserva integridad referencial e historial sin requerir una migración.
+
+## 23. Validación por tipo y avisos accionables
+
+La API es autoridad final para validar los formularios. Los nombres personales admiten letras y separadores nominales, no dígitos; valores numéricos se aceptan solo como enteros dentro de su dominio, sin coerción desde texto arbitrario. El frontend transforma las respuestas de validación en avisos accesibles con campo y motivo; los secretos efímeros mantienen una presentación explícita y no temporizada.
