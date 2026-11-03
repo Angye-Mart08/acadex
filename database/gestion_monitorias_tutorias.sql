@@ -1813,10 +1813,10 @@ INSERT INTO AsignacionAcademica(id_asignacion, id_usuario, id_rol, id_asignatura
 INSERT INTO Disponibilidad(id_disponibilidad, id_asignacion, dia_semana, hora_inicio, hora_fin, modalidad, estado) VALUES
 (1, 4, 'Lunes', '08:00:00', '10:00:00', 'Presencial', 'Activo'),
 (2, 4, 'Miércoles', '10:00:00', '12:00:00', 'Presencial', 'Activo'),
-(3, 4, 'Viernes', '14:00:00', '16:00:00', 'Virtual', 'Activo'),
+(3, 4, 'Viernes', '14:00:00', '16:00:00', 'Presencial', 'Activo'),
 (4, 5, 'Martes', '09:00:00', '11:00:00', 'Presencial', 'Activo'),
 (5, 5, 'Jueves', '15:00:00', '17:00:00', 'Presencial', 'Activo'),
-(6, 6, 'Sábado', '08:00:00', '10:00:00', 'Virtual', 'Activo');
+(6, 6, 'Sábado', '08:00:00', '10:00:00', 'Presencial', 'Activo');
 
 INSERT INTO AsignacionEspacio(id_asignacion_espacio, id_disponibilidad, id_espacio, fecha_inicio, fecha_fin, estado) VALUES
 (1, 1, 13, '2026-01-20', NULL, 'Activo'),

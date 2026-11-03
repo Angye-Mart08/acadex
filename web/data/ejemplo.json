@@ -31,13 +31,5 @@
     { "code": "101A", "name": "Salón 101A", "type": "Aula", "capacity": 20 },
     { "code": "BIB01", "name": "Biblioteca central", "type": "Biblioteca", "capacity": 40 }
   ],
-  "requests": [
-    {
-      "id": 1,
-      "subject": "Pensamiento matemático",
-      "type": "Monitoría",
-      "priority": "Alta",
-      "status": "Pendiente"
-    }
-  ]
+  "requests": []
 }

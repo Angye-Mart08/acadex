@@ -254,3 +254,81 @@ Operaciones administrativas (requieren rol `Administrador`):
 ## Avisos y validación de integridad
 
 El frontend presenta errores y validaciones en notificaciones accesibles, cerrables y temporizadas; los secretos temporales conservan un diálogo explícito. Las respuestas `422` devuelven `details` por ruta y mensaje, y el cliente las convierte en avisos que identifican el campo. La API valida nombres personales sin dígitos, enteros sin letras/notación exponencial, límites numéricos, formatos, longitudes y relaciones de negocio antes de persistir.
+
+## Portal del tutor: agenda, solicitudes y reportes
+
+El tutor dispone de `GET /tutor/dashboard`, `GET /tutor/assignments` y CRUD protegido para `/tutor/availability`. El calendario semanal solo admite asignaciones propias y activas del periodo actual; al editar o crear bloques valida hora final posterior y ausencia de solapamientos. El retiro desactiva el bloque y conserva su historial.
+
+Las rutas `/tutor/recoveries` programan una recuperación para sesiones propias canceladas o no asistidas, permiten cancelarla mientras está pendiente y marcarla realizada desde su fecha. `POST /tutor/requests/{id}/decision` acepta una asignación o registra una cancelación con motivo obligatorio. La justificación se almacena en `CancelacionMonitoria` y se entrega en el listado administrativo y en el portal del tutor.
+
+`GET /tutor/reportable-sessions` lista sesiones realizadas y recuperaciones finalizadas sin reporte. `POST /tutor/reports` guarda o actualiza un borrador por sesión, valida fecha/hora, asistentes y SAT, y registra hasta cuatro adjuntos PDF, Word o imágenes (4 MB por archivo, 12 MB total). Los adjuntos se guardan en disco dentro de `api/uploads/tutor-reports/`; metadatos y datos estructurados se guardan en MariaDB. `POST /tutor/reports/{id}/submit` envía el reporte y bloquea su edición.
+
+La migración `database/migrations/002_reportes_tutor.sql` crea `InformeTutorDetalle` y `AdjuntoInformeTutor`. Se aplica de forma idempotente al iniciar la API y requiere que las credenciales bootstrap tengan permisos DDL en la base ya configurada. El módulo mensual genera una salida provisional; la exportación con plantilla institucional queda pendiente de recibir el formato oficial.
+
+La configuración del tutor permite cambiar su propia contraseña mediante `PATCH /admin/configuration/password`, ruta autenticada que valida la contraseña actual y la nueva.
+
+## Acuerdos de uso de archivos y reportes
+
+Los reportes de tutoría se almacenan como borradores editables y pasan a `Enviado` al remitirse a administración. La carga se limita por archivo y por reporte; los metadatos quedan en MariaDB y los binarios en `api/uploads/tutor-reports/`, que se ignora en Git. El despliegue debe respaldar esa carpeta o moverla a un almacenamiento persistente compartido.
+
+La exportación institucional editable queda pendiente hasta recibir la plantilla oficial. No usar informes de demostración como documentos oficiales.
+
+La consulta de solicitudes autenticada también entrega `cancellationReason` al estudiante propietario para presentar la explicación de la cancelación en **Mis solicitudes**.
+
+## Notificaciones persistentes e informe mensual provisional
+
+Rutas nuevas autenticadas:
+
+- `GET /notifications`: lista hasta 50 notificaciones del usuario y devuelve el contador `unread`.
+- `PATCH /notifications/{id}/read`: marca como leída únicamente una notificación perteneciente al usuario autenticado.
+- `POST /notifications/read-all`: marca como leídas todas las notificaciones de esa cuenta.
+- `GET /tutor/monthly-report?month=AAAA-MM`: para rol Tutor, consolida sesiones realizadas, métricas, reportes y metadatos de anexos; devuelve el borrador existente si lo hay.
+- `PUT /tutor/monthly-report`: crea o actualiza el borrador del mes. Los campos son `month`, `title`, `introduction`, `achievements`, `challenges` y `recommendations`. No se permite editar un informe en estado Enviado.
+
+Se notifican nuevas solicitudes estudiantiles o administrativas, asignaciones, confirmaciones, cancelaciones con justificación, cambios de estado y reportes diarios enviados a administración. Las notificaciones son por destinatario, tienen marca de lectura y se consultan cada 30 segundos en la interfaz. Los errores al persistirlas se registran sin revertir la operación que ya se realizó.
+
+`database/migrations/003_notificaciones_informe_mensual.sql` crea de forma idempotente `Notificacion` e `InformeMensualTutor` al iniciar la API. La interfaz mensual permite guardar y previsualizar el consolidado, descargar un documento Word compatible `.doc` e imprimirlo como PDF. El formato se declara provisional hasta incorporar la plantilla institucional. La API pasó `npm run typecheck` y `npm run validate`; el frontend pasó `npm run build`; el health check local respondió con MariaDB conectado.
+
+## Mejoras de tutor: recuperaciones, solicitudes, sesiones y CRUD de reportes
+
+- `GET /tutor/recoverable-sessions` devuelve únicamente sesiones propias en estado `Cancelada` o `No Asistida` sin recuperación `Programada`/`Realizada`. `POST /tutor/recoveries` vuelve a validar propiedad, estado, fecha futura y que no se duplique una recuperación activa.
+- Las solicitudes del tutor/monitor se consultan con el listado autenticado existente. Confirmar/cancelar tutorías y marcar monitorías atendidas mantienen sus rutas de decisión; la cancelación exige motivo.
+- `GET /tutor/reportable-sessions` lista las sesiones realizadas pendientes y aquellas con informe. `POST /tutor/reports` crea borrador; `GET /tutor/reports/{id}` devuelve el detalle y anexos propios; `PATCH /tutor/reports/{id}` edita únicamente estados `Borrador` o `Devuelto`; `POST /tutor/reports/{id}/submit` remite a administración; `DELETE /tutor/reports/{id}` solo elimina `Borrador` no enviado y retira sus archivos. Los reportes devueltos conservan historial.
+- `GET /tutor/reports/{id}/attachments/{attachmentId}` descarga solo un archivo que pertenezca a un reporte del tutor autenticado. Las rutas internas no se exponen en la respuesta JSON.
+
+Al editar un borrador sin seleccionar archivos nuevos, se conservan los adjuntos existentes. Si se reemplazan, se quitan los archivos anteriores después de confirmar la actualización. El límite continúa en 4 MB por archivo y 12 MB por reporte.
+
+El ejemplo ficticio de solicitud de `web/data/ejemplo.json` se eliminó del archivo local. No se modificaron filas de `Solicitud` en MariaDB; el registro #1 está ligado a una sesión y se conservó conforme a la indicación del equipo.
+
+## Facultades, horarios y decisiones de solicitudes
+
+- `POST /admin/faculties`: registra una facultad activa (`name`, `description` opcional); responde `409` si el nombre ya existe.
+- `GET /admin/request-slots?userId=&role=&subjectId=&periodId=`: genera fechas próximas desde bloques activos de `Disponibilidad` (tutor) o `HorarioMonitor` (monitor) dentro del periodo.
+- `POST /requests/{id}/assign`: exige una asignación activa compatible con tipo/asignatura/periodo, bloque semanal existente y ausencia de sesión traslapada. La operación genera la sesión y notifica a estudiante y responsable.
+- `POST /requests/{id}/decision`: solo el tutor o monitor asignado puede confirmar o cancelar, con justificación obligatoria al cancelar. La confirmación marca la sesión `Confirmada`.
+- `PATCH /requests/{id}`: administración solo puede pasar solicitudes permitidas a `Cancelada` o `Finalizada`; no puede aprobar ni rechazar.
+- `DELETE /requests/{id}`: preserva el historial; solicitudes asignadas, atendidas o finalizadas responden `409` con la explicación al usuario.
+
+Los reportes diarios se autorizan mediante la asignación académica del tutor a la sesión. La consulta tolera informes previos sin fila `InformeTutorDetalle`, recuperando los datos disponibles de `Informe.contenido`. El informe mensual toma únicamente sesiones realizadas que ya tengan un informe individual asociado.\nLa consulta de bloques excluye horarios ya ocupados y la operación de asignación vuelve a revisar el cruce dentro de la transacción para manejar concurrencia.
+## Corrección de arranque: listado administrativo de solicitudes
+
+Se agregó `listAdminRequests` a las importaciones de `server.ts`. La ruta autenticada `GET /requests` ejecutaba esa función para el rol Administrador, pero no estaba enlazada en el módulo, por lo que fallaba en ejecución con `ReferenceError`. La comprobación de tipos de `server.ts` está desactivada mediante `@ts-nocheck`; por eso se verificó explícitamente que el símbolo exista en `admin.ts` y esté importado en el servidor.
+### Facultades y correcciones de agenda e informes
+
+- `GET /admin/faculties` lista facultades activas e inactivas y el conteo de programas asociados.
+- `POST /admin/faculties` crea; `PATCH /admin/faculties/{id}` actualiza nombre, descripción y estado; `DELETE /admin/faculties/{id}` elimina únicamente si no tiene programas relacionados. Las operaciones requieren rol Administrador.
+- `GET /admin/request-slots` genera opciones fecha/hora a partir del horario semanal del responsable. Omite horas que ya comenzaron en el día actual y sesiones ocupadas del mismo responsable en cualquiera de sus asignaciones. La asignación vuelve a verificar el bloque semanal y los traslapes antes de insertar la sesión.
+- Cuando cambia la asignatura de una asignación de Tutor, los bloques semanales se copian a la asignación nueva; los registros previos permanecen unidos a la asignación histórica. La validación de traslapes solo considera asignaciones activas.
+- `POST /tutor/reports` rechaza reportes de sesiones ordinarias que no estén realizadas o finalizadas. Las recuperaciones requieren el estado Realizada. El formulario mensual precarga los apartados narrativos con los reportes individuales; se permite editar y descargar Word y no se ofrece imprimir la página del software.
+
+### Validación de periodos, disponibilidad y alta de reportes
+
+`GET /admin/request-slots` responde `422 PERIOD_EXPIRED` si el periodo Activo o Planeado ya terminó, y `422 PERIOD_DATES_INVALID` para rangos inconsistentes. El API no inventa fechas ni programa fuera del rango institucional. Los bloques Híbridos de monitoría se convierten en opciones Presencial y Virtual, las únicas modalidades admitidas por `Sesion`.
+
+`POST/PATCH /tutor/availability` puede omitir `assignmentId` únicamente si el tutor tiene una sola asignación activa para el periodo; de lo contrario se debe seleccionar. El servidor normaliza el dato vacío, verifica pertenencia y revisa cruces solo en asignaciones activas. La fecha de sesión y recuperación se normaliza en SQL a `AAAA-MM-DD` antes de validar el reporte.
+
+Los reportes Enviados, Aprobados o Entregados permanecen como historial de solo lectura. Las sesiones finalizadas sin informe ofrecen Crear; Borrador/Devuelto ofrece edición; solo se elimina un Borrador no enviado.
+
+### Prueba de creación de disponibilidad
+
+El formulario ahora llama `POST /tutor/availability` para un bloque nuevo; `PATCH /tutor/availability/{id}` se reserva para IDs existentes mayores que cero. Se reprodujo el guardado con la sesión y asignación activas del tutor, y se confirmó la lectura del bloque en `GET /tutor/availability`: ID `19`, lunes 08:00–09:00, modalidad Presencial, asignatura Matemáticas básicas. Es un bloque semanal provisional guardado en MariaDB local.

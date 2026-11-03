@@ -57,10 +57,12 @@ export type ApiRequest = {
   description?: string
   period?: string
   periodId?: number
+  sessionStatus?: string | null
 }
 
 export type PortalSession = {
   id: number
+  requestId?: number
   subject: string
   date: string
   startTime: string
@@ -72,6 +74,7 @@ export type PortalSession = {
 
 export type PortalAvailability = {
   id: number
+  assignmentId?: number
   day: string
   startTime: string
   endTime: string
@@ -80,6 +83,19 @@ export type PortalAvailability = {
   modality: 'Presencial' | 'Virtual' | 'Híbrida'
   status: 'Activo' | 'Inactivo'
 }
+
+export type TutorAssignment = { id: number; subjectId: number; codigo: string; subject: string; periodId: number; period: string }
+export type TutorDashboardData = { metrics: { upcoming: number; completed: number; openRequests: number; pendingReports: number }; upcoming: Array<{ id: number; subject: string; date: string; startTime: string; endTime: string; status: string; place: string }> }
+export type TutorRecovery = { id: number; originalSessionId: number; date: string; startTime: string; endTime: string; description: string; status: 'Programada'|'Realizada'|'Cancelada'; subject: string }
+export type TutorRecoverableSession = { id:number;requestId:number;subject:string;date:string;startTime:string;endTime:string;status:'Cancelada'|'No Asistida';cancellationReason:string }
+export type TutorReport = { id: number; sessionId: number; subject: string; date: string; status: string; title: string; content: string; activities: string; achievements: string; difficulties: string; recommendations: string }
+export type TutorReportAttachment = {id:number;category:string;name:string;mimeType:string;size:number}
+export type TutorReportRecord = {id:number;sessionId:number;subject:string;student:string;status:string;title:string;content:Record<string,unknown>|string|null;activities:string;achievements:string;difficulties:string;recommendations:string;date:string;startTime:string;endTime:string;place:string;description:string;attendanceCount:number;satCount:number;attendees:number[];satDetails:Array<{studentId:number;description:string}>;recovered:boolean;recoveryId:number|null;attachments:TutorReportAttachment[]}
+export type TutorReportableSession = { id:number; requestId:number; studentId:number; student:string; subject:string; date:string; startTime:string; endTime:string; modality:string; status:string; place:string; reportId:number|null; reportStatus:string|null; reportTitle:string|null; isRecovery?:boolean; recoveryId?:number|null }
+export type NotificationItem = { id:number; category:'Solicitud'|'Sesion'|'Informe'|'Sistema'; title:string; message:string; entityType:string|null; entityId:number|null; createdAt:string; read:boolean }
+export type NotificationResponse = { items:NotificationItem[]; unread:number }
+export type MonthlyTutorSession = { id:number; requestId:number; subjectCode:string; subject:string; date:string; startTime:string; endTime:string; place:string; modality:string; sessionStatus:string; reportId:number|null; reportStatus:string|null; reportTitle:string|null; activities:string|null; achievements:string|null; difficulties:string|null; reportRecommendations:string|null; attendees:number; satCount:number; description:string; recovered:boolean; attachmentCount:number; attachments:Array<{id:number;category:string;name:string;mimeType:string;size:number}> }
+export type MonthlyTutorReport = { month:string; tutor:string; tutorDocument:string; weeklyHours:number; totals:{sessions:number;attendees:number;sat:number;minutes:number}; sessions:MonthlyTutorSession[]; draft:null|{id:number;title:string;content:{introduction:string;achievements:string;challenges:string;recommendations:string};status:'Borrador'|'Enviado';updatedAt:string} }
 
 export type AdminCatalogs = {
   programs: Array<{ id: number; codigo: string; nombre: string; facultyName?: string }>
@@ -92,6 +108,8 @@ export type AdminCatalogs = {
 }
 
 export type RequestAssignmentInput = { userId: number; role: 'Tutor' | 'Monitor'; date: string; startTime: string; endTime: string; modality: 'Presencial' | 'Virtual' }
+export type AdminRequestSlot = {date:string;day:string;startTime:string;endTime:string;modality:'Presencial'|'Virtual'}
+export function listAdminRequestSlots(accessToken:string,input:{userId:number;role:'Tutor'|'Monitor';subjectId:number;periodId:number}) { const query=new URLSearchParams({userId:String(input.userId),role:input.role,subjectId:String(input.subjectId),periodId:String(input.periodId)});return request<AdminRequestSlot[]>(`/admin/request-slots?${query}`,authenticatedOptions(accessToken)) }
 
 export type AdminDashboard = {
   generatedAt: string
@@ -199,6 +217,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function requestFile(path:string,accessToken:string):Promise<Blob>{const targets=explicitApiUrl?[`${explicitApiUrl}${path}`]:[...(typeof window!=='undefined'&&window.location?['/api/v1'+path]:[]),`http://localhost:3000/api/v1${path}`,`http://127.0.0.1:3000/api/v1${path}`];let response:Response|null=null;for(const target of targets){try{response=await fetch(target,{headers:{Authorization:`Bearer ${accessToken}`}});if((response.status===502||response.status===504)&&targets.indexOf(target)<targets.length-1)continue;break}catch{}}if(!response)throw new ApiError(0,'API_UNAVAILABLE','No fue posible conectar con el servidor API de Acadex.');if(!response.ok){const body=await response.json().catch(()=>null) as {code?:string;message?:string}|null;throw new ApiError(response.status,body?.code??'API_ERROR',body?.message??'No se pudo descargar el adjunto.')}return response.blob()}
+
 export function login(email: string, password: string) {
   return request<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
 }
@@ -285,13 +305,17 @@ export function getAdminCatalogs(accessToken: string) {
 
 export type AdminSubject = { id: number; code: string; name: string; credits: number | null; description: string | null; status: 'Activo' | 'Inactivo' }
 export type AdminProgram = { id: number; code: string; name: string; snies: string | null; facultyId: number; facultyName: string; status: 'Activo' | 'Inactivo' }
-export type AdminFaculty = { id: number; name: string }
+export type AdminFaculty = { id: number; name: string; description?: string | null; status?: 'Activo' | 'Inactivo'; programCount?: number }
 export function listAdminSubjects(accessToken: string) { return request<AdminSubject[]>('/admin/subjects', authenticatedOptions(accessToken)) }
 export function createAdminSubject(accessToken: string, input: Omit<AdminSubject,'id'>) { return request<AdminSubject>('/admin/subjects', authenticatedOptions(accessToken,{method:'POST',body:JSON.stringify(input)})) }
 export function updateAdminSubject(accessToken: string, id: number, input: Partial<Omit<AdminSubject,'id'>>) { return request<AdminSubject>(`/admin/subjects/${id}`, authenticatedOptions(accessToken,{method:'PATCH',body:JSON.stringify(input)})) }
 export function deleteAdminSubject(accessToken: string, id: number) { return request<void>(`/admin/subjects/${id}`, authenticatedOptions(accessToken,{method:'DELETE'})) }
 export function listAdminPrograms(accessToken: string) { return request<{data:AdminProgram[];faculties:AdminFaculty[]}>('/admin/programs', authenticatedOptions(accessToken)) }
+export function listAdminFaculties(accessToken:string) { return request<AdminFaculty[]>('/admin/faculties',authenticatedOptions(accessToken)) }
 export function createAdminProgram(accessToken: string, input: Omit<AdminProgram,'id'|'facultyName'>) { return request<AdminProgram>('/admin/programs', authenticatedOptions(accessToken,{method:'POST',body:JSON.stringify(input)})) }
+export function createAdminFaculty(accessToken:string,input:{name:string;description:string}) { return request<AdminFaculty>('/admin/faculties',authenticatedOptions(accessToken,{method:'POST',body:JSON.stringify(input)})) }
+export function updateAdminFaculty(accessToken:string,id:number,input:{name:string;description:string;status:'Activo'|'Inactivo'}) { return request<AdminFaculty>(`/admin/faculties/${id}`,authenticatedOptions(accessToken,{method:'PATCH',body:JSON.stringify(input)})) }
+export function deleteAdminFaculty(accessToken:string,id:number) { return request<void>(`/admin/faculties/${id}`,authenticatedOptions(accessToken,{method:'DELETE'})) }
 export function updateAdminProgram(accessToken: string, id: number, input: Partial<Omit<AdminProgram,'id'|'facultyName'>>) { return request<AdminProgram>(`/admin/programs/${id}`, authenticatedOptions(accessToken,{method:'PATCH',body:JSON.stringify(input)})) }
 export function deleteAdminProgram(accessToken: string, id: number) { return request<void>(`/admin/programs/${id}`, authenticatedOptions(accessToken,{method:'DELETE'})) }
 
@@ -358,6 +382,30 @@ export function listPortalSessions(accessToken: string) {
 export function listPortalAvailability(accessToken: string) {
   return request<PortalAvailability[]>('/availability', authenticatedOptions(accessToken))
 }
+
+export function getTutorDashboard(accessToken: string) { return request<TutorDashboardData>('/tutor/dashboard', authenticatedOptions(accessToken)) }
+export function listTutorAssignments(accessToken: string) { return request<TutorAssignment[]>('/tutor/assignments', authenticatedOptions(accessToken)) }
+export function createTutorAvailability(accessToken: string, input: { assignmentId?: number; day: string; startTime: string; endTime: string; modality: 'Presencial'|'Virtual' }) { return request<{id:number}>('/tutor/availability', authenticatedOptions(accessToken,{method:'POST',body:JSON.stringify(input)})) }
+export function updateTutorAvailability(accessToken: string, id: number, input: { assignmentId?: number; day: string; startTime: string; endTime: string; modality: 'Presencial'|'Virtual' }) { return request<{id:number}>(`/tutor/availability/${id}`, authenticatedOptions(accessToken,{method:'PATCH',body:JSON.stringify(input)})) }
+export function deleteTutorAvailability(accessToken: string,id:number) { return request<void>(`/tutor/availability/${id}`,authenticatedOptions(accessToken,{method:'DELETE'})) }
+export function listTutorRecoveries(accessToken:string) { return request<TutorRecovery[]>('/tutor/recoveries',authenticatedOptions(accessToken)) }
+export function listTutorRecoverableSessions(accessToken:string) { return request<TutorRecoverableSession[]>('/tutor/recoverable-sessions',authenticatedOptions(accessToken)) }
+export function createTutorRecovery(accessToken:string,input:Omit<TutorRecovery,'id'|'status'|'subject'>) { return request<{id:number}>('/tutor/recoveries',authenticatedOptions(accessToken,{method:'POST',body:JSON.stringify(input)})) }
+export function cancelTutorRecovery(accessToken:string,id:number) { return request<void>(`/tutor/recoveries/${id}`,authenticatedOptions(accessToken,{method:'DELETE'})) }
+export function completeTutorRecovery(accessToken:string,id:number) { return request<void>(`/tutor/recoveries/${id}/complete`,authenticatedOptions(accessToken,{method:'POST'})) }
+export function decideTutorRequest(accessToken:string,id:number,input:{action:'accept'|'cancel';reason?:string}) { return request<ApiRequest>(`/requests/${id}/decision`,authenticatedOptions(accessToken,{method:'POST',body:JSON.stringify(input)})) }
+export function listTutorReportableSessions(accessToken:string) { return request<TutorReportableSession[]>('/tutor/reportable-sessions',authenticatedOptions(accessToken)) }
+export function saveTutorReport(accessToken:string,input:Record<string,unknown>) { return request<{id:number;status:string}>('/tutor/reports',authenticatedOptions(accessToken,{method:'POST',body:JSON.stringify(input)})) }
+export function submitTutorReport(accessToken:string,id:number) { return request<{id:number;status:string}>(`/tutor/reports/${id}/submit`,authenticatedOptions(accessToken,{method:'POST'})) }
+export function getTutorReport(accessToken:string,id:number) { return request<TutorReportRecord>(`/tutor/reports/${id}`,authenticatedOptions(accessToken)) }
+export function updateTutorReport(accessToken:string,id:number,input:Record<string,unknown>) { return request<{id:number;status:string}>(`/tutor/reports/${id}`,authenticatedOptions(accessToken,{method:'PATCH',body:JSON.stringify(input)})) }
+export function deleteTutorReport(accessToken:string,id:number) { return request<{id:number;deleted:boolean}>(`/tutor/reports/${id}`,authenticatedOptions(accessToken,{method:'DELETE'})) }
+export function downloadTutorReportAttachment(accessToken:string,reportId:number,attachmentId:number) { return requestFile(`/tutor/reports/${reportId}/attachments/${attachmentId}`,accessToken) }
+export function getNotifications(accessToken:string) { return request<NotificationResponse>('/notifications',authenticatedOptions(accessToken)) }
+export function markNotificationRead(accessToken:string,id:number) { return request<{read:boolean}>(`/notifications/${id}/read`,authenticatedOptions(accessToken,{method:'PATCH'})) }
+export function markAllNotificationsRead(accessToken:string) { return request<{read:boolean}>('/notifications/read-all',authenticatedOptions(accessToken,{method:'POST'})) }
+export function getMonthlyTutorReport(accessToken:string,month:string) { return request<MonthlyTutorReport>(`/tutor/monthly-report?month=${encodeURIComponent(month)}`,authenticatedOptions(accessToken)) }
+export function saveMonthlyTutorReport(accessToken:string,input:{month:string;title:string;introduction:string;achievements:string;challenges:string;recommendations:string}) { return request<{id:number;status:string;updated:boolean}>('/tutor/monthly-report',authenticatedOptions(accessToken,{method:'PUT',body:JSON.stringify(input)})) }
 
 export function listSubjects(accessToken: string) {
   return request<Array<{ id: number; codigo: string; nombre: string }>>('/catalogs/subjects', authenticatedOptions(accessToken))

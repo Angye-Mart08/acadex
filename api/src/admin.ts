@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { pool } from './db.js'
 import { DataError } from './data.js'
+import { publishRequestNotifications, publishRoleNotification } from './notifications.js'
 
 const roleNames = ['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as const
 const roleSchema = z.enum(roleNames)
@@ -219,11 +220,29 @@ async function upsertAssignments(connection: any, id: number, role: string, assi
   const periodId = assignment.periodId ?? (await connection.query("SELECT id_periodo FROM PeriodoAcademico WHERE estado='Activo' ORDER BY fecha_inicio DESC LIMIT 1"))[0][0]?.id_periodo
   if (!periodId) throw new DataError(422, 'PERIOD_REQUIRED', `No existe un periodo activo para ${role}.`)
   const hours = assignment.weeklyHours ?? 1
+  const subjectIds = assignment.subjectIds ?? []
+  const [previousAssignments] = await connection.query("SELECT id_asignacion AS id,id_asignatura AS subjectId,id_periodo AS periodId FROM AsignacionAcademica WHERE id_usuario=? AND id_rol=? AND estado='Activa'", [id, roleId])
   await connection.execute("UPDATE AsignacionAcademica SET estado='Cancelada' WHERE id_usuario=? AND id_rol=?", [id, roleId])
-  for (const subjectId of assignment.subjectIds ?? []) {
+  for (const subjectId of subjectIds) {
     const [existing] = await connection.query('SELECT id_asignacion FROM AsignacionAcademica WHERE id_usuario=? AND id_rol=? AND id_asignatura=? AND id_periodo=? LIMIT 1', [id, roleId, subjectId, periodId])
-    if (existing.length) await connection.execute("UPDATE AsignacionAcademica SET horas_semanales=?, estado='Activa' WHERE id_asignacion=?", [hours, existing[0].id_asignacion])
-    else await connection.execute("INSERT INTO AsignacionAcademica (id_usuario,id_rol,id_asignatura,id_periodo,horas_semanales,fecha_inicio,estado) VALUES (?,?,?,?,?,CURDATE(),'Activa')", [id, roleId, subjectId, periodId, hours])
+    if (existing.length) {
+      await connection.execute("UPDATE AsignacionAcademica SET horas_semanales=?, estado='Activa' WHERE id_asignacion=?", [hours, existing[0].id_asignacion])
+      const previous = previousAssignments.find((item: any) => Number(item.periodId) === Number(periodId) && Number(item.id) !== Number(existing[0].id_asignacion))
+      if (role === 'Tutor' && previous) await copyTutorAvailability(connection,previous.id,existing[0].id_asignacion)
+    }
+    else {
+      const [created] = await connection.execute("INSERT INTO AsignacionAcademica (id_usuario,id_rol,id_asignatura,id_periodo,horas_semanales,fecha_inicio,estado) VALUES (?,?,?,?,?,CURDATE(),'Activa')", [id, roleId, subjectId, periodId, hours])
+      const previous = previousAssignments.find((item: any) => Number(item.periodId) === Number(periodId))
+      if (role === 'Tutor' && previous) await copyTutorAvailability(connection,previous.id,created.insertId)
+    }
+  }
+}
+
+async function copyTutorAvailability(connection:any,sourceAssignmentId:number,targetAssignmentId:number) {
+  const [blocks] = await connection.query("SELECT dia_semana,hora_inicio,hora_fin,modalidad,estado FROM Disponibilidad WHERE id_asignacion=?", [sourceAssignmentId])
+  for (const block of blocks) {
+    const [duplicate] = await connection.query("SELECT id_disponibilidad FROM Disponibilidad WHERE id_asignacion=? AND dia_semana=? AND hora_inicio=? AND hora_fin=? LIMIT 1", [targetAssignmentId,block.dia_semana,block.hora_inicio,block.hora_fin])
+    if (!duplicate.length) await connection.execute("INSERT INTO Disponibilidad(id_asignacion,dia_semana,hora_inicio,hora_fin,modalidad,estado) VALUES(?,?,?,?,?,?)", [targetAssignmentId,block.dia_semana,block.hora_inicio,block.hora_fin,block.modalidad,block.estado])
   }
 }
 
@@ -477,8 +496,8 @@ export async function deleteAdminSpace(id: number) {
   }
 }
 
-function normalizeAdminRequest(row:any){return {id:Number(row.id),studentId:Number(row.studentId),student:row.student,programId:Number(row.programId),program:row.program,subjectId:Number(row.subjectId),subject:row.subject,type:row.type,priority:row.priority,status:row.status,date:row.date,motive:row.motivo??'',description:row.descripcion??'',period:row.period,periodId:Number(row.periodId)}}
-const requestSelect=`SELECT s.id_solicitud AS id,e.id_usuario AS studentId,CONCAT(u.nombres,' ',u.apellidos) AS student,p.id_programa AS programId,p.nombre AS program,a.id_asignatura AS subjectId,a.nombre AS subject,ts.nombre AS type,s.prioridad AS priority,s.estado AS status,DATE_FORMAT(s.fecha_solicitud,'%Y-%m-%d') AS date,s.motivo,s.descripcion,pa.nombre AS period,s.id_periodo AS periodId FROM Solicitud s JOIN Estudiante e ON e.id_estudiante=s.id_estudiante JOIN Usuario u ON u.id_usuario=e.id_usuario JOIN Programa p ON p.id_programa=s.id_programa JOIN Asignatura a ON a.id_asignatura=s.id_asignatura JOIN TipoSolicitud ts ON ts.id_tipo_solicitud=s.id_tipo_solicitud JOIN PeriodoAcademico pa ON pa.id_periodo=s.id_periodo`;
+function normalizeAdminRequest(row:any){return {id:Number(row.id),studentId:Number(row.studentId),student:row.student,programId:Number(row.programId),program:row.program,subjectId:Number(row.subjectId),subject:row.subject,type:row.type,priority:row.priority,status:row.status,date:row.date,motive:row.motivo??'',description:row.descripcion??'',period:row.period,periodId:Number(row.periodId),sessionStatus:row.sessionStatus??null,cancellationReason:row.cancellationReason??null}}
+const requestSelect=`SELECT s.id_solicitud AS id,e.id_usuario AS studentId,CONCAT(u.nombres,' ',u.apellidos) AS student,p.id_programa AS programId,p.nombre AS program,a.id_asignatura AS subjectId,a.nombre AS subject,ts.nombre AS type,s.prioridad AS priority,s.estado AS status,DATE_FORMAT(s.fecha_solicitud,'%Y-%m-%d') AS date,s.motivo,s.descripcion,pa.nombre AS period,s.id_periodo AS periodId,(SELECT ss.estado FROM Sesion ss WHERE ss.id_solicitud=s.id_solicitud ORDER BY ss.id_sesion DESC LIMIT 1) AS sessionStatus,(SELECT cm.motivo FROM CancelacionMonitoria cm JOIN Sesion cs ON cs.id_sesion=cm.id_sesion WHERE cs.id_solicitud=s.id_solicitud AND cm.estado='Activo' ORDER BY cm.fecha_cancelacion DESC LIMIT 1) AS cancellationReason FROM Solicitud s JOIN Estudiante e ON e.id_estudiante=s.id_estudiante JOIN Usuario u ON u.id_usuario=e.id_usuario JOIN Programa p ON p.id_programa=s.id_programa JOIN Asignatura a ON a.id_asignatura=s.id_asignatura JOIN TipoSolicitud ts ON ts.id_tipo_solicitud=s.id_tipo_solicitud JOIN PeriodoAcademico pa ON pa.id_periodo=s.id_periodo`;
 export async function listAdminRequests(query: any = {}) {
   const where = ['1=1']
   const params: any[] = []
@@ -533,6 +552,7 @@ export async function createAdminRequest(payload:unknown){
   if(!periods.length)throw new DataError(422,'PERIOD_NOT_AVAILABLE','El periodo no está disponible para nuevas solicitudes.')
   const [result]=await pool.execute("INSERT INTO Solicitud (id_estudiante,id_programa,id_asignatura,id_tipo_solicitud,id_periodo,fecha_solicitud,motivo,descripcion,prioridad,estado) VALUES (?,?,?,?,?,NOW(),?,?,?,'Pendiente')",[students[0].studentId,input.programId,input.subjectId,types[0].id_tipo_solicitud,periodId,input.motive,input.description,input.priority])
   const [rows]=await pool.query(`${requestSelect} WHERE s.id_solicitud=?`,[result.insertId])
+  await publishRequestNotifications(Number(result.insertId), { title: 'Solicitud de acompañamiento', message: 'Administración registró una solicitud inicial para ti. Consulta los detalles en Mis solicitudes.', category: 'Solicitud' })
   return normalizeAdminRequest(rows[0])
 }
 
@@ -553,9 +573,10 @@ export async function assignAdminRequest(id: number, payload: unknown) {
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
-    const [requestRows] = await connection.query("SELECT s.id_asignatura,s.id_periodo,s.estado,DATE_FORMAT(p.fecha_inicio,'%Y-%m-%d') AS periodStart,DATE_FORMAT(p.fecha_fin,'%Y-%m-%d') AS periodEnd FROM Solicitud s JOIN PeriodoAcademico p ON p.id_periodo=s.id_periodo WHERE s.id_solicitud=? FOR UPDATE", [id])
+    const [requestRows] = await connection.query("SELECT s.id_asignatura,s.id_periodo,s.estado,ts.nombre AS requestType,DATE_FORMAT(p.fecha_inicio,'%Y-%m-%d') AS periodStart,DATE_FORMAT(p.fecha_fin,'%Y-%m-%d') AS periodEnd FROM Solicitud s JOIN PeriodoAcademico p ON p.id_periodo=s.id_periodo JOIN TipoSolicitud ts ON ts.id_tipo_solicitud=s.id_tipo_solicitud WHERE s.id_solicitud=? FOR UPDATE", [id])
     if (!requestRows.length) throw new DataError(404, 'REQUEST_NOT_FOUND', 'La solicitud no existe.')
     if (!['Pendiente', 'Aprobada'].includes(requestRows[0].estado)) throw new DataError(409, 'REQUEST_NOT_ASSIGNABLE', 'Solo se pueden asignar solicitudes pendientes o aprobadas.')
+    if ((requestRows[0].requestType === 'Tutoría' && assignment.role !== 'Tutor') || (requestRows[0].requestType === 'Monitoría' && assignment.role !== 'Monitor')) throw new DataError(422,'ASSIGNMENT_ROLE_MISMATCH','El rol asignado debe corresponder al tipo de acompañamiento solicitado.')
     const sessionDate = assignment.date
     const periodStart = requestRows[0].periodStart
     const periodEnd = requestRows[0].periodEnd
@@ -572,6 +593,18 @@ export async function assignAdminRequest(id: number, payload: unknown) {
       [assignment.userId, assignment.role, requestRows[0].id_asignatura, requestRows[0].id_periodo],
     )
     if (!assignmentRows.length) throw new DataError(422, 'STAFF_SUBJECT_MISMATCH', 'La persona seleccionada no tiene una asignación activa para esta asignatura y periodo.')
+    const dayNames = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado']
+    const weekday = dayNames[new Date(`${assignment.date}T00:00:00.000Z`).getUTCDay()]
+    const scheduleSql = assignment.role === 'Tutor'
+      ? `SELECT id_disponibilidad AS id FROM Disponibilidad WHERE id_asignacion=? AND dia_semana=? AND hora_inicio=? AND hora_fin=? AND estado='Activo'`
+      : `SELECT hm.id_horario_monitor AS id FROM HorarioMonitor hm WHERE hm.id_usuario=? AND hm.id_periodo=? AND hm.dia_semana=? AND hm.hora_inicio=? AND hm.hora_fin=? AND hm.estado='Activo'`
+    const scheduleParams = assignment.role === 'Tutor'
+      ? [assignmentRows[0].id,weekday,assignment.startTime,assignment.endTime]
+      : [assignment.userId,requestRows[0].id_periodo,weekday,assignment.startTime,assignment.endTime]
+    const [scheduleRows] = await connection.query(scheduleSql, scheduleParams)
+    if (!scheduleRows.length) throw new DataError(422, 'SCHEDULE_SLOT_NOT_FOUND', 'El horario seleccionado ya no está disponible en el horario preestablecido del responsable.')
+    const [conflicts] = await connection.query("SELECT s.id_sesion FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre=? AND s.fecha=? AND s.estado NOT IN ('Cancelada','No Asistida') AND s.hora_inicio < ? AND s.hora_fin > ? LIMIT 1", [assignment.userId,assignment.role,assignment.date,assignment.endTime,assignment.startTime])
+    if (conflicts.length) throw new DataError(409, 'SCHEDULE_SLOT_TAKEN', 'El responsable ya tiene una sesión asignada en ese horario.')
     const [sessionExists] = await connection.query("SELECT id_sesion FROM Sesion WHERE id_solicitud=? AND estado NOT IN ('Cancelada','No Asistida') LIMIT 1", [id])
     if (sessionExists.length) throw new DataError(409, 'REQUEST_ALREADY_ASSIGNED', 'La solicitud ya cuenta con una sesión activa.')
     await connection.execute(
@@ -587,38 +620,72 @@ export async function assignAdminRequest(id: number, payload: unknown) {
     connection.release()
   }
   const [rows] = await pool.query(`${requestSelect} WHERE s.id_solicitud=?`, [id])
+  await publishRequestNotifications(id, { title: 'Acompañamiento asignado', message: 'Tu solicitud tiene una sesión programada. Revisa la fecha y el horario en Mis sesiones.', includeStaff: true })
   return normalizeAdminRequest(rows[0])
 }
 
 export async function updateAssignedRequestStatus(session: any, id: number, payload: unknown) {
   const input = z.object({ status: z.enum(['Atendida']) }).strict().parse(payload)
   const [assigned] = await pool.query(
-    `SELECT s.id_sesion
+    `SELECT s.id_sesion,s.estado AS sessionStatus
        FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion
        JOIN Rol r ON r.id_rol=aa.id_rol
       WHERE s.id_solicitud=? AND aa.id_usuario=? AND r.nombre=? AND s.estado NOT IN ('Cancelada','No Asistida')`,
     [id, session.user.id, session.activeRole],
   )
   if (!assigned.length) throw new DataError(404, 'ASSIGNED_REQUEST_NOT_FOUND', 'La solicitud no está asignada a tu cuenta y rol.')
+  if (assigned.some((row:any)=>['Programada','Reprogramada'].includes(row.sessionStatus))) throw new DataError(409,'SESSION_CONFIRMATION_REQUIRED','Confirma la sesión asignada antes de marcar la solicitud como atendida.')
   const [rows] = await pool.query('SELECT estado FROM Solicitud WHERE id_solicitud=?', [id])
   if (!rows.length) throw new DataError(404, 'REQUEST_NOT_FOUND', 'La solicitud no existe.')
   if (rows[0].estado !== 'Asignada') throw new DataError(409, 'INVALID_STATUS_TRANSITION', 'Solo se pueden marcar como atendidas las solicitudes asignadas.')
   await pool.execute("UPDATE Solicitud SET estado='Atendida' WHERE id_solicitud=?", [id])
   await pool.execute("UPDATE Sesion SET estado='Realizada' WHERE id_solicitud=? AND estado IN ('Programada','Confirmada','En Proceso')", [id])
+  await publishRequestNotifications(id, { title: 'Acompañamiento marcado como realizado', message: `La solicitud fue marcada como atendida por ${session.activeRole}.`, category: 'Sesion', includeStaff: true })
   const [result] = await pool.query(`${requestSelect} WHERE s.id_solicitud=?`, [id])
   return normalizeAdminRequest(result[0])
 }
+
+export async function decideTutorRequest(session: any, requestId: number, payload: unknown) {
+  if (!['Tutor','Monitor'].includes(session.activeRole)) throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para el tutor o monitor asignado.')
+  const input = z.object({ action: z.enum(['accept','cancel']), reason: z.string().trim().min(5).max(1000).optional() }).strict().superRefine((value, ctx) => {
+    if (value.action === 'cancel' && !value.reason) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'Justifica la cancelación.' })
+  }).parse(payload)
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [rows] = await connection.query(`SELECT s.id_sesion,s.fecha,s.estado AS sessionStatus,so.estado AS requestStatus FROM Sesion s JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE s.id_solicitud=? AND aa.id_usuario=? AND r.nombre=? FOR UPDATE`, [requestId,session.user.id,session.activeRole])
+    if (!rows.length) throw new DataError(404, 'ASSIGNED_REQUEST_NOT_FOUND', 'La solicitud no está asignada a tu cuenta y rol activo.')
+    const selected = rows.find((row: any) => !['Cancelada','No Asistida','Finalizada','Realizada'].includes(row.sessionStatus))
+    if (!selected || selected.requestStatus !== 'Asignada') throw new DataError(409, 'INVALID_REQUEST_STATE', 'Esta solicitud ya no admite aceptación o cancelación.')
+    if (input.action === 'accept') {
+      await connection.execute("UPDATE Sesion SET estado='Confirmada' WHERE id_sesion=?", [selected.id_sesion])
+    } else {
+      const daysUntil = Math.max(0, Math.floor((new Date(`${String(selected.fecha).slice(0,10)}T00:00:00Z`).getTime() - new Date(`${new Date().toISOString().slice(0,10)}T00:00:00Z`).getTime()) / 86400000))
+      await connection.execute("INSERT INTO CancelacionMonitoria (id_sesion,id_usuario,dias_anticipacion,motivo,estado) VALUES (?, ?, ?, ?, 'Activo')", [selected.id_sesion,session.user.id,daysUntil,input.reason])
+      await connection.execute("UPDATE Sesion SET estado='Cancelada',observaciones=? WHERE id_sesion=?", [`Cancelación del tutor: ${input.reason}`.slice(0,500),selected.id_sesion])
+      await connection.execute("UPDATE Solicitud SET estado='Cancelada' WHERE id_solicitud=?", [requestId])
+    }
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally { connection.release() }
+  const [result] = await pool.query(`${requestSelect} WHERE s.id_solicitud=?`, [requestId])
+  const serviceName=session.activeRole==='Tutor'?'tutoría':'monitoría'
+  await publishRequestNotifications(requestId, { title: input.action === 'accept' ? `${serviceName} confirmada` : `${serviceName} cancelada por el responsable`, message: input.action === 'accept' ? `El ${session.activeRole.toLowerCase()} confirmó la sesión asignada.` : `El ${session.activeRole.toLowerCase()} canceló la sesión. Justificación: ${input.reason}`, category: 'Solicitud', includeStaff: true })
+  if (input.action === 'cancel') await publishRoleNotification('Administrador', { category: 'Solicitud', title: `${serviceName} cancelada por el responsable`, message: `La solicitud #${requestId} fue cancelada. Justificación: ${input.reason}`, entityType: 'solicitud', entityId: requestId })
+  return normalizeAdminRequest(result[0])
+}
 export async function updateAdminRequest(id:number,payload:any){
-  const input=z.object({status:z.enum(['Pendiente','Aprobada','Rechazada','Asignada','Atendida','Cancelada','Finalizada'])}).strict().parse(payload)
+  const input=z.object({status:z.enum(['Cancelada','Finalizada'])}).strict().parse(payload)
   const [currentRows]=await pool.query('SELECT estado FROM Solicitud WHERE id_solicitud=?',[id])
   if(!currentRows.length)throw new DataError(404,'REQUEST_NOT_FOUND','La solicitud no existe.')
   const currentStatus=currentRows[0].estado
-  if(input.status==='Asignada'&&currentStatus!=='Asignada')throw new DataError(422,'ASSIGNMENT_REQUIRED','Usa la operación de asignación para vincular un tutor o monitor y programar la sesión.')
   const transitions:Record<string,string[]>={
-    Pendiente:['Aprobada','Rechazada','Cancelada'],
-    Aprobada:['Asignada','Cancelada'],
-    Asignada:['Atendida','Cancelada'],
-    Atendida:['Finalizada','Cancelada'],
+    Pendiente:['Cancelada'],
+    Aprobada:['Cancelada'],
+    Asignada:[],
+    Atendida:['Finalizada'],
     Rechazada:[],Cancelada:[],Finalizada:[],
   }
   if(currentStatus!==input.status&&!transitions[currentStatus]?.includes(input.status)){
@@ -626,6 +693,7 @@ export async function updateAdminRequest(id:number,payload:any){
   }
   if(currentStatus!==input.status)await pool.execute('UPDATE Solicitud SET estado=? WHERE id_solicitud=?',[input.status,id])
   const [rows]=await pool.query(`${requestSelect} WHERE s.id_solicitud=?`,[id])
+  if(currentStatus!==input.status) await publishRequestNotifications(id,{title:'Actualización de solicitud',message:`Administración actualizó el estado de tu solicitud a ${input.status}.`,includeStaff:true})
   return normalizeAdminRequest(rows[0])
 }
 
@@ -787,6 +855,75 @@ export async function listAdminPrograms() {
   const [rows] = await pool.query('SELECT p.id_programa AS id,p.codigo AS code,p.nombre AS name,p.registro_snies AS snies,p.id_facultad AS facultyId,f.nombre AS facultyName,p.estado AS status FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad ORDER BY p.nombre')
   const [faculties] = await pool.query("SELECT id_facultad AS id,nombre AS name FROM Facultad WHERE estado='Activo' ORDER BY nombre")
   return { data: rows, faculties }
+}
+
+export async function listAdminFaculties() {
+  const [rows] = await pool.query('SELECT f.id_facultad AS id,f.nombre AS name,f.descripcion AS description,f.estado AS status,COUNT(p.id_programa) AS programCount FROM Facultad f LEFT JOIN Programa p ON p.id_facultad=f.id_facultad GROUP BY f.id_facultad ORDER BY f.nombre')
+  return rows
+}
+
+const facultyInput = z.object({ name: catalogName.max(120), description: z.string().trim().max(250).optional().default('') }).strict()
+export async function createAdminFaculty(payload: unknown) {
+  const input = facultyInput.parse(payload)
+  try {
+    const [result] = await pool.execute('INSERT INTO Facultad (nombre,descripcion,estado) VALUES (?,?,\'Activo\')', [input.name,input.description || null])
+    return (await pool.query('SELECT id_facultad AS id,nombre AS name,descripcion AS description,estado AS status FROM Facultad WHERE id_facultad=?', [result.insertId]))[0][0]
+  } catch (error: any) {
+    if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_FACULTY','Ya existe una facultad con ese nombre.')
+    throw error
+  }
+}
+
+export async function updateAdminFaculty(id: number, payload: unknown) {
+  const input = facultyInput.extend({ status: z.enum(['Activo','Inactivo']).optional() }).parse(payload)
+  const [current] = await pool.query('SELECT id_facultad FROM Facultad WHERE id_facultad=?', [id])
+  if (!current.length) throw new DataError(404,'FACULTY_NOT_FOUND','La facultad no existe.')
+  try {
+    await pool.execute('UPDATE Facultad SET nombre=?,descripcion=?,estado=COALESCE(?,estado) WHERE id_facultad=?', [input.name,input.description || null,input.status ?? null,id])
+    return (await listAdminFaculties()).find((row:any)=>Number(row.id)===id)
+  } catch (error:any) {
+    if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_FACULTY','Ya existe una facultad con ese nombre.')
+    throw error
+  }
+}
+
+export async function deleteAdminFaculty(id: number) {
+  const [rows] = await pool.query('SELECT id_facultad FROM Facultad WHERE id_facultad=?', [id])
+  if (!rows.length) throw new DataError(404,'FACULTY_NOT_FOUND','La facultad no existe.')
+  const [usage] = await pool.query('SELECT COUNT(*) AS total FROM Programa WHERE id_facultad=?', [id])
+  if (Number(usage[0]?.total ?? 0)) throw new DataError(409,'FACULTY_IN_USE','La facultad tiene programas asociados; desactívala para conservar el historial.')
+  await pool.execute('DELETE FROM Facultad WHERE id_facultad=?', [id])
+}
+
+export async function listAdminRequestSlots(query: { userId: number; role: 'Tutor'|'Monitor'; subjectId: number; periodId: number }) {
+  const [periods] = await pool.query("SELECT DATE_FORMAT(fecha_inicio,'%Y-%m-%d') AS startDate,DATE_FORMAT(fecha_fin,'%Y-%m-%d') AS endDate FROM PeriodoAcademico WHERE id_periodo=? AND estado IN ('Activo','Planeado')", [query.periodId])
+  if (!periods.length) throw new DataError(422,'PERIOD_NOT_AVAILABLE','El periodo seleccionado no tiene horarios disponibles.')
+  const today = new Intl.DateTimeFormat('en-CA',{timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
+  if(periods[0].endDate<today)throw new DataError(422,'PERIOD_EXPIRED','El periodo académico seleccionado finalizó. Registra o activa un periodo vigente antes de programar nuevas solicitudes.')
+  if(periods[0].startDate>periods[0].endDate)throw new DataError(422,'PERIOD_DATES_INVALID','El periodo académico tiene fechas inconsistentes. Corrige su fecha de inicio y fin en Gestión de periodos.')
+  const assignmentQuery = `SELECT aa.id_asignacion AS id FROM AsignacionAcademica aa JOIN Rol r ON r.id_rol=aa.id_rol JOIN Usuario u ON u.id_usuario=aa.id_usuario JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.id_rol=r.id_rol WHERE aa.id_usuario=? AND aa.id_asignatura=? AND aa.id_periodo=? AND aa.estado='Activa' AND u.estado='Activo' AND ur.estado='Activo' AND r.nombre=? LIMIT 1`
+  const [assignments] = await pool.query(assignmentQuery, [query.userId,query.subjectId,query.periodId,query.role])
+  if (!assignments.length) throw new DataError(422,'STAFF_SUBJECT_MISMATCH','La persona no tiene una asignación activa para la asignatura y periodo seleccionados.')
+  const [weekly] = query.role === 'Tutor'
+    ? await pool.query("SELECT dia_semana AS day,TIME_FORMAT(hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(hora_fin,'%H:%i') AS endTime,modalidad AS modality FROM Disponibilidad WHERE id_asignacion=? AND estado='Activo' ORDER BY FIELD(dia_semana,'Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'),hora_inicio", [assignments[0].id])
+    : await pool.query("SELECT dia_semana AS day,TIME_FORMAT(hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(hora_fin,'%H:%i') AS endTime,modalidad AS modality FROM HorarioMonitor WHERE id_usuario=? AND id_periodo=? AND estado='Activo' ORDER BY FIELD(dia_semana,'Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'),hora_inicio", [query.userId,query.periodId])
+  const dayIndex: Record<string,number> = { Domingo:0,Lunes:1,Martes:2,Miércoles:3,Jueves:4,Viernes:5,Sábado:6 }
+  const start = new Date(`${periods[0].startDate < today ? today : periods[0].startDate}T00:00:00.000Z`)
+  const end = new Date(`${periods[0].endDate}T00:00:00.000Z`)
+  const horizon = new Date(start); horizon.setUTCDate(horizon.getUTCDate()+90)
+  const limit = horizon < end ? horizon : end
+  const slots: Array<{date:string;day:string;startTime:string;endTime:string;modality:'Presencial'|'Virtual'}> = []
+  for (const cursor = new Date(start); cursor <= limit; cursor.setUTCDate(cursor.getUTCDate()+1)) {
+    const date = cursor.toISOString().slice(0,10)
+    const day = Object.keys(dayIndex).find(name => dayIndex[name] === cursor.getUTCDay())!
+    for (const block of weekly.filter((item:any) => item.day === day)) {
+      const modalities: Array<'Presencial'|'Virtual'>=block.modality==='Híbrida'?['Presencial','Virtual']:[block.modality]
+      for(const modality of modalities)slots.push({date,day,startTime:block.startTime,endTime:block.endTime,modality})
+    }
+  }
+  const [booked] = await pool.query("SELECT DATE_FORMAT(s.fecha,'%Y-%m-%d') AS date,TIME_FORMAT(s.hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(s.hora_fin,'%H:%i') AS endTime FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre=? AND s.fecha BETWEEN ? AND ? AND s.estado NOT IN ('Cancelada','No Asistida')", [query.userId,query.role,start.toISOString().slice(0,10),limit.toISOString().slice(0,10)])
+  const now=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Bogota',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())
+  return slots.filter(slot=>(slot.date!==today||slot.startTime>now)&&!booked.some((session:any)=>session.date===slot.date&&session.startTime<slot.endTime&&session.endTime>slot.startTime))
 }
 export async function createAdminProgram(payload: unknown) {
   const input = programInput.parse(payload)

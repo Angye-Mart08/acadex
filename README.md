@@ -223,3 +223,70 @@ El flujo de auditoría debe avanzar por capas y dejar evidencia para cada mejora
 10. **Parámetros institucionales**: apartado retirado de la configuración del administrador. Se conservaron la tabla y los endpoints existentes para proteger datos y compatibilidad; no se eliminaron parámetros almacenados.
 
 Antes de iniciar auditoría, configurar `.env`, ejecutar `npm run dev`, comprobar `http://localhost:3000/health` y verificar que muestre `database: connected`. Para validar el código: `npm run build:web`, `npm run typecheck:api` y `npm --prefix api run validate`. Los cambios CRUD deben probarse con datos de demostración y confirmarse en HeidiSQL o mediante `npm run db:inspect`; no usar datos reales de estudiantes en evidencias.
+
+## Portal del tutor
+
+El portal de tutoría ya consulta datos propios desde MariaDB. Su resumen presenta sesiones próximas y realizadas, solicitudes asignadas e informes pendientes. En **Mi disponibilidad** el tutor administra bloques semanales en un calendario, con alta, edición y retiro; la API valida asignación activa y evita cruces. Las recuperaciones quedan asociadas a la sesión original, se pueden cancelar mientras estén programadas y marcar como realizadas al llegar la fecha.
+
+En **Solicitudes**, el tutor acepta o cancela las tutorías asignadas. La cancelación exige justificación y la conserva para consulta del tutor y del administrador. **Mis sesiones** permite filtrar la agenda y marcar una tutoría como realizada. **Reportes** registra horario real, lugar, descripción, asistentes, seguimiento SAT y adjuntos; los borradores se guardan en MariaDB y el envío los remite a administración. Los archivos se almacenan localmente en `api/uploads/tutor-reports/`, carpeta ignorada por Git.
+
+La configuración permite cambiar la contraseña y activar/desactivar los avisos de reportes pendientes (preferencia local del navegador). Para operar la migración inicial de reportes, el arranque de la API usa las credenciales `DATABASE_BOOTSTRAP_USER` y `DATABASE_BOOTSTRAP_PASSWORD`; la migración `database/migrations/002_reportes_tutor.sql` es idempotente y añade las tablas de detalle y adjuntos sin reemplazar las tablas existentes.
+
+La exportación con diseño institucional definitivo requiere la plantilla oficial y sus reglas de anexos. El módulo provisional de cierre mensual ya permite revisar el flujo; ver `docs/decisiones.md`.
+
+## Notificaciones y cierre mensual del tutor
+
+Las notificaciones ahora se almacenan en MariaDB por usuario y se consultan desde la campana del encabezado, disponible para los roles del portal. La bandeja muestra el contador de pendientes, permite marcar una notificación o todas como leídas y consulta cambios nuevos periódicamente mientras la sesión está abierta. Se generan avisos ante nuevas solicitudes estudiantiles o administrativas, asignación, confirmación/cancelación (incluida su justificación), actualización de estado y envío de reportes diarios a administración. Los fallos al guardar un aviso se registran en el servidor sin deshacer la operación principal.
+
+La API expone `GET /api/v1/notifications`, `PATCH /api/v1/notifications/{id}/read` y `POST /api/v1/notifications/read-all`. Al iniciar, aplica idempotentemente `database/migrations/003_notificaciones_informe_mensual.sql`, que crea `Notificacion` e `InformeMensualTutor` sin reconstruir tablas existentes.
+
+El tutor dispone de **Informe mensual** para elegir un mes, consolidar sesiones reportadas, revisar totales de horas/asistencia/SAT y metadatos de anexos, editar introducción, logros, dificultades y recomendaciones, guardar un borrador en MariaDB, previsualizarlo y exportarlo a Word compatible (`.doc`) o imprimirlo/guardarlo como PDF. El informe se nutre de los reportes diarios y de recuperación ya registrados. Su formato se marca como provisional hasta integrar la plantilla institucional; el borrador mensual no reemplaza ni cambia los reportes de sesión. El resumen del tutor avisa cuando tiene sesiones reportadas en el mes, pero aún no ha creado su borrador. También muestra las tutorías realizadas que siguen sin reporte; el aviso orienta a recuperar los reportes atrasados desde el viernes y durante el fin de semana.
+
+**Verificación de esta entrega:** `npm run typecheck` y `npm run validate` en `api/`, `npm run build` en `web/`, `git diff --check`, API local respondiendo `database: connected` y auditoría MariaDB de solo lectura. La auditoría confirmó la instalación de las dos tablas de la migración nueva (40 tablas totales); conserva alertas de datos demostrativos ya conocidas, sin modificarlas. El documento institucional de cierre sigue pendiente para ajustar el diseño final.
+
+## Ajustes recientes del portal del tutor
+
+El dashboard del tutor conserva métricas y agenda próxima, con un solo bloque de agenda y sin la tarjeta de atajos redundantes. **Solicitudes asignadas** ahora tiene búsqueda, filtro de estado, resumen de pendientes/atendidas/canceladas y tarjetas con prioridad, estudiante y asignatura; la cancelación exige una justificación que se notifica al estudiante. **Mis sesiones** usa tarjetas con fecha, horario, modalidad, lugar y estado, además de una búsqueda y filtros consistentes.
+
+En **Mi disponibilidad**, la recuperación obtiene sesiones propias canceladas o no asistidas que aún no tengan recuperación activa. El selector muestra asignatura, fecha, hora y estado, informa cuando no hay una sesión elegible y bloquea el envío en ese caso. La API vuelve a validar propiedad, estado, fecha futura y ausencia de recuperación duplicada.
+
+**Reportes** dispone de consulta de detalle, creación, edición de borradores/devueltos, descarga de adjuntos, envío a revisión y eliminación de borradores no enviados. Los reportes enviados quedan bloqueados; al reemplazar adjuntos se limpian los archivos anteriores, y al eliminar un borrador se retiran sus adjuntos e historial de borrador. Los reportes devueltos conservan su historial. La solicitud ficticia que estaba en `web/data/ejemplo.json` se retiró del ejemplo local; por instrucción del equipo, no se insertaron ni borraron solicitudes en MariaDB.
+
+### Ubicación de la plantilla oficial
+
+Cuando la institución entregue el archivo, agrégalo como `api/templates/plantilla_informe_tutor_unitropico.docx`. Las instrucciones de integración están en [api/templates/README.md](api/templates/README.md). La plantilla todavía no se carga automáticamente; hay que mapear sus campos y anexos al generador del informe antes de considerar ese módulo institucional terminado.
+
+**Comprobación de los ajustes:** API `typecheck`, contrato OpenAPI sincronizado (51 rutas y 69 operaciones), build de producción web y `git diff --check` satisfactorios. La base de datos no recibió cambios en esta actividad.
+
+### Portal tutor
+
+Para completar la jornada del tutor, ingresa al portal y revisa **Mi resumen**. En **Mi disponibilidad** crea o ajusta los bloques semanales de la asignatura activa; los horarios cruzados se rechazan. La sección **Solicitudes** permite aceptar o cancelar solicitudes vinculadas; cancelar exige una razón que se conserva para administración. En **Mis sesiones**, marca como realizada cada tutoría atendida. En **Reportes**, documenta los datos de la sesión, asistencia/SAT y adjunta evidencias; guarda borrador para completar luego o envíalo a revisión. Las sesiones atrasadas sin reporte se resaltan y pueden recuperarse desde el viernes durante el fin de semana. Las recuperaciones se registran desde el calendario y se finalizan cuando ya se realizaron.
+
+Los adjuntos se almacenan en `api/uploads/tutor-reports/`, fuera del control de versiones; respalda ese directorio con la base si se despliega. Para probar cambios en un entorno de clase, usa cuentas de demostración y no reemplaces contraseñas ni registros compartidos del equipo.
+
+### Cancelaciones visibles al estudiante
+
+En **Mis solicitudes**, el estudiante puede leer la justificación de una tutoría cancelada por su tutor. El motivo se conserva en la solicitud/sesión de cancelación existente y se consulta desde MariaDB; no se pierde al cambiar de pantalla.
+
+## Facultades, solicitudes y reportes institucionales
+
+El módulo de programas permite registrar una facultad desde **Nueva facultad** y usarla de inmediato al crear programas. La API valida el nombre y evita duplicados.
+
+Al registrar o asignar una solicitud administrativa, se selecciona el tutor o monitor responsable y una fecha/bloque generado a partir de su horario activo para la asignatura y periodo. La API vuelve a validar el bloque y los cruces de sesiones. La asignación crea la sesión y notifica al responsable; el tutor confirma tutorías y el monitor confirma monitorías desde su bandeja. Administración puede cancelar solicitudes pendientes o cerrar las atendidas, pero no aprobarlas ni rechazarlas. Las solicitudes asignadas o atendidas conservan su historial y no se borran.
+
+Cada sesión realizada tiene un reporte individual. El informe mensual consolida únicamente sesiones que ya tienen reporte y se genera con secciones basadas en la plantilla institucional ubicada en `api/templates/plantilla_informe_tutor_unitropico.docx`. La sección **Sesiones consolidadas** inicia en una página final independiente. Las evidencias de imagen se anexan al documento exportado; los otros adjuntos aparecen identificados por nombre.
+## Correcciones integradas para facultades, horarios y reportes
+
+La administración dispone de CRUD de facultades con listado, descripción, estado y cantidad de programas. Las facultades asociadas a programas se desactivan para conservar la integridad; la eliminación física solo procede si no tienen programas relacionados. Las solicitudes administrativas consultan fechas concretas de los bloques semanales del tutor o monitor, muestran estado de consulta y omiten horas ya ocupadas o que ya comenzaron. Al cambiar la asignatura de un tutor se copian sus bloques de disponibilidad a la nueva asignación, manteniendo el historial de la asignación anterior.
+
+El tutor gestiona su calendario desde **Horario**. Los reportes se habilitan para sesiones realizadas/finalizadas y permiten crear, consultar, editar borradores, enviar y eliminar borradores. El informe mensual toma actividades, logros, dificultades y recomendaciones de los reportes individuales para precargar su contenido editable. La salida se ofrece como descarga Word; se retiró la impresión de la interfaz porque no reproduce el archivo DOCX oficial exactamente.
+
+## Diagnóstico de disponibilidad y reportes
+
+El API informa cuando no puede ofrecer fechas por periodo vencido. En la base de desarrollo consultada, el único periodo marcado Activo es `2026-1` (20 de enero a 20 de junio de 2026), que ya venció. Aunque hay horarios de monitor activos, no se deben programar sesiones fuera del periodo institucional. Registra o activa el periodo vigente y sus fechas en Administración → Periodos académicos; las fechas existentes no se alteran automáticamente. La asignación activa del tutor de muestra tampoco tiene bloques de disponibilidad, así que debe registrarlos desde Horario.
+
+Los reportes se habilitan para sesiones finalizadas sin informe. En la base consultada, la única sesión reportable ya tiene un informe Aprobado; se puede consultar, pero no editar ni eliminar. El CRUD está disponible para sesiones finalizadas sin informe y para borradores/devueltos; la eliminación se limita al borrador no enviado.
+
+### Corrección del guardado de horario del tutor
+
+El formulario de bloque nuevo inicializa un objeto con `id: 0`. El guardado ahora decide editar solo si `id > 0`; en caso contrario crea con `POST`, evitando enviar por error `PATCH /tutor/availability/0`. Se probó el guardado y la recarga con la asignación activa de tutor. Quedó un bloque provisional semanal **lunes 08:00–09:00, presencial**, para Matemáticas básicas, con ID de disponibilidad `19`. Se puede retirar desde Horario → eliminar bloque si ya no se requiere.

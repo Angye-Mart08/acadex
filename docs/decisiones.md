@@ -136,3 +136,60 @@ Asignaturas y programas se administran mediante rutas protegidas para Administra
 ## 23. Validación por tipo y avisos accionables
 
 La API es autoridad final para validar los formularios. Los nombres personales admiten letras y separadores nominales, no dígitos; valores numéricos se aceptan solo como enteros dentro de su dominio, sin coerción desde texto arbitrario. El frontend transforma las respuestas de validación en avisos accesibles con campo y motivo; los secretos efímeros mantienen una presentación explícita y no temporizada.
+
+## Recomendación: exportación institucional de informes
+
+La edición y exportación con diseño institucional definitivo sigue pendiente: falta la plantilla oficial y no es seguro fijar campos, encabezados, tamaños de foto o paginación de anexos. El módulo provisional se documenta en la decisión añadida al final de este archivo. Cuando el equipo tenga el formato institucional, se recomienda migrar la salida a una plantilla DOCX en el backend, completar campos con `Informe` e `InformeTutorDetalle`, incluir evidencias como anexos numerados, permitir vista previa y exportar a PDF mediante una conversión instalada en el entorno servidor. Mantener separados el contenido estructurado y el archivo generado permite regenerar el informe sin perder el reporte fuente.
+
+## 24. Operación del portal de tutor
+
+Las consultas y mutaciones del tutor se limitan por `id_usuario`, rol activo y asignación académica activa. Los bloques de disponibilidad se desactivan para mantener historial y se rechazan si se cruzan. Una cancelación exige motivo y actualiza el registro de la sesión y solicitud dentro de una transacción, conservando la justificación en la entidad de cancelación.
+
+Las tutorías recuperadas se guardan como operación vinculada a la sesión original en `RecuperacionMonitoria`; al completarse, pueden originar un reporte diferenciado. Los reportes usan `Informe` como encabezado y `InformeTutorDetalle`/`AdjuntoInformeTutor` para valores estructurados y metadatos; los binarios permanecen bajo el directorio de cargas de la API. La carpeta de archivos debe respaldarse junto a MariaDB.
+
+## 25. Plantilla y exportación institucional
+
+Se deja pendiente la generación y edición de informes con la plantilla institucional hasta recibirla. Los campos, diseño, fotos, anexos, encabezado institucional y paginación son requisitos de aceptación que no se deben inferir. Con la plantilla aprobada, se recomienda reemplazar la salida provisional por generación DOCX en backend, edición de borrador con vista previa, lista ordenada de evidencias y conversión final a PDF. Conservar el reporte estructurado permite regenerar el documento sin perder los datos fuente.
+
+## Avance provisional de notificaciones e informe mensual
+
+Las notificaciones funcionales se persisten en MariaDB, con una fila por destinatario y control individual de lectura. La interfaz consulta cada 30 segundos mientras el usuario tiene una sesión abierta. Para el alcance académico del proyecto se eligió polling autenticado en vez de WebSockets: conserva una arquitectura REST sencilla, evita un servicio de tiempo real adicional y permite entregar eventos entre roles aunque no compartan pantalla. La limitación es que el aviso visual puede tardar hasta un intervalo de consulta y no aparece si la persona está desconectada; no equivale a correo ni notificación móvil.
+
+Los eventos se registran después de confirmar solicitudes, asignaciones, decisiones del tutor, cambios administrativos de estado y envío de reportes diarios. Si falla la escritura de una notificación, el error se registra en servidor sin revertir el proceso principal. Consulta y lectura se limitan a la cuenta propietaria.
+
+Se implementó un borrador mensual consolidado desde los reportes existentes, con métricas, sesiones, metadatos de anexos, edición, vista previa y exportación compatible con Word/impresión PDF. Esto permite revisar el flujo antes de recibir el archivo institucional. El `.doc` es HTML compatible con Word y el PDF se obtiene mediante el diálogo de impresión del navegador; ninguno se presenta como formato institucional validado. Al recibir la plantilla se deben ajustar campos obligatorios, identidad visual, anexos embebidos, paginación y criterios de aprobación. Los reportes diarios permanecen como fuente estructurada y no se alteran al guardar el borrador mensual.
+
+La migración `003_notificaciones_informe_mensual.sql` añade las tablas persistentes y se aplica idempotentemente al arranque de la API, sin recrear el esquema ni sobrescribir filas existentes.
+
+## Diseño y seguridad de los módulos del tutor
+
+La recuperación solo puede originarse en una sesión propia cancelada/no asistida sin otra recuperación pendiente o realizada. Esta elegibilidad se consulta de forma explícita y también se valida en servidor, para que el formulario no dependa de etiquetas o filtrados del cliente.
+
+Los reportes de sesión usan `Informe` y sus tablas de detalle/adjuntos ya existentes. Se agregó CRUD autenticado, limitando lectura/edición a la asignación del tutor. Los borradores pueden eliminarse junto con sus adjuntos e historial de edición. Los reportes `Devuelto` pueden corregirse, pero conservan historial; los remitidos quedan bloqueados. Los adjuntos descargables se sirven desde una ruta que verifica el propietario y no revela su ubicación interna.
+
+El archivo oficial se recibirá en `api/templates/plantilla_informe_tutor_unitropico.docx`. Se mantiene separado del generador provisional hasta mapear cada marcador, anexo, paginación y salida final. La solicitud ficticia se limpió solo de `web/data/ejemplo.json`; las filas de MariaDB se preservaron porque el registro #1 tiene una sesión relacionada y el equipo pidió no tocar la base.
+
+## Enrutamiento y conservación de solicitudes
+
+La administración crea solicitudes, asigna un responsable desde el catálogo de asignaciones académicas y programa únicamente fechas/bloques existentes en su horario activo. La validación de horario se repite en el servidor para impedir fechas inventadas o cruces concurrentes. Las decisiones de confirmar/cancelar pertenecen al usuario con el rol asignado (Tutor o Monitor); Administración no aprueba ni rechaza.
+
+La eliminación se limita a solicitudes sin asignación ni relaciones históricas. Para una solicitud asignada o atendida se informa que debe cambiarse de estado y conservarse el historial. Los filtros permanecen disponibles en los módulos administrativos que los requieren y las tablas separan visualmente encabezados y acciones.
+
+## Informes institucionales
+
+Cada sesión realizada conserva su reporte diario en `Informe` y su detalle en `InformeTutorDetalle`. La autorización de lectura se basa en la relación sesión–asignación–tutor, lo cual también permite leer reportes heredados cuyo campo autor no coincide con la asignación o que carecen de detalle extendido. El borrador mensual solo incorpora sesiones que tengan reporte individual. La exportación sigue el orden de apartados del formato institucional presente en `api/templates/plantilla_informe_tutor_unitropico.docx`; las sesiones consolidadas comienzan en una página final separada.
+## Conservación de horarios y salida del informe mensual
+
+Las disponibilidades de tutor se relacionan con `AsignacionAcademica`. Cambiar la asignatura no debe actualizar esa asignación histórica porque sesiones ya realizadas apuntan a ella. Por ello se crea/reactiva la asignación correspondiente y se copian sus bloques semanales, conservando los registros originales. Los traslapes consultan solo asignaciones activas. Las facultades referenciadas por programas se desactivan en vez de eliminarse físicamente.
+
+La descarga mensual produce Word compatible y su contenido se precarga desde los reportes individuales; el usuario puede editar los apartados antes de descargar. La impresión de la página queda retirada hasta contar con una integración que utilice la plantilla DOCX oficial directamente, ya que imprimir la aplicación no conserva su formato institucional.
+
+## Periodos vigentes e informes aprobados
+
+Las fechas de `PeriodoAcademico` son requisito para programar sesiones; el estado Activo no extiende por sí mismo un periodo vencido. El API reporta el problema para que Administración registre/active las fechas institucionales vigentes, sin inventar calendario ni modificar el historial previo.
+
+Los informes Enviados, Aprobados y Entregados son historial de solo lectura. El tutor crea informes para sesiones finalizadas sin informe, edita Borrador/Devuelto y elimina únicamente Borrador no enviado. Por eso una sesión de muestra ya aprobada no ofrece botones de edición o eliminación.
+
+## Alta y edición de disponibilidad
+
+La interfaz distingue alta y edición por el ID del bloque, no por la presencia del objeto de formulario: el ID `0` es el marcador de un alta y no debe enviarse en la ruta PATCH. La creación usa POST; edición requiere un identificador persistido mayor que cero. El primer bloque de demostración se conserva activo para que el tutor pueda verificar el calendario y se identifica como provisional en la documentación del proyecto.

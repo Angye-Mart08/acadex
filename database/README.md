@@ -202,3 +202,47 @@ La reauditoría de solo lectura posterior a la prueba integrada de edición repo
 No fue necesario modificar el DDL ni aplicar una migración: las tablas `Asignatura`, `Programa`, `Facultad` y sus relaciones ya existían. Los nuevos endpoints administrativos validan tipos, rangos, facultad y duplicados antes de guardar. Las eliminaciones consultan referencias operativas y responden conflicto en vez de borrar historial; el administrador puede cambiar el estado a `Inactivo`.
 
 La API rechaza nombres personales con dígitos y entradas no enteras en campos numéricos; créditos, semestre, horas y capacidad respetan sus rangos funcionales. Se probaron CRUD temporales de asignatura y programa con creación, edición y eliminación; también se confirmó que referencias existentes bloquean el borrado. Los registros temporales fueron limpiados y no se modificaron datos preexistentes.
+
+## Migración de reportes y operación del tutor
+
+Al iniciar la API se aplica idempotentemente `migrations/002_reportes_tutor.sql` mediante las credenciales bootstrap del `.env`. La migración agrega `InformeTutorDetalle` para el horario real, lugar, conteos, asistentes, SAT y marca de recuperación, y `AdjuntoInformeTutor` para los metadatos de los archivos. El contenido de usuario se conserva; la base no se sobrescribe. En una instalación existente el usuario bootstrap debe tener permisos de `CREATE` y `ALTER`.
+
+Los adjuntos binarios del formulario se guardan en `api/uploads/tutor-reports/` y no se suben a Git. Debe conservarse esta carpeta junto con la copia de seguridad de MariaDB si se requiere retener evidencias. En un despliegue multiinstancia conviene trasladar los archivos a almacenamiento compartido y guardar allí sus identificadores.
+
+La verificación local posterior a la migración encontró 38 tablas InnoDB, 57 claves foráneas, 27 restricciones `UNIQUE`, 9 restricciones `CHECK` y cero referencias huérfanas. La auditoría también reportó filas de demostración por revisar: 4 credenciales que no parecen bcrypt, 5 códigos de estudiante discrepantes, una persona con más de una asignación activa por rol y una sesión con asignatura/periodo distinto al de la solicitud. La auditoría es de solo lectura y no se corrigieron estos datos. El script aún indica reglas `CHECK` recomendadas ausentes; contrastar su catálogo antes de afirmar que todas las validaciones físicas están instaladas.
+
+## Notificaciones e informe mensual provisional
+
+La migración `migrations/003_notificaciones_informe_mensual.sql` agrega sin reemplazar información existente:
+
+- `Notificacion`: propietario `Usuario`, categoría, título/mensaje, referencia opcional a entidad, fecha e indicador de lectura. Los índices soportan bandeja reciente y conteo de pendientes; las notificaciones se eliminan al borrar su usuario.
+- `InformeMensualTutor`: contenido JSON del borrador mensual por usuario y `AAAA-MM`, con estado y marcas de creación/actualización/envío. La clave única evita dos informes del mismo tutor para el mismo mes.
+
+La API ejecuta esta migración de forma idempotente al iniciar, junto con la migración de reportes diarios. La verificación local confirmó 40 tablas, 59 claves foráneas, 28 restricciones `UNIQUE`, 10 restricciones `CHECK` y cero referencias huérfanas tras la instalación. La auditoría aún informa filas demostrativas que requieren revisión; no se modificaron. Para verificar la instalación, ejecutar `npm run db:audit` desde `api/` o consultar `Notificacion` e `InformeMensualTutor` en HeidiSQL.
+
+## Reportes diarios: CRUD y preservación de datos
+
+El CRUD de reportes del tutor reutiliza `Informe`, `InformeTutorDetalle`, `HistorialInforme` y `AdjuntoInformeTutor`; no requiere migración adicional. Se pueden editar borradores/devueltos; el borrado físico se restringe a informes `Borrador` no enviados y limpia su historial de edición y archivos asociados. Los reportes devueltos y enviados preservan trazabilidad. Las descargas verifican que el informe y el anexo pertenezcan al tutor autenticado.
+
+En la revisión de solicitudes se retiró únicamente el dato ficticio de `web/data/ejemplo.json`. No se insertaron ni eliminaron filas en MariaDB. El registro #1 se conservó porque tiene una sesión relacionada; eliminarlo requeriría intervenir historial operativo, lo cual no fue autorizado.
+
+## Reglas recientes de operación académica
+
+No se añadió ni modificó el esquema de MariaDB para esta entrega. La creación de facultades usa `Facultad`; la generación de opciones horarias consulta `Disponibilidad`, `HorarioMonitor`, `AsignacionAcademica` y `PeriodoAcademico`. Las sesiones se validan contra esos horarios y no pueden traslaparse con sesiones activas del mismo responsable.
+
+La bandeja del tutor/monitor consulta las sesiones relacionadas con su asignación. Los informes diarios se asocian uno a uno con una sesión mediante la restricción existente de `Informe.id_sesion`; el informe mensual lee solo esas sesiones con reporte. La lectura de informes heredados admite que no exista fila en `InformeTutorDetalle`.
+## Integridad para facultades y horarios de tutor
+
+El CRUD de facultades utiliza la tabla existente `Facultad`; el borrado físico se bloquea cuando `Programa.id_facultad` tiene referencias, por lo que se debe cambiar el estado a Inactivo. No se requiere migración adicional de esquema para esta funcionalidad.
+
+Al cambiar la asignatura de un tutor, la aplicación conserva la asignación previa para mantener el historial de sesiones y duplica los bloques de `Disponibilidad` en la asignación activa nueva. No elimina horarios de MariaDB. La validación de traslapes de bloques semanales ignora asignaciones canceladas.
+
+## Estado de los datos académicos consultados
+
+La revisión de solo lectura detectó el periodo `2026-1` Activo con fecha de cierre 20/06/2026. El API responde `PERIOD_EXPIRED` porque no debe programar fuera del calendario institucional. Para probar solicitudes, registra/activa el periodo vigente desde el módulo administrativo con las fechas oficiales; se conservaron intactos los registros anteriores. Los monitores tienen bloques activos en el periodo anterior y la asignación activa del tutor de muestra carece de bloques activos.
+
+La base contiene una sesión finalizada del tutor con informe Aprobado y no tiene otra sesión finalizada sin informe. La vista ofrece el informe aprobado en consulta. Para comprobar creación/edición/eliminación se necesita una sesión finalizada sin informe o un borrador propio; no se insertaron datos de prueba.
+
+### Bloque provisional creado para verificar el horario
+
+El alta se ejecutó con la lógica real de autenticación y disponibilidad del tutor y se verificó mediante una segunda lectura. Se conserva en `Disponibilidad` como ID `19`, asignación `10`, lunes 08:00–09:00, modalidad Presencial, estado Activo. Es un bloque recurrente semanal de demostración; elimínalo desde el módulo Horario si no debe permanecer en los datos locales.
