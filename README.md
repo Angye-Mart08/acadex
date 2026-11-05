@@ -37,6 +37,61 @@ acadex/
 
 ## Ejecución rápida
 
+### Docker Compose
+
+Requiere Docker Engine o Docker Desktop con contenedores Linux y Docker Compose v2.
+Desde la raíz del repositorio, copia la configuración si todavía no tienes `.env`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Completa `DOCKER_DATABASE_PASSWORD`, `DOCKER_DATABASE_ROOT_PASSWORD` y `JWT_SECRET`
+en `.env` con valores aleatorios distintos. Para generar cada valor puedes ejecutar:
+
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+Construye e inicia los tres servicios:
+
+```powershell
+docker compose up -d --build
+docker compose ps
+```
+
+Abre [Acadex](http://localhost:5173) y comprueba
+[el estado de la API y MariaDB](http://localhost:5173/health).
+Nginx sirve el frontend compilado, las rutas de la SPA y el proxy `/api/v1`.
+La API y MariaDB se comunican en la red interna; solo se publica el puerto web.
+Compose espera a que MariaDB y la API estén saludables antes de iniciar sus dependientes.
+
+El esquema y los datos de demostración se importan únicamente al crear el volumen
+`database_data`. Los siguientes arranques conservan los datos; los cambios al SQL
+inicial no se aplican automáticamente a una base existente. Esta base Docker es
+independiente de la instalación local de MariaDB y no importa sus datos.
+Las contraseñas de MariaDB en `.env` deben conservarse después del primer arranque:
+cambiarlas allí no actualiza las cuentas de un volumen existente.
+
+```powershell
+docker compose logs -f api
+docker compose down
+docker compose up -d
+```
+
+`docker compose down` conserva el volumen. **`docker compose down -v` elimina
+permanentemente la base Docker**, por lo que solo debe usarse para reiniciar datos
+de prueba que ya no necesites.
+
+El modo predeterminado es `DOCKER_NODE_ENV=development` para permitir el acceso
+con las cuentas demo heredadas y su conversión a bcrypt al iniciar sesión.
+Para un despliegue de producción configura `DOCKER_NODE_ENV=production`, asegúrate
+de que las credenciales utilizadas ya tengan hashes bcrypt, configura el origen
+público en `DOCKER_CORS_ORIGIN` y sirve HTTPS mediante un proxy de despliegue.
+Para cambiar el puerto local, ajusta `DOCKER_WEB_PORT` y `DOCKER_CORS_ORIGIN`.
+El frontend usa una URL relativa para la API y no requiere reconstrucción al cambiar el puerto.
+Detén el frontend de `npm run dev` antes de iniciar Docker si está usando el puerto `5173`.
+
 El frontend y la API pueden ejecutarse de manera conjunta desde la raíz del proyecto o en terminales independientes:
 
 ### Opción 1: Ejecución integrada (Recomendada)
