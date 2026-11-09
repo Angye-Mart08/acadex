@@ -81,6 +81,26 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
 .primary-button:hover { border-color: var(--brand-green-deep); background: var(--brand-green-deep); box-shadow: 0 10px 20px rgba(0,88,80,.22); }
 .login-button { min-height: 50px; border-radius: 10px; }
 .login-note { margin-top: 20px; color: #829089; line-height: 1.5; }
+.login-lockout-notice { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid #ead6a7; border-radius: 10px; color: #594b2a; background: #fffaf0; font-size: 12px; line-height: 1.45; }
+.login-lockout-notice strong { color: #765d1d; font-size: 13px; }
+.login-lockout-notice .secondary-button { width: 100%; white-space: normal; }
+.login-lockout-notice small { color: #416b5c; }
+.login-button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow: none; }
+.credential-reset-dialog { display: grid; gap: 16px; }
+.credential-reset-notice { display: flex; align-items: flex-start; gap: 11px; padding: 14px 15px; border: 1px solid #dcebe1; border-radius: 12px; color: #315d43; background: #f4faf5; }
+.credential-reset-notice svg { flex: 0 0 auto; margin-top: 1px; color: #347653; }
+.credential-reset-notice p { margin: 0; color: #526a5a; font-size: 13px; line-height: 1.55; }
+.credential-temporary-password { display: grid; gap: 9px; padding: 16px; border: 1px solid #dce7df; border-radius: 12px; background: #f8fbf8; }
+.credential-temporary-password span { color: #718078; font-size: 10px; font-weight: 800; letter-spacing: .09em; }
+.credential-temporary-password code { overflow-wrap: anywhere; color: #1b4932; font-size: 19px; font-weight: 800; }
+.credential-reset-dialog .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.admin-reset-code-form { display: grid; gap: 10px; width: 100%; padding-top: 5px; }
+.admin-reset-code-form label { display: grid; gap: 6px; color: #4b6254; font-size: 11px; font-weight: 700; }
+.admin-reset-code-form input { width: 100%; min-height: 39px; padding: 9px 11px; border: 1px solid #d5e1d9; border-radius: 8px; background: #fff; color: #243d32; font: inherit; outline: none; }
+.admin-reset-code-form input:focus { border-color: #43846a; box-shadow: 0 0 0 3px #43846a22; }
+.admin-reset-code-form button { width: 100%; white-space: normal; }
+.admin-reset-error { color: #a3433f; line-height: 1.4; }
+@media(max-width: 520px) { .credential-reset-dialog .modal-actions { flex-direction: column-reverse; } .credential-reset-dialog .modal-actions button { width: 100%; } }
 .login-footer-quote { margin-top: 24px; padding-top: 18px; border-top: 1px solid #e9eeeb; color: #73827c; text-align: center; font-size: 12px; font-style: italic; }
 .mobile-login-brand { display: none; }
 

@@ -167,3 +167,11 @@ Los informes individuales se asocian a sesiones realizadas/finalizadas; los repo
 Las fechas de `Sesion` y `RecuperacionMonitoria` se normalizan a `AAAA-MM-DD` para la validación del reporte. Estados Enviado/Aprobado/Entregado se conservan como historial de solo lectura; Borrador/Devuelto puede editarse.
 
 La fila provisional de verificación se guardó en `Disponibilidad` asociada a `AsignacionAcademica.id_asignacion = 10`: lunes 08:00–09:00, Presencial, estado Activo. Tiene ID `19` y se puede retirar mediante el CRUD de disponibilidad del tutor.
+
+## Sesiones de ingreso
+
+La migración `004_sesiones_ingreso.sql` agrega `SesionIngreso`, separada de `Sesion` académica. Guarda el UUID del `jti`, usuario, rol activo, fecha de creación, vencimiento y fecha opcional de revocación. La FK a `Usuario` elimina las sesiones de acceso asociadas cuando se elimina el usuario. Un token solo autentica si su fila no está revocada y todavía no venció.
+
+Al cambiar una clave, las filas de las sesiones de ingreso adicionales se marcan revocadas; al restablecer una credencial se marcan todas las sesiones activas de ese usuario. No se borran para conservar trazabilidad.
+
+La migración `005_sesiones_preautenticacion.sql` agrega `SesionPreAutenticacion` para el token breve de selección inicial de rol. Se consume una sola vez o se revoca si el usuario cancela. Los cambios de rol posteriores emiten una fila nueva en `SesionIngreso` y revocan la sesión anterior.

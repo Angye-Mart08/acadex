@@ -1042,6 +1042,30 @@ export async function listCredentials(role?:string){
   return rows.map((row:any)=>({...row,id:Number(row.id),roles:String(row.roles??'').split(',').filter(Boolean)}))
 }
 
+export async function listSuspendedAccounts(){
+  const [rows]=await pool.query(`
+    SELECT u.id_usuario AS id,u.correo AS email,
+           CONCAT(u.nombres,' ',u.apellidos) AS name,
+           ca.intentos_fallidos AS failedAttempts,
+           DATE_FORMAT(ca.bloqueada_hasta,'%Y-%m-%dT%H:%i:%s-05:00') AS lockedUntil,
+           ca.cambio_clave_solicitado_en IS NOT NULL AS passwordChangeRequested
+      FROM ControlAcceso ca JOIN Usuario u ON u.id_usuario=ca.id_usuario
+      JOIN Credencial c ON c.id_usuario=u.id_usuario
+     WHERE ca.tipo_bloqueo='suspension24h' AND ca.bloqueada_hasta>CURRENT_TIMESTAMP
+       AND u.estado='Activo' AND c.estado='Activo'
+     ORDER BY ca.cambio_clave_solicitado_en DESC,ca.bloqueada_hasta`)
+  return rows.map((row:any)=>({...row,id:Number(row.id),failedAttempts:Number(row.failedAttempts),passwordChangeRequested:Boolean(row.passwordChangeRequested)}))
+}
+
+export async function unlockSuspendedAccount(id:number){
+  const [result]=await pool.execute(`
+    UPDATE ControlAcceso SET intentos_fallidos=0,bloqueada_hasta=NULL,
+      tipo_bloqueo=NULL,cambio_clave_solicitado_en=NULL
+     WHERE id_usuario=? AND tipo_bloqueo='suspension24h' AND bloqueada_hasta>CURRENT_TIMESTAMP`,[id])
+  if(!result.affectedRows)throw new DataError(404,'SUSPENDED_ACCOUNT_NOT_FOUND','La cuenta no tiene una suspensión de 24 horas activa.')
+  return {unlocked:true}
+}
+
 export async function resetCredential(id:number,currentUserId?:number){
   if(currentUserId&&id===Number(currentUserId))throw new DataError(400,'CANNOT_RESET_SELF','No puedes restablecer tu propia clave desde la administración. Usa el formulario de cambio de contraseña.')
   const connection=await pool.getConnection()
@@ -1056,6 +1080,9 @@ export async function resetCredential(id:number,currentUserId?:number){
     const temporaryPassword=randomBytes(12).toString('base64url')
     const hash=await bcrypt.hash(temporaryPassword,12)
     await connection.execute('UPDATE Credencial SET password_hash=?,usuario=?,primer_inicio=1 WHERE id_credencial=?',[hash,rows[0].correo,rows[0].id_credencial])
+    await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
+    await connection.execute('UPDATE SesionPreAutenticacion SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
+    await connection.execute('UPDATE ControlAcceso SET intentos_fallidos=0,bloqueada_hasta=NULL,tipo_bloqueo=NULL,cambio_clave_solicitado_en=NULL WHERE id_usuario=?',[id])
     await connection.commit()
     return {id,temporaryPassword}
   }catch(error){await connection.rollback();throw error}finally{connection.release()}
@@ -1089,6 +1116,8 @@ export async function exportTemporaryCredentials(role:string,currentUserId:numbe
       const passwordHash=await bcrypt.hash(temporaryPassword,12)
       const [update]=await connection.execute("UPDATE Credencial SET password_hash=?,usuario=?,primer_inicio=1 WHERE id_usuario=? AND estado='Activo'",[passwordHash,account.email,account.id])
       if(update.affectedRows!==1)throw new DataError(409,'CREDENTIAL_EXPORT_CONFLICT','Una credencial cambió durante la exportación. No se generó el archivo; inténtalo de nuevo.')
+      await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[account.id])
+      await connection.execute('UPDATE SesionPreAutenticacion SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[account.id])
       exported.push({id:Number(account.id),code:account.code,email:account.email,name:account.name,roles:String(account.roles??'').split(',').filter(Boolean),temporaryPassword})
     }
     await connection.commit()
@@ -1096,16 +1125,27 @@ export async function exportTemporaryCredentials(role:string,currentUserId:numbe
   }catch(error){await connection.rollback();throw error}finally{connection.release()}
 }
 
-export async function changePassword(id:number,payload:any){
+export async function changePassword(id:number,payload:any,currentSessionId?:string){
   const passwordSchema=z.string().min(8,'La contraseña debe tener al menos 8 caracteres.').max(72,'La contraseña no puede superar 72 caracteres.').refine((value)=>Buffer.byteLength(value,'utf8')<=72,'La contraseña supera el límite admitido.')
   const input=z.object({currentPassword:z.string().min(1),newPassword:passwordSchema,confirmPassword:passwordSchema}).strict().refine((value)=>value.newPassword===value.confirmPassword,'Las contraseñas nuevas no coinciden.').parse(payload)
-  const [rows]=await pool.query("SELECT password_hash FROM Credencial WHERE id_usuario=? AND estado='Activo'",[id])
-  if(!rows.length)throw new DataError(404,'CREDENTIAL_NOT_FOUND','No existe una credencial activa.')
-  const stored=rows[0].password_hash
-  const valid=stored.startsWith('$2')?await bcrypt.compare(input.currentPassword,stored):process.env.NODE_ENV!=='production'&&input.currentPassword===stored
-  if(!valid)throw new DataError(401,'INVALID_CURRENT_PASSWORD','La contraseña actual no es válida.')
-  await pool.execute('UPDATE Credencial SET password_hash=?,primer_inicio=0 WHERE id_usuario=?',[await bcrypt.hash(input.newPassword,12),id])
-  return {changed:true}
+  const connection=await pool.getConnection()
+  try{
+    await connection.beginTransaction()
+    const [rows]=await connection.query("SELECT password_hash FROM Credencial WHERE id_usuario=? AND estado='Activo' FOR UPDATE",[id])
+    if(!rows.length)throw new DataError(404,'CREDENTIAL_NOT_FOUND','No existe una credencial activa.')
+    const stored=rows[0].password_hash
+    const valid=stored.startsWith('$2')?await bcrypt.compare(input.currentPassword,stored):process.env.NODE_ENV!=='production'&&input.currentPassword===stored
+    if(!valid)throw new DataError(401,'INVALID_CURRENT_PASSWORD','La contraseña actual no es válida.')
+    await connection.execute('UPDATE Credencial SET password_hash=?,primer_inicio=0 WHERE id_usuario=?',[await bcrypt.hash(input.newPassword,12),id])
+    if(currentSessionId){
+      await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND id_sesion<>? AND revocada_en IS NULL',[id,currentSessionId])
+    }else{
+      await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
+    }
+    await connection.execute('UPDATE SesionPreAutenticacion SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
+    await connection.commit()
+    return {changed:true}
+  }catch(error){await connection.rollback();throw error}finally{connection.release()}
 }
 
 export async function listSettings(){

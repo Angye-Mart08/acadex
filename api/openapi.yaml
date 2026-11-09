@@ -49,8 +49,66 @@ paths:
                 $ref: '#/components/schemas/LoginResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          description: La cuenta está en espera durante un minuto después del tercer o cuarto intento fallido.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '423':
+          description: La cuenta quedó suspendida durante 24 horas tras cinco intentos fallidos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '422':
           $ref: '#/components/responses/ValidationError'
+
+  /auth/request-password-change:
+    post:
+      tags: [Autenticación]
+      summary: Solicitar código de recuperación de administrador o avisar al administrador
+      operationId: requestPasswordChange
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, example: usuario@unitropico.edu.co }
+      responses:
+        '202': { description: Solicitud procesada sin revelar si la cuenta existe o está suspendida. }
+        '503': { description: El correo saliente no está configurado o no pudo enviar el código. }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/reset-admin-password:
+    post:
+      tags: [Autenticación]
+      summary: Cambiar la contraseña de un administrador con un código de un solo uso
+      operationId: resetAdminPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, newPassword, confirmPassword]
+              properties:
+                email: { type: string, format: email, example: admin@unitropico.edu.co }
+                code: { type: string, pattern: '^\d{6}$' }
+                newPassword: { type: string, minLength: 8, maxLength: 72 }
+                confirmPassword: { type: string, minLength: 8, maxLength: 72 }
+      responses:
+        '200': { description: Contraseña actualizada y bloqueo levantado. }
+        '400': { description: El código no es válido, ya venció o no corresponde a una cuenta suspendida. }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /auth/select-role:
     post:
@@ -67,6 +125,53 @@ paths:
       responses:
         '200':
           description: Rol seleccionado y sesión emitida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /auth/cancel-role-selection:
+    post:
+      tags: [Autenticación]
+      summary: Revocar el token preliminar de selección de rol
+      operationId: cancelRoleSelection
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [preAuthToken]
+              properties:
+                preAuthToken: { type: string, minLength: 1 }
+      responses:
+        '204': { description: Token preliminar revocado o ya vencido. }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/change-role:
+    post:
+      tags: [Autenticación]
+      summary: Cambiar de rol dentro de una sesión de ingreso activa
+      operationId: changeActiveRole
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRoleRequest'
+      responses:
+        '200':
+          description: Rol cambiado y token anterior revocado.
           content:
             application/json:
               schema:
@@ -98,13 +203,13 @@ paths:
   /auth/logout:
     post:
       tags: [Autenticación]
-      summary: Cerrar la sesión local del cliente
+      summary: Revocar la sesión activa y cerrar sesión
       operationId: logout
       security:
         - bearerAuth: []
       responses:
         '204':
-          description: El cliente debe eliminar los tokens almacenados. El JWT no se revoca en el servidor y permanece válido hasta expirar.
+          description: La API revoca el token. El cliente debe eliminar los tokens almacenados.
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -410,6 +515,36 @@ paths:
         '200': { description: Cuentas filtradas por rol., content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CredentialAccount' } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/configuration/suspended-accounts:
+    get:
+      tags: [Administración]
+      summary: Listar cuentas suspendidas por intentos fallidos
+      operationId: listSuspendedAccounts
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Cuentas con suspensión de 24 horas activa., content: { application/json: { schema: { type: array, items: { type: object } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/configuration/suspended-accounts/{id}/unlock:
+    post:
+      tags: [Administración]
+      summary: Levantar anticipadamente una suspensión de 24 horas
+      operationId: unlockSuspendedAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Suspensión levantada., content: { application/json: { schema: { type: object, properties: { unlocked: { type: boolean } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No existe una suspensión activa para esa cuenta. }
 
   /admin/configuration/credentials/{id}/reset:
     post:
@@ -1735,6 +1870,12 @@ components:
       required: [preAuthToken, role]
       properties:
         preAuthToken: { type: string, minLength: 1 }
+        role: { $ref: '#/components/schemas/Role' }
+    ChangeRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
         role: { $ref: '#/components/schemas/Role' }
     UserInput:
       type: object

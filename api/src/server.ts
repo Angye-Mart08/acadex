@@ -3,11 +3,11 @@ import cors from 'cors'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import { randomUUID } from 'node:crypto'
 import { z, ZodError } from 'zod'
-import { AuthError, currentUserFromToken, login, selectRole } from './auth.js'
+import { AuthError, cancelRoleSelection, changeActiveRole, currentUserFromToken, login, requestPasswordChange, resetAdminPassword, revokeSession, selectRole } from './auth.js'
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
 import { DataError, cancelTutorRecovery, completeTutorRecovery, createRequest, createTutorAvailability, createTutorRecovery, dashboard, deleteTutorAvailability, deleteTutorReport, getTutorReport, getTutorReportAttachment, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects, listTutorAssignments, listTutorRecoverableSessions, listTutorRecoveries, listTutorReportableSessions, saveTutorReport, submitTutorReport, tutorDashboard, updateTutorAvailability, updateTutorReport } from './data.js'
-import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminFaculty, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, decideTutorRequest, deleteAdminFaculty, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminFaculties, listAdminPeriods, listAdminPrograms, listAdminRequestSlots, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminFaculty, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
+import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminFaculty, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, decideTutorRequest, deleteAdminFaculty, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminFaculties, listAdminPeriods, listAdminPrograms, listAdminRequestSlots, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listSettings, listSuspendedAccounts, resetCredential, unlockSuspendedAccount, updateAdminFaculty, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
 import { getMonthlyTutorReport, listNotifications, markAllNotificationsRead, markNotificationRead, saveMonthlyTutorDraft } from './notifications.js'
 
 const app = express()
@@ -106,9 +106,35 @@ router.post('/auth/login', async (req, res, next) => {
   }
 })
 
+router.post('/auth/request-password-change', async (req, res, next) => {
+  try { res.status(202).json(await requestPasswordChange(req.body)) } catch (error) { next(error) }
+})
+
+router.post('/auth/reset-admin-password', async (req, res, next) => {
+  try { res.status(200).json(await resetAdminPassword(req.body)) } catch (error) { next(error) }
+})
+
 router.post('/auth/select-role', async (req, res, next) => {
   try {
     res.status(200).json(await selectRole(req.body))
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/auth/cancel-role-selection', async (req, res, next) => {
+  try {
+    const body = z.object({ preAuthToken: z.string().min(1) }).strict().parse(req.body)
+    await cancelRoleSelection(body.preAuthToken)
+    res.status(204).send()
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/auth/change-role', requireSession, async (req, res, next) => {
+  try {
+    res.status(200).json(await changeActiveRole(req.session, req.body))
   } catch (error) {
     next(error)
   }
@@ -125,8 +151,14 @@ router.get('/auth/me', async (req, res, next) => {
   }
 })
 
-// Cierra la sesión del cliente; el JWT stateless permanece válido hasta expirar.
-router.post('/auth/logout', requireSession, (_req, res) => res.status(204).send())
+router.post('/auth/logout', requireSession, async (req, res, next) => {
+  try {
+    await revokeSession(req.header('authorization').slice(7).trim())
+    res.status(204).send()
+  } catch (error) {
+    next(error)
+  }
+})
 
 router.get('/portal/dashboard', requireSession, async (req, res, next) => {
   try { res.json(req.session.activeRole === 'Administrador' ? await adminDashboard() : await dashboard(req.session)) } catch (error) { next(error) }
@@ -248,6 +280,14 @@ router.get('/admin/configuration/credentials', requireSession, requireRole('Admi
   try { const query=z.object({role:z.enum(['Administrador','Tutor','Monitor','Estudiante']).optional()}).strict().parse(req.query); res.json(await listCredentials(query.role)) } catch (error) { next(error) }
 })
 
+router.get('/admin/configuration/suspended-accounts', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listSuspendedAccounts()) } catch (error) { next(error) }
+})
+
+router.post('/admin/configuration/suspended-accounts/:id/unlock', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await unlockSuspendedAccount(idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+})
+
 router.post('/admin/configuration/credentials/export', requireSession, requireRole('Administrador'), async (req, res, next) => {
   try { const body=z.object({role:z.enum(['Administrador','Tutor','Monitor','Estudiante'])}).strict().parse(req.body); res.json(await exportTemporaryCredentials(body.role,req.session.user.id)) } catch (error) { next(error) }
 })
@@ -257,7 +297,7 @@ router.post('/admin/configuration/credentials/:id/reset', requireSession, requir
 })
 
 router.patch('/admin/configuration/password', requireSession, async (req, res, next) => {
-  try { res.json(await changePassword(req.session.user.id, req.body)) } catch (error) { next(error) }
+  try { res.json(await changePassword(req.session.user.id, req.body, req.session.sessionId)) } catch (error) { next(error) }
 })
 
 router.get('/admin/configuration/settings', requireSession, requireRole('Administrador'), async (_req, res, next) => {
@@ -368,7 +408,11 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof ZodError) {
     return apiError(res, req, 422, 'VALIDATION_ERROR', 'La información enviada no cumple las reglas de validación.', error.issues.map((issue) => ({ path: issue.path, message: issue.message })))
   }
-  if (error instanceof AuthError) return apiError(res, req, error.status, error.code, error.message)
+  if (error instanceof AuthError) {
+    const retryAfterSeconds = Number(error.metadata?.retryAfterSeconds)
+    if (retryAfterSeconds > 0) res.setHeader('Retry-After', String(retryAfterSeconds))
+    return res.status(error.status).json({ status: error.status, code: error.code, message: error.message, path: req.path, timestamp: new Date().toISOString(), requestId: req.requestId, ...(error.metadata ?? {}) })
+  }
   if (error instanceof DataError) return apiError(res, req, error.status, error.code, error.message)
   console.error(error)
   return apiError(res, req, 500, 'INTERNAL_ERROR', 'Ocurrió un error interno del servidor.')

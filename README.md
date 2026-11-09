@@ -290,3 +290,17 @@ Los reportes se habilitan para sesiones finalizadas sin informe. En la base cons
 ### Corrección del guardado de horario del tutor
 
 El formulario de bloque nuevo inicializa un objeto con `id: 0`. El guardado ahora decide editar solo si `id > 0`; en caso contrario crea con `POST`, evitando enviar por error `PATCH /tutor/availability/0`. Se probó el guardado y la recarga con la asignación activa de tutor. Quedó un bloque provisional semanal **lunes 08:00–09:00, presencial**, para Matemáticas básicas, con ID de disponibilidad `19`. Se puede retirar desde Horario → eliminar bloque si ya no se requiere.
+
+### Sesiones de ingreso y cierre de sesión
+
+Los accesos autenticados se registran en `SesionIngreso` con identificador único, usuario, rol activo, vencimiento y marca de revocación. El botón **Cerrar sesión** solicita a la API revocar el token antes de limpiar el estado local; las peticiones posteriores con ese token reciben `401`. La migración `004_sesiones_ingreso.sql` se aplica al iniciar la API. Esto corresponde a autenticación del software y no a las sesiones académicas de tutorías o monitorías.
+
+El cambio de contraseña conserva la sesión actual y revoca las demás, además de cualquier selección de rol pendiente. El restablecimiento administrativo y la exportación de claves temporales revocan todos los tokens activos o preliminares de las cuentas afectadas.
+
+Cada inicio correcto actualiza `Credencial.ultimo_acceso`. Las respuestas de autenticación incluyen `expiresIn` calculado a partir del TTL configurado para el token.
+
+Los JWT del navegador se conservan en `sessionStorage`: siguen disponibles al recargar la pestaña y se descartan al cerrarla. La aplicación elimina las copias de esos tokens que versiones anteriores dejaron en `localStorage`; el correo recordado permanece como preferencia independiente.
+
+En cuentas con varios roles, el token preliminar para entrar tiene vigencia breve y solo se puede usar una vez. Después, el cambio de rol requiere el token de acceso actual y rota la sesión, revocando el token anterior. Salir desde el selector también revoca el token preliminar. Las migraciones `004_sesiones_ingreso.sql` y `005_sesiones_preautenticacion.sql` crean las tablas separadas para ambos estados de autenticación.
+
+El login limita cinco intentos fallidos por combinación de IP/correo durante 15 minutos y responde `429` con `Retry-After`. El contador vive en memoria del proceso API; si el despliegue usa varias réplicas, debe trasladarse a un almacén compartido para aplicar el límite globalmente.

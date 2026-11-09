@@ -332,3 +332,21 @@ Los reportes Enviados, Aprobados o Entregados permanecen como historial de solo 
 ### Prueba de creación de disponibilidad
 
 El formulario ahora llama `POST /tutor/availability` para un bloque nuevo; `PATCH /tutor/availability/{id}` se reserva para IDs existentes mayores que cero. Se reprodujo el guardado con la sesión y asignación activas del tutor, y se confirmó la lectura del bloque en `GET /tutor/availability`: ID `19`, lunes 08:00–09:00, modalidad Presencial, asignatura Matemáticas básicas. Es un bloque semanal provisional guardado en MariaDB local.
+
+### Revocación de sesiones de ingreso
+
+Cada token de acceso se registra en `SesionIngreso` usando el `jti` del JWT. `GET /auth/me` y las rutas protegidas verifican que el registro exista, siga vigente y no esté revocado. `POST /auth/logout` actualiza `revocada_en`; desde ese momento el mismo token responde `401 SESSION_REVOKED`. La migración idempotente `database/migrations/004_sesiones_ingreso.sql` crea la tabla al iniciar la API. La sesión de autenticación es distinta de `Sesion`, que representa tutorías/monitorías.
+
+**Prueba funcional:** una cuenta activa completó login y selección de rol cuando correspondía; su token fue aceptado antes del cierre, logout respondió `204` y el mismo token fue rechazado después con `401`. No se imprimieron credenciales ni token en la salida de la prueba.
+
+Al cambiar la contraseña, se revocan las otras sesiones de ingreso y las selecciones de rol pendientes, conservando la de la solicitud para permitir continuar en la aplicación. El restablecimiento administrativo y la generación de claves temporales revocan todos los tokens activos y preliminares del usuario. Se comprobó el comportamiento con filas temporales dentro de una transacción revertida.
+
+El login exitoso escribe `Credencial.ultimo_acceso`. `LoginResponse.expiresIn` informa los segundos derivados de `ACCESS_TOKEN_TTL`, en lugar de un valor fijo o ausente.
+
+El frontend guarda los tokens de acceso y preautenticación en `sessionStorage`, para mantener la sesión al recargar y eliminar esos valores al cerrar la pestaña. En la actualización también limpia las claves JWT anteriores de `localStorage`.
+
+`POST /auth/select-role` consume el token preliminar una sola vez; su estado se registra en `SesionPreAutenticacion` y se invalida al elegir rol o cancelar. `POST /auth/change-role` exige un Bearer activo, crea el token para el rol elegido y revoca el token anterior. `POST /auth/cancel-role-selection` revoca el token mientras el usuario sigue en el selector. El pretoken emitido al iniciar con varios roles vence según `PRE_AUTH_TOKEN_TTL` (5 minutos por defecto) y no se vuelve a emitir tras seleccionar un rol.
+
+`POST /auth/login` registra fallos consecutivos por cuenta en MariaDB. El tercer y cuarto fallo producen una espera de un minuto cada uno; el quinto suspende la cuenta por 24 horas. Las cuentas de Administrador pueden pedir un código de un solo uso al correo institucional registrado y cambiar su contraseña; las demás cuentas notifican a los administradores desde la pantalla de acceso. El código expira en 10 minutos, permite hasta cinco intentos y se envía como máximo una vez por minuto.
+
+El envío de códigos usa la cuenta Gmail de pruebas `acadexmytsistemas@gmail.com` como remitente, con `smtp.gmail.com` por el puerto 587. Debes definir `SMTP_PASSWORD` en tu `.env` con la contraseña de aplicación de Google; nunca uses la contraseña normal de Gmail. Puedes sobrescribir el remitente y servidor con `SMTP_USER`, `SMTP_FROM` y `SMTP_HOST`. La migración `007_admin_password_reset_codes.sql` se aplica automáticamente al iniciar la API. Sin credencial SMTP válida, la solicitud de recuperación administrativa devuelve un error y no levanta el bloqueo.

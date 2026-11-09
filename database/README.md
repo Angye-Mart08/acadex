@@ -246,3 +246,9 @@ La base contiene una sesión finalizada del tutor con informe Aprobado y no tien
 ### Bloque provisional creado para verificar el horario
 
 El alta se ejecutó con la lógica real de autenticación y disponibilidad del tutor y se verificó mediante una segunda lectura. Se conserva en `Disponibilidad` como ID `19`, asignación `10`, lunes 08:00–09:00, modalidad Presencial, estado Activo. Es un bloque recurrente semanal de demostración; elimínalo desde el módulo Horario si no debe permanecer en los datos locales.
+
+### Tabla de sesiones de autenticación
+
+`migrations/004_sesiones_ingreso.sql` agrega `SesionIngreso` para controlar JWT de acceso: UUID de sesión, propietario, rol, vencimiento y revocación. Se aplica automáticamente al iniciar el API y usa `CREATE TABLE IF NOT EXISTS`, por lo que volver a iniciar no reinicializa ni sobrescribe datos. No modifica `Sesion`, que conserva exclusivamente la agenda académica.
+
+`migrations/005_sesiones_preautenticacion.sql` agrega `SesionPreAutenticacion` para los tokens temporales de selección inicial de rol. El servidor guarda vencimiento y revocación, consume el token una única vez y permite cancelarlo desde la pantalla de selección. El cambio de rol dentro del portal se realiza con una fila de `SesionIngreso` y revoca la fila anterior.

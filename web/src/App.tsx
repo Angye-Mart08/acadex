@@ -10,6 +10,8 @@ import {
   AdminReport,
   ApiError,
   CredentialAccount,
+  LoginLockout,
+  SuspendedAccount,
   DbStatus,
   NotificationItem,
   MonthlyTutorReport,
@@ -25,6 +27,7 @@ import {
   assignRequest as assignRequestApi,
   changePassword,
   cancelTutorRecovery,
+  cancelRoleSelection as cancelRoleSelectionApi,
   completeTutorRecovery,
   createTutorAvailability,
   createTutorRecovery,
@@ -47,6 +50,7 @@ import {
   deleteTutorReport,
   downloadTutorReportAttachment,
   updateTutorAvailability,
+  unlockSuspendedAccount,
   createAcademicPeriod,
   createAdminProgram,
   createAdminFaculty,
@@ -70,6 +74,7 @@ import {
   getCurrentUser,
   getDbStatus,
   listCredentials,
+  listSuspendedAccounts,
   listAdminPeriods,
   listAdminPrograms,
   listAdminFaculties,
@@ -84,6 +89,9 @@ import {
   listUsers as listUsersApi,
   markAssignedRequestAttended,
   login as loginApi,
+  requestPasswordChange as requestPasswordChangeApi,
+  resetAdminPassword as resetAdminPasswordApi,
+  changeActiveRole as changeActiveRoleApi,
   logout as logoutApi,
   resetCredential,
   selectRole as selectRoleApi,
@@ -105,6 +113,7 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  Copy,
   Clock3,
   Database,
   Eye,
@@ -269,13 +278,14 @@ function App() {
   const [authenticated, setAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [selectedRole, setSelectedRole] = useState<Role | null>(null)
-  const [accessToken, setAccessToken] = useState(() => window.localStorage.getItem(accessTokenStorageKey) ?? '')
-  const [roleToken, setRoleToken] = useState(() => window.localStorage.getItem(roleTokenStorageKey) ?? '')
+  const [accessToken, setAccessToken] = useState(() => window.sessionStorage.getItem(accessTokenStorageKey) ?? '')
+  const [roleToken, setRoleToken] = useState(() => window.sessionStorage.getItem(accessTokenStorageKey) ? '' : window.sessionStorage.getItem(roleTokenStorageKey) ?? '')
   const [hydratingSession, setHydratingSession] = useState(true)
   const [sessionVersion, setSessionVersion] = useState(0)
   const [view, setView] = useState<View>('dashboard')
   const [portalView, setPortalView] = useState<PortalView>('inicio')
   const [loginError, setLoginError] = useState('')
+  const [loginLockout, setLoginLockout] = useState<LoginLockout | null>(null)
   const [mobileNav, setMobileNav] = useState(false)
   const [users, setUsers] = useState<User[]>([])
   const [spaces, setSpaces] = useState<Space[]>([])
@@ -289,6 +299,13 @@ function App() {
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
   const activeView = selectedRole === 'Administrador' ? view : portalView
+
+  useEffect(() => {
+    // Retira JWT guardados por versiones anteriores en almacenamiento persistente.
+    window.localStorage.removeItem(accessTokenStorageKey)
+    window.localStorage.removeItem(roleTokenStorageKey)
+    if (window.sessionStorage.getItem(accessTokenStorageKey)) window.sessionStorage.removeItem(roleTokenStorageKey)
+  }, [])
 
   useEffect(() => {
     if (!authenticated || !selectedRole || currentUser?.mustChangePassword) return
@@ -307,8 +324,8 @@ function App() {
         setSelectedRole(user.activeRole ?? (user.roles.length === 1 ? user.roles[0] : null))
       })
       .catch(() => {
-        window.localStorage.removeItem(accessTokenStorageKey)
-        window.localStorage.removeItem(roleTokenStorageKey)
+        window.sessionStorage.removeItem(accessTokenStorageKey)
+        window.sessionStorage.removeItem(roleTokenStorageKey)
         setAccessToken('')
         setRoleToken('')
       })
@@ -367,62 +384,80 @@ function App() {
     const password = String(form.get('password') ?? '')
     try {
       const response = await loginApi(email, password)
+      setLoginLockout(null)
       setCurrentUser(response.user)
       setAuthenticated(true)
       setRoleToken(response.preAuthToken ?? '')
-      if (response.preAuthToken) window.localStorage.setItem(roleTokenStorageKey, response.preAuthToken)
-      else window.localStorage.removeItem(roleTokenStorageKey)
+      if (response.preAuthToken) window.sessionStorage.setItem(roleTokenStorageKey, response.preAuthToken)
+      else window.sessionStorage.removeItem(roleTokenStorageKey)
       setSelectedRole(response.activeRole ?? null)
       if (response.accessToken) {
         setAccessToken(response.accessToken)
-        window.localStorage.setItem(accessTokenStorageKey, response.accessToken)
+        window.sessionStorage.setItem(accessTokenStorageKey, response.accessToken)
       }
       setLoginError('')
     } catch (error) {
+      if (error instanceof ApiError && error.lockout) setLoginLockout(error.lockout)
       setLoginError(error instanceof ApiError ? error.message : 'No fue posible iniciar sesión.')
     }
   }
 
+  const handlePasswordChangeRequest = async (email: string) => {
+    const response = await requestPasswordChangeApi(email)
+    return response.message
+  }
+
+  const handleAdminPasswordReset = async (input: { email: string; code: string; newPassword: string; confirmPassword: string }) => {
+    await resetAdminPasswordApi(input)
+  }
+
   const handleRoleSelect = async (role: Role) => {
-    if (!roleToken) {
+    if (!roleToken && !accessToken) {
       setLoginError('La selección de rol expiró. Inicia sesión nuevamente.')
       return
     }
     try {
-      const response = await selectRoleApi(roleToken, role)
+      const response = roleToken
+        ? await selectRoleApi(roleToken, role)
+        : await changeActiveRoleApi(accessToken, role)
       if (!response.accessToken) throw new Error('La API no devolvió el token de acceso.')
       setCurrentUser(response.user)
       setSelectedRole(response.activeRole ?? role)
       setAccessToken(response.accessToken)
-      if (response.preAuthToken) {
-        setRoleToken(response.preAuthToken)
-        window.localStorage.setItem(roleTokenStorageKey, response.preAuthToken)
-      }
-      window.localStorage.setItem(accessTokenStorageKey, response.accessToken)
+      setRoleToken('')
+      window.sessionStorage.removeItem(roleTokenStorageKey)
+      window.sessionStorage.setItem(accessTokenStorageKey, response.accessToken)
       setLoginError('')
     } catch (error) {
       setLoginError(error instanceof ApiError ? error.message : 'No fue posible seleccionar el rol.')
     }
   }
 
-  const logout = () => {
-    if (accessToken) void logoutApi(accessToken).catch(() => undefined)
-    setAuthenticated(false)
-    setCurrentUser(null)
-    setSelectedRole(null)
-    setAccessToken('')
-    setPeriods([])
-    setPortalSessions([])
-    setAvailability([])
-    setRoleToken('')
-    window.localStorage.removeItem(accessTokenStorageKey)
-    window.localStorage.removeItem(roleTokenStorageKey)
-    setView('dashboard')
-    setPortalView('inicio')
+  const logout = async () => {
+    try {
+      if (accessToken) await logoutApi(accessToken)
+      else if (roleToken) await cancelRoleSelectionApi(roleToken)
+    } catch {
+      // La interfaz siempre debe permitir salir; si la API no está disponible,
+      // el token local se elimina y expirará según su TTL.
+    } finally {
+      setAuthenticated(false)
+      setCurrentUser(null)
+      setSelectedRole(null)
+      setAccessToken('')
+      setPeriods([])
+      setPortalSessions([])
+      setAvailability([])
+      setRoleToken('')
+      window.sessionStorage.removeItem(accessTokenStorageKey)
+      window.sessionStorage.removeItem(roleTokenStorageKey)
+      setView('dashboard')
+      setPortalView('inicio')
+    }
   }
 
   if (hydratingSession) return <><div className="session-loading">Validando sesión...</div><NoticeHost /></>
-  if (!authenticated || !currentUser) return <><LoginPage onSubmit={handleLogin} error={loginError} /><NoticeHost /></>
+  if (!authenticated || !currentUser) return <><LoginPage onSubmit={handleLogin} error={loginError} lockout={loginLockout} onEmailChange={() => { setLoginError(''); setLoginLockout(null) }} onRequestPasswordChange={handlePasswordChangeRequest} onAdminPasswordReset={handleAdminPasswordReset} /><NoticeHost /></>
 
   if (!selectedRole) return <><RoleSelector user={currentUser} onSelect={(role) => { void handleRoleSelect(role); setPortalView('inicio') }} onLogout={logout} error={loginError} /><NoticeHost /></>
 
@@ -492,10 +527,64 @@ function FirstPasswordChange({ accessToken, onLogout, onComplete }: { accessToke
   return <div className="role-selector-backdrop"><section className="role-selector-card" role="dialog" aria-modal="true" aria-labelledby="first-password-title"><div className="role-selector-header"><div><span className="eyebrow">Actualización de seguridad</span><h2 id="first-password-title">Crea tu contraseña personal</h2><p>Este acceso usa una clave temporal. Cámbiala antes de continuar.</p></div></div><form className="portal-form" onSubmit={submit}><label>Contraseña temporal o actual<input type="password" required autoComplete="current-password" value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<div className="role-selector-actions"><button type="button" className="secondary-button" onClick={onLogout}>Cerrar sesión</button><button type="submit" className="primary-button" disabled={saving}>{saving ? 'Guardando...' : 'Guardar contraseña'} <ArrowRight size={17} /></button></div></form></section></div>
 }
 
-function LoginPage({ onSubmit, error }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; error: string }) {
+function LoginPage({ onSubmit, error, lockout, onEmailChange, onRequestPasswordChange, onAdminPasswordReset }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; error: string; lockout: LoginLockout | null; onEmailChange: () => void; onRequestPasswordChange: (email: string) => Promise<string>; onAdminPasswordReset: (input: { email: string; code: string; newPassword: string; confirmPassword: string }) => Promise<void> }) {
   const [showPassword, setShowPassword] = useState(false)
   const [email, setEmail] = useState(() => window.localStorage.getItem('acadex:remembered-email') ?? '')
   const [rememberEmail, setRememberEmail] = useState(() => Boolean(window.localStorage.getItem('acadex:remembered-email')))
+  const [remainingSeconds, setRemainingSeconds] = useState(0)
+  const [requestingChange, setRequestingChange] = useState(false)
+  const [requestMessage, setRequestMessage] = useState('')
+  const [resetCodeRequested, setResetCodeRequested] = useState(false)
+  const [resetCode, setResetCode] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [resetError, setResetError] = useState('')
+
+  useEffect(() => {
+    setRemainingSeconds(lockout?.retryAfterSeconds ?? 0)
+    if (!lockout?.retryAfterSeconds) return
+    const timer = window.setInterval(() => setRemainingSeconds((seconds) => Math.max(0, seconds - 1)), 1000)
+    return () => window.clearInterval(timer)
+  }, [lockout?.retryAfterSeconds, lockout?.type, lockout?.attempts])
+
+  const formatRemaining = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const rest = seconds % 60
+    return [hours, minutes, rest].map((value) => String(value).padStart(2, '0')).join(':')
+  }
+
+  const requestPasswordHelp = async () => {
+    setRequestingChange(true)
+    setRequestMessage('')
+    setResetError('')
+    try {
+      const message = await onRequestPasswordChange(email)
+      if (lockout?.canResetWithCode) {
+        setResetCodeRequested(true)
+        setRequestMessage('Si la cuenta cumple los requisitos, enviamos un código al correo institucional registrado. Revisa tu bandeja de entrada.')
+      } else setRequestMessage(message)
+    } catch (error) { setRequestMessage(error instanceof ApiError ? error.message : 'No fue posible enviar la solicitud.') }
+    finally { setRequestingChange(false) }
+  }
+
+  const submitPasswordReset = async () => {
+    setResetError('')
+    if (!/^\d{6}$/.test(resetCode)) { setResetError('Escribe el código de seis dígitos que recibiste.'); return }
+    if (newPassword.length < 8) { setResetError('La nueva contraseña debe tener al menos 8 caracteres.'); return }
+    if (newPassword !== confirmNewPassword) { setResetError('La nueva contraseña y su confirmación no coinciden.'); return }
+    setRequestingChange(true)
+    try {
+      await onAdminPasswordReset({ email, code: resetCode, newPassword, confirmPassword: confirmNewPassword })
+      setRequestMessage('Contraseña actualizada. Ya puedes iniciar sesión con tu nueva contraseña.')
+      setResetCodeRequested(false)
+      setResetCode('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+      setRemainingSeconds(0)
+    } catch (error) { setResetError(error instanceof ApiError ? error.message : 'No fue posible cambiar la contraseña.') }
+    finally { setRequestingChange(false) }
+  }
 
   const submitLogin = (event: FormEvent<HTMLFormElement>) => {
     const submittedEmail = String(new FormData(event.currentTarget).get('email') ?? '').trim()
@@ -531,11 +620,12 @@ function LoginPage({ onSubmit, error }: { onSubmit: (event: FormEvent<HTMLFormEl
             <p>Sistema de Gestión de Monitorías y Tutorías Académicas.</p>
           </div>
           <form className="login-form" onSubmit={submitLogin}>
-            <label>Correo institucional<div className="login-input"><Mail size={18} /><input name="email" type="email" pattern=".+@unitropico[.]edu[.]co" title="Usa tu correo institucional @unitropico.edu.co." placeholder="nombre@unitropico.edu.co" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></label>
+            <label>Correo institucional<div className="login-input"><Mail size={18} /><input name="email" type="email" pattern=".+@unitropico[.]edu[.]co" title="Usa tu correo institucional @unitropico.edu.co." placeholder="nombre@unitropico.edu.co" autoComplete="username" value={email} onChange={(event) => { setEmail(event.target.value); onEmailChange(); setRequestMessage(''); setResetCodeRequested(false); setResetCode('') }} required /></div></label>
             <label>Contraseña<div className="password-field login-input"><LockKeyhole size={18} /><input name="password" type={showPassword ? 'text' : 'password'} placeholder="Ingresa tu contraseña" autoComplete="current-password" minLength={1} maxLength={72} required /><button type="button" aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
             <div className="form-row"><label className="check-label"><input type="checkbox" checked={rememberEmail} onChange={(event) => setRememberEmail(event.target.checked)} /> <span>Recordarme</span></label></div>
-            {error && <div className="form-error"><CircleAlert size={16} />{error}</div>}
-            <button className="primary-button login-button" type="submit">Iniciar sesión <ArrowRight size={18} /></button>
+            {error && !(lockout && remainingSeconds === 0) && <div className="form-error"><CircleAlert size={16} />{error}</div>}
+            {lockout && <div className="login-lockout-notice" role="status"><strong>{lockout.type === 'suspension24h' ? 'Cuenta suspendida temporalmente' : 'Pausa de seguridad'}</strong><span>{remainingSeconds > 0 ? `Podrás volver a intentar en ${formatRemaining(remainingSeconds)}.` : 'Ya puedes volver a intentar iniciar sesión.'}</span>{lockout.type === 'suspension24h' && remainingSeconds > 0 && <button className="secondary-button" type="button" onClick={() => void requestPasswordHelp()} disabled={requestingChange || !/.+@unitropico\.edu\.co$/i.test(email)}>{requestingChange ? 'Enviando...' : lockout.canResetWithCode ? 'Enviar código para cambiar mi contraseña' : 'Notificar al administrador para cambiar mi contraseña'}</button>}{requestMessage && <small>{requestMessage}</small>}{resetCodeRequested && lockout.canResetWithCode && <div className="admin-reset-code-form"><label>Código de 6 dígitos<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" /></label><label>Nueva contraseña<input type="password" autoComplete="new-password" minLength={8} maxLength={72} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><label>Confirmar nueva contraseña<input type="password" autoComplete="new-password" minLength={8} maxLength={72} value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} /></label>{resetError && <small className="admin-reset-error" role="alert">{resetError}</small>}<button className="primary-button" type="button" disabled={requestingChange} onClick={() => void submitPasswordReset()}>{requestingChange ? 'Actualizando...' : 'Verificar código y cambiar contraseña'}</button></div>}</div>}
+            <button className="primary-button login-button" type="submit" disabled={lockout?.type === 'espera' && remainingSeconds > 0}>Iniciar sesión <ArrowRight size={18} /></button>
           </form>
           <p className="login-note">Al continuar, accederás con tus credenciales institucionales.</p>
           <div className="login-footer-quote">“Juntos construimos más oportunidades”</div>
@@ -2019,15 +2109,58 @@ function AcademicPeriodsPanel({ accessToken }: { accessToken: string }) {
   return <section className="panel form-panel settings-panel"><div className="panel-heading"><div><h3>Periodos académicos</h3><p>CRUD administrativo. Los periodos vinculados a solicitudes, horarios o asignaciones no se pueden eliminar.</p></div><CalendarDays size={20} /></div>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<form className="settings-form" onSubmit={save}><label>Nombre<input required minLength={4} maxLength={20} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="2026-2" /></label><div className="form-columns"><label>Fecha inicial<input type="date" required value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label><label>Fecha final<input type="date" required value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.target.value })} /></label><label>Estado<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as AcademicPeriod['estado'] })}><option>Planeado</option><option>Activo</option><option>Finalizado</option></select></label></div><div className="modal-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Crear periodo'}</button>{editingId && <button type="button" className="secondary-button" onClick={cancelEdit}>Cancelar edición</button>}</div></form><div className="table-scroll"><table><thead><tr><th>PERIODO</th><th>VIGENCIA</th><th>ESTADO</th><th /></tr></thead><tbody>{periods.map((period) => <tr key={period.id}><td><strong>{period.nombre}</strong></td><td>{period.startDate} — {period.endDate}</td><td>{period.estado}</td><td className="align-right"><button className="row-action" onClick={() => edit(period)}>Editar</button><button className="delete-action" onClick={() => void remove(period)} title="Eliminar periodo"><Trash2 size={16} /></button></td></tr>)}{!periods.length && <tr><td colSpan={4}>{loading ? 'Cargando periodos...' : 'No hay periodos registrados.'}</td></tr>}</tbody></table></div></section>
 }
 
+function SuspendedAccountsPanel({ accessToken }: { accessToken: string }) {
+  const [accounts, setAccounts] = useState<SuspendedAccount[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState<number | null>(null)
+  const load = async () => {
+    setLoading(true)
+    try { setAccounts(await listSuspendedAccounts(accessToken)) }
+    catch (error) { window.dispatchEvent(new CustomEvent('acadex:notice', { detail: error instanceof ApiError ? error.message : 'No se pudieron consultar las cuentas suspendidas.' })) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { void load() }, [accessToken])
+  const unlock = async (account: SuspendedAccount) => {
+    if (!window.confirm(`¿Levantar la suspensión de 24 horas para ${account.name}?`)) return
+    setBusyId(account.id)
+    try { await unlockSuspendedAccount(accessToken, account.id); await load() }
+    catch (error) { window.alert(error instanceof ApiError ? error.message : 'No se pudo levantar la suspensión.') }
+    finally { setBusyId(null) }
+  }
+  return <section className="panel table-panel suspended-accounts-panel"><div className="panel-heading"><div><h3>Cuentas suspendidas</h3><p>Suspensiones por cinco intentos fallidos. Puedes levantarlas antes de que terminen las 24 horas.</p></div><ShieldCheck size={20}/></div><div className="table-scroll"><table><thead><tr><th>CUENTA</th><th>INTENTOS</th><th>FIN DE SUSPENSIÓN</th><th>SOLICITUD</th><th/></tr></thead><tbody>{accounts.map((account)=><tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td>{account.failedAttempts} de 5</td><td>{new Date(account.lockedUntil).toLocaleString('es-CO',{dateStyle:'short',timeStyle:'short'})}</td><td>{account.passwordChangeRequested?'Solicitó cambio de contraseña':'—'}</td><td className="align-right"><button className="row-action" type="button" disabled={busyId===account.id} onClick={()=>void unlock(account)}>{busyId===account.id?'Procesando…':'Levantar suspensión'}</button></td></tr>)}{!accounts.length&&<tr><td colSpan={5}>{loading?'Cargando cuentas…':'No hay cuentas suspendidas.'}</td></tr>}</tbody></table></div></section>
+}
+
 function ConfigurationView({ accessToken, currentUser }: { accessToken: string; currentUser: User }) {
   const [role, setRole] = useState('')
   const [accounts, setAccounts] = useState<CredentialAccount[]>([])
+  const [resetTarget, setResetTarget] = useState<CredentialAccount | null>(null)
+  const [temporaryPassword, setTemporaryPassword] = useState<{ account: CredentialAccount; value: string } | null>(null)
+  const [resetError, setResetError] = useState('')
+  const [resetBusy, setResetBusy] = useState(false)
+  const [passwordCopied, setPasswordCopied] = useState(false)
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
   const [loading, setLoading] = useState(false)
   const [exportingSecrets, setExportingSecrets] = useState(false)
   const loadAccounts = async (selectedRole = role) => { setLoading(true); try { setAccounts(await listCredentials(accessToken, selectedRole)) } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cargar las credenciales.') } finally { setLoading(false) } }
   useEffect(() => { void loadAccounts('') }, [accessToken])
-  const reset = async (account: CredentialAccount) => { if(account.id===currentUser.id)return; if (!window.confirm(`¿Generar una clave temporal nueva para ${account.name}? Revocará su contraseña actual y deberá cambiarla al iniciar sesión.`)) return; try { const result = await resetCredential(accessToken, account.id); window.alert(`Clave temporal de un solo uso:\n\n${result.temporaryPassword}\n\nEntrégala por un canal seguro. Se exigirá cambiarla al iniciar sesión.`) } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible restablecer la credencial.') } }
+  const reset = (account: CredentialAccount) => { if (account.id === currentUser.id) return; setResetError(''); setResetTarget(account) }
+  const confirmReset = async () => {
+    if (!resetTarget) return
+    setResetBusy(true)
+    setResetError('')
+    try {
+      const result = await resetCredential(accessToken, resetTarget.id)
+      setTemporaryPassword({ account: resetTarget, value: result.temporaryPassword })
+      setPasswordCopied(false)
+      setResetTarget(null)
+    } catch (error) { setResetError(error instanceof ApiError ? error.message : 'No fue posible restablecer la credencial.') }
+    finally { setResetBusy(false) }
+  }
+  const copyTemporaryPassword = async () => {
+    if (!temporaryPassword) return
+    try { await navigator.clipboard.writeText(temporaryPassword.value); setPasswordCopied(true) }
+    catch { setPasswordCopied(false) }
+  }
   const savePassword = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { await changePassword(accessToken, passwords); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }); window.alert('Contraseña actualizada correctamente.') } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cambiar la contraseña.') } }
   const exportCredentials = () => downloadCsv(`cuentas${role ? `-${role.toLowerCase()}` : ''}.csv`, accounts.map((account) => ({ nombre: account.name, codigo: account.code, correo: account.email, roles: account.roles.join(' / '), estado: account.status })))
   const eligibleForSecretExport = accounts.filter((account) => account.status === 'Activo' && account.id !== currentUser.id && Boolean(role) && account.roles.includes(role as Role))
@@ -2044,7 +2177,9 @@ function ConfigurationView({ accessToken, currentUser }: { accessToken: string; 
     } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible generar la exportación segura.') }
     finally { setExportingSecrets(false) }
   }
-  return <><PageHeader eyebrow="Administración / Configuración" title="Configuración y credenciales" description="Gestiona el acceso de usuarios y la operación académica del sistema." action={<button className="secondary-button" onClick={exportCredentials} disabled={!accounts.length}><Download size={17} /> Exportar listado</button>} /><section className="configuration-section"><header className="configuration-section-heading"><span>OPERACIÓN ACADÉMICA</span><h2>Supervisión y periodos</h2><p>Estado de MariaDB y vigencia del calendario académico.</p></header><div className="configuration-stack"><DatabaseControlPanel accessToken={accessToken} /><AcademicPeriodsPanel accessToken={accessToken} /></div></section><section className="configuration-section"><header className="configuration-section-heading"><span>SEGURIDAD</span><h2>Acceso y credenciales</h2><p>Consulta cuentas, restablece claves temporales y actualiza tu contraseña.</p></header><div className="configuration-grid"><section className="panel table-panel"><div className="panel-heading"><div><h3>Credenciales de usuarios</h3><p>Las claves guardadas no se muestran. Solo se exportan claves temporales de un uso.</p></div><KeyRound size={20} /></div><div className="table-toolbar config-toolbar"><select value={role} onChange={(event) => { setRole(event.target.value); void loadAccounts(event.target.value) }}><option value="">Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Tutor</option><option>Monitor</option></select><button className="secondary-button filter-button" onClick={() => void loadAccounts()}><RefreshCw size={16} /> {loading ? 'Cargando...' : 'Actualizar'}</button></div><div className="credential-export-panel"><div><strong>Exportar claves temporales</strong><span>Selecciona un rol. Las claves actuales se revocan y se exige cambiarlas en el primer acceso.</span></div><button className="secondary-button" type="button" onClick={() => void exportTemporaryPasswords()} disabled={!role || loading || !eligibleForSecretExport.length || exportingSecrets}>{exportingSecrets ? 'Generando...' : `Generar CSV (${eligibleForSecretExport.length})`} <Download size={16} /></button></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CLAVE</th><th>ESTADO</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td><div className="user-roles">{account.roles.map((item) => <span className="role-pill" key={item}>{item}</span>)}</div></td><td><code className="credential-code">Protegida</code></td><td>{account.status}</td><td className="align-right"><button className="row-action" disabled={account.id===currentUser.id || account.status!=='Activo'} title={account.id===currentUser.id ? 'Usa el formulario Cambiar mi contraseña' : 'Generar una clave temporal de un solo uso'} onClick={() => void reset(account)}>Generar clave temporal</button></td></tr>)}</tbody></table></div></section><section className="panel form-panel"><div className="panel-heading"><div><h3>Cambiar mi contraseña</h3><p>Usa una contraseña nueva de 8 a 72 caracteres.</p></div><LockKeyhole size={20} /></div><form className="portal-form" onSubmit={savePassword}><label>Contraseña actual<input type="password" required value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label><button className="primary-button" type="submit"><KeyRound size={17} /> Cambiar contraseña</button></form></section></div></section></>
+  return <><PageHeader eyebrow="Administración / Configuración" title="Configuración y credenciales" description="Gestiona el acceso de usuarios y la operación académica del sistema." action={<button className="secondary-button" onClick={exportCredentials} disabled={!accounts.length}><Download size={17} /> Exportar listado</button>} /><section className="configuration-section"><header className="configuration-section-heading"><span>OPERACIÓN ACADÉMICA</span><h2>Supervisión y periodos</h2><p>Estado de MariaDB y vigencia del calendario académico.</p></header><div className="configuration-stack"><DatabaseControlPanel accessToken={accessToken} /><AcademicPeriodsPanel accessToken={accessToken} /></div></section><section className="configuration-section"><header className="configuration-section-heading"><span>SEGURIDAD</span><h2>Acceso y credenciales</h2><p>Consulta cuentas, restablece claves temporales y actualiza tu contraseña.</p></header><SuspendedAccountsPanel accessToken={accessToken} /><div className="configuration-grid"><section className="panel table-panel"><div className="panel-heading"><div><h3>Credenciales de usuarios</h3><p>Las claves guardadas no se muestran. Solo se exportan claves temporales de un uso.</p></div><KeyRound size={20} /></div><div className="table-toolbar config-toolbar"><select value={role} onChange={(event) => { setRole(event.target.value); void loadAccounts(event.target.value) }}><option value="">Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Tutor</option><option>Monitor</option></select><button className="secondary-button filter-button" onClick={() => void loadAccounts()}><RefreshCw size={16} /> {loading ? 'Cargando...' : 'Actualizar'}</button></div><div className="credential-export-panel"><div><strong>Exportar claves temporales</strong><span>Selecciona un rol. Las claves actuales se revocan y se exige cambiarlas en el primer acceso.</span></div><button className="secondary-button" type="button" onClick={() => void exportTemporaryPasswords()} disabled={!role || loading || !eligibleForSecretExport.length || exportingSecrets}>{exportingSecrets ? 'Generando...' : `Generar CSV (${eligibleForSecretExport.length})`} <Download size={16} /></button></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CLAVE</th><th>ESTADO</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td><div className="user-roles">{account.roles.map((item) => <span className="role-pill" key={item}>{item}</span>)}</div></td><td><code className="credential-code">Protegida</code></td><td>{account.status}</td><td className="align-right"><button className="row-action" disabled={account.id===currentUser.id || account.status!=='Activo'} title={account.id===currentUser.id ? 'Usa el formulario Cambiar mi contraseña' : 'Generar una clave temporal de un solo uso'} onClick={() => void reset(account)}>Generar clave temporal</button></td></tr>)}</tbody></table></div></section><section className="panel form-panel"><div className="panel-heading"><div><h3>Cambiar mi contraseña</h3><p>Usa una contraseña nueva de 8 a 72 caracteres.</p></div><LockKeyhole size={20} /></div><form className="portal-form" onSubmit={savePassword}><label>Contraseña actual<input type="password" required value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label><button className="primary-button" type="submit"><KeyRound size={17} /> Cambiar contraseña</button></form></section></div></section>
+{resetTarget && <Modal title="Restablecer contraseña" subtitle={`Se generará una clave temporal para ${resetTarget.name}.`} onClose={() => { if (!resetBusy) setResetTarget(null) }}><div className="credential-reset-dialog"><div className="credential-reset-notice"><ShieldCheck size={20}/><p>La contraseña actual dejará de funcionar. En el próximo inicio de sesión, la persona deberá cambiar esta clave temporal por una propia.</p></div>{resetError && <div className="form-error"><CircleAlert size={16}/>{resetError}</div>}<div className="modal-actions"><button type="button" className="secondary-button" autoFocus disabled={resetBusy} onClick={() => setResetTarget(null)}>Cancelar</button><button type="button" className="primary-button" disabled={resetBusy} onClick={() => void confirmReset()}>{resetBusy ? 'Generando…' : 'Generar clave temporal'}</button></div></div></Modal>}
+{temporaryPassword && <Modal title="Clave temporal generada" subtitle={`Cuenta de ${temporaryPassword.account.name}`} onClose={() => setTemporaryPassword(null)}><div className="credential-reset-dialog"><div className="credential-temporary-password"><span>CLAVE TEMPORAL · USO INICIAL</span><code>{temporaryPassword.value}</code></div><div className="credential-reset-notice"><ShieldCheck size={20}/><p>Comparte esta clave por un canal seguro. La persona deberá cambiarla al iniciar sesión. Esta clave solo se muestra ahora.</p></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => void copyTemporaryPassword()}><Copy size={16}/>{passwordCopied ? 'Copiada' : 'Copiar clave'}</button><button type="button" className="primary-button" onClick={() => setTemporaryPassword(null)}>Listo</button></div></div></Modal>}</>
 }
 
 function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {

@@ -193,3 +193,15 @@ Los informes Enviados, Aprobados y Entregados son historial de solo lectura. El 
 ## Alta y edición de disponibilidad
 
 La interfaz distingue alta y edición por el ID del bloque, no por la presencia del objeto de formulario: el ID `0` es el marcador de un alta y no debe enviarse en la ruta PATCH. La creación usa POST; edición requiere un identificador persistido mayor que cero. El primer bloque de demostración se conserva activo para que el tutor pueda verificar el calendario y se identifica como provisional en la documentación del proyecto.
+
+## Sesiones de autenticación revocables
+
+Los JWT de acceso se mantienen como Bearer tokens, pero cada token emitido se registra por su `jti` en `SesionIngreso`. Las rutas protegidas comprueban ese registro y `POST /auth/logout` lo revoca, dando cierre efectivo sin confundirlo con la entidad académica `Sesion`. El registro persistente permite revocación inmediata incluso tras reiniciar la API. Si no hay conexión al API al salir, solo se limpia el token del navegador y la expiración JWT sigue siendo el límite remoto.
+
+Un cambio de contraseña mantiene el JWT usado en la solicitud, pero revoca los demás de ese usuario. Restablecimientos administrativos y generación de claves temporales revocan todas sus sesiones para impedir que una credencial anterior conserve acceso.
+
+La revocación por cambio de clave incluye también los tokens preliminares de selección de rol (`SesionPreAutenticacion`); así no se puede completar un login iniciado con la contraseña anterior.
+
+La selección de rol inicial usa un token con estado persistido, vencimiento corto y consumo único. La navegación de cambio de rol se autoriza con la sesión de acceso vigente y rota el token, evitando mantener una credencial de selección reutilizable después del logout. El token preliminar puede revocarse directamente desde el selector.
+
+El endpoint de login limita fallos por combinación de IP y correo (cinco cada 15 minutos). El contador se mantiene en memoria para la ejecución local de una instancia. Si se escala horizontalmente, la implementación debe cambiar a un store compartido y configurarse con la IP real del proxy de confianza.

@@ -212,12 +212,14 @@ CREATE TABLE Estudiante(
 
     codigo_estudiantil VARCHAR(30) NOT NULL UNIQUE,
 
-    semestre TINYINT NOT NULL CONSTRAINT chk_estudiante_semestre CHECK (semestre BETWEEN 1 AND 12),
+    semestre TINYINT NOT NULL,
 
     estado ENUM(
         'Activo',
         'Inactivo'
     ) NOT NULL DEFAULT 'Activo',
+
+    CONSTRAINT chk_estudiante_semestre CHECK (semestre BETWEEN 1 AND 12),
 
     CONSTRAINT fk_estudiante_usuario
 
@@ -599,7 +601,7 @@ CREATE TABLE AsignacionAcademica(
 
     id_periodo INT NOT NULL,
 
-    horas_semanales TINYINT NOT NULL CONSTRAINT chk_asignacion_horas CHECK (horas_semanales BETWEEN 1 AND 60),
+    horas_semanales TINYINT NOT NULL,
 
     fecha_inicio DATE NOT NULL,
 
@@ -612,6 +614,8 @@ CREATE TABLE AsignacionAcademica(
         'Cancelada'
 
     ) NOT NULL DEFAULT 'Activa',
+
+    CONSTRAINT chk_asignacion_horas CHECK (horas_semanales BETWEEN 1 AND 60),
 
     CONSTRAINT fk_asignacion_usuario
 
@@ -689,7 +693,7 @@ CREATE TABLE Espacio(
 
     observaciones VARCHAR(300),
 
-    capacidad INT NOT NULL CONSTRAINT chk_espacio_capacidad CHECK (capacidad BETWEEN 1 AND 1000),
+    capacidad INT NOT NULL,
 
     tipo ENUM(
 
@@ -709,7 +713,9 @@ CREATE TABLE Espacio(
         'Activo',
         'Inactivo'
 
-    ) NOT NULL DEFAULT 'Activo'
+    ) NOT NULL DEFAULT 'Activo',
+
+    CONSTRAINT chk_espacio_capacidad CHECK (capacidad BETWEEN 1 AND 1000)
 
 ) ENGINE=InnoDB;
 

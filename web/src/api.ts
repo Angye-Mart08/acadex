@@ -129,6 +129,7 @@ export type AdminReport = {
 }
 
 export type CredentialAccount = { id: number; code: string; email: string; name: string; status: string; roles: Role[] }
+export type SuspendedAccount = { id: number; email: string; name: string; failedAttempts: number; lockedUntil: string; passwordChangeRequested: boolean }
 export type TemporaryCredentialExport = { generatedAt: string; role: Role; accounts: Array<Pick<CredentialAccount, 'id' | 'code' | 'email' | 'name' | 'roles'> & { temporaryPassword: string }> }
 export type AppSetting = { id: number; clave: string; valor: string; tipo: string; descripcion?: string; updatedAt?: string }
 
@@ -148,16 +149,20 @@ export type LoginResponse = {
   user: ApiUser
 }
 
+export type LoginLockout = { type: 'espera' | 'suspension24h'; retryAfterSeconds: number; attempts: number; canResetWithCode?: boolean }
+
 const explicitApiUrl = import.meta.env.VITE_API_URL ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '') : null
 
 class ApiError extends Error {
   status: number
   code: string
+  lockout?: LoginLockout
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, lockout?: LoginLockout) {
     super(message)
     this.status = status
     this.code = code
+    this.lockout = lockout
   }
 }
 
@@ -203,14 +208,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { code?: string; message?: string; details?: Array<{ path?: Array<string | number>; message?: string }> } | null
+    const body = await response.json().catch(() => null) as { code?: string; message?: string; details?: Array<{ path?: Array<string | number>; message?: string }>; type?: LoginLockout['type']; retryAfterSeconds?: number; attempts?: number; canResetWithCode?: boolean } | null
     const fieldNames: Record<string,string> = { name:'Nombre', roles:'Roles', code:'Código', document:'Documento', email:'Correo', phone:'Número de contacto', credits:'Créditos', capacity:'Capacidad', semester:'Semestre', programId:'Programa', facultyId:'Facultad', weeklyHours:'Horas semanales', subjectIds:'Asignatura', startDate:'Fecha inicial', endDate:'Fecha final', status:'Estado', location:'Ubicación', type:'Tipo' }
     const details = body?.details?.map((issue) => {
       const path = issue.path?.map((part) => fieldNames[String(part)] ?? String(part)).join(' → ')
       return path ? `${path}: ${issue.message ?? 'valor inválido'}` : issue.message
     }).filter(Boolean)
     const message = [body?.message ?? 'La solicitud no pudo ser procesada.', ...(details ?? [])].join(' ')
-    throw new ApiError(response.status, body?.code ?? 'API_ERROR', message)
+    const lockout = body?.type && body.retryAfterSeconds !== undefined && body.attempts !== undefined
+      ? { type: body.type, retryAfterSeconds: body.retryAfterSeconds, attempts: body.attempts, canResetWithCode: body.canResetWithCode }
+      : undefined
+    throw new ApiError(response.status, body?.code ?? 'API_ERROR', message, lockout)
   }
 
   if (response.status === 204) return undefined as T
@@ -223,8 +231,24 @@ export function login(email: string, password: string) {
   return request<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
 }
 
+export function requestPasswordChange(email: string) {
+  return request<{ requested: boolean; message: string }>('/auth/request-password-change', { method: 'POST', body: JSON.stringify({ email }) })
+}
+
+export function resetAdminPassword(input: { email: string; code: string; newPassword: string; confirmPassword: string }) {
+  return request<{ changed: boolean }>('/auth/reset-admin-password', { method: 'POST', body: JSON.stringify(input) })
+}
+
 export function selectRole(preAuthToken: string, role: Role) {
   return request<LoginResponse>('/auth/select-role', { method: 'POST', body: JSON.stringify({ preAuthToken, role }) })
+}
+
+export function cancelRoleSelection(preAuthToken: string) {
+  return request<void>('/auth/cancel-role-selection', { method: 'POST', body: JSON.stringify({ preAuthToken }) })
+}
+
+export function changeActiveRole(accessToken: string, role: Role) {
+  return request<LoginResponse>('/auth/change-role', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify({ role }) }))
 }
 
 export function getCurrentUser(accessToken: string) {
@@ -321,6 +345,14 @@ export function deleteAdminProgram(accessToken: string, id: number) { return req
 
 export function listCredentials(accessToken: string, role = '') {
   return request<CredentialAccount[]>(`/admin/configuration/credentials${role ? `?role=${encodeURIComponent(role)}` : ''}`, authenticatedOptions(accessToken))
+}
+
+export function listSuspendedAccounts(accessToken: string) {
+  return request<SuspendedAccount[]>('/admin/configuration/suspended-accounts', authenticatedOptions(accessToken))
+}
+
+export function unlockSuspendedAccount(accessToken: string, id: number) {
+  return request<{ unlocked: boolean }>(`/admin/configuration/suspended-accounts/${id}/unlock`, authenticatedOptions(accessToken, { method: 'POST' }))
 }
 
 export function resetCredential(accessToken: string, id: number) {

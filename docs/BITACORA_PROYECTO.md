@@ -813,3 +813,41 @@ La causa exacta del `Too small: expected number to be >0` era que el formulario 
 **Prueba funcional:** ejecuté el flujo real de autenticación, consulta de asignación, guardado del servicio de disponibilidad y recarga de horario sin mockear MariaDB. Se creó y se volvió a leer el bloque semanal provisional `Lunes 08:00–09:00 · Presencial · Matemáticas básicas`, ID `19`, para asignación `10`. La cuenta tenía cero bloques antes y uno después. El registro permanece activo en la base local para que se vea en Horario; puede eliminarse desde ese módulo cuando termine la demostración.
 
 **Verificación de código:** build web de producción y typecheck de API correctos. La validación OpenAPI permanece sincronizada; no hubo cambios de rutas en esta corrección. El periodo `2026-1` sigue vencido y no se modificó; por tanto, la creación de solicitudes nuevas seguirá requiriendo registrar las fechas institucionales del periodo vigente.
+
+### Auditoría de autenticación: revocación de logout
+
+Se detectó que el endpoint de cierre respondía `204` sin invalidar el JWT, que permanecía utilizable hasta expirar. Se agregó `SesionIngreso` y la migración idempotente `004_sesiones_ingreso.sql`; cada token lleva un `jti` y la API comprueba su sesión activa antes de autorizar rutas. `POST /auth/logout` registra la revocación, y la interfaz espera la respuesta antes de borrar el estado local. Si la API no responde, la interfaz igualmente permite salir y elimina el token local; el token remoto expira conforme a su TTL.
+
+**Verificación funcional secuencial:** login real contra el servicio de autenticación, aceptación de token, revocación y rechazo del mismo token (`401 SESSION_REVOKED`). También pasaron `api: npm run typecheck`, `web: npm run build` y `git diff --check`. La prueba no expuso secretos ni modificó información académica.
+
+### Revocación de sesiones al cambiar/restablecer credenciales
+
+Se corrigió la persistencia de sesiones previas tras cambiar una contraseña. El cambio personal revoca los demás JWT y mantiene el actual; restablecer la clave de otra cuenta o generar claves temporales en lote revoca todos sus JWT y pretokens pendientes. El cambio de contraseña y la revocación se ejecutan en una transacción.
+
+**Comprobación:** las reglas SQL se ejecutaron contra MariaDB con filas de sesión temporales: se verificó que la sesión actual permaneciera activa, las otras se revocaran y el restablecimiento revocara todas. La transacción se revirtió, sin dejar registros de prueba. Las tablas de preautenticación también se limpian dentro de esas transacciones.
+
+### Metadatos de inicio de sesión
+
+Se detectó que `ultimo_acceso` nunca se escribía al autenticar y que la respuesta no exponía el tiempo real de expiración pese a estar descrito en OpenAPI. El login correcto ahora actualiza la marca temporal (incluida la migración de claves heredadas a bcrypt) y `expiresIn` se calcula con `exp - iat` del JWT firmado.
+
+**Comprobación:** login real exitoso, `ultimo_acceso` cambió y la respuesta devolvió `28800` segundos, coincidentes con el TTL configurado en el entorno. El token de comprobación se revocó inmediatamente. Typecheck API y validación OpenAPI (54 rutas, 74 operaciones) correctos.
+
+### Almacenamiento de tokens en el navegador
+
+Los tokens de ingreso estaban en `localStorage`, persistiendo tras cerrar el navegador. Se migraron acceso y rol preliminar a `sessionStorage`, limpiando las claves JWT históricas de `localStorage`; el correo recordado no se cambia.
+
+**Comprobación:** build de producción TypeScript/Vite exitoso y búsqueda del código confirma que las operaciones de lectura/escritura de ambos JWT usan `sessionStorage`; `localStorage` solo se usa para quitar copias antiguas. Al cerrar la pestaña se pierde el almacenamiento de sesión.
+
+### Selección y cambio de rol vinculados a la sesión
+
+Se eliminó la emisión de pretokens de ocho horas después de elegir rol. El pretoken de selección inicial ahora se registra en `SesionPreAutenticacion`, vence según `PRE_AUTH_TOKEN_TTL` y se consume de forma atómica una sola vez. Si el usuario cancela el selector, se revoca. Para cambiar de rol dentro del portal se agregó `POST /auth/change-role`, que exige el JWT actual, verifica que el rol siga asignado, emite el token nuevo y revoca el anterior.
+
+**Comprobación funcional contra MariaDB:** una cuenta con varios roles inició, seleccionó rol, no pudo reutilizar el pretoken, cambió de rol y perdió el acceso con el token anterior. El token nuevo funcionó y se revocó al salir. También se verificó que cancelar el selector revoca su pretoken. Las migraciones se aplicaron idempotentemente. Typecheck API, build web y OpenAPI válido (56 rutas, 76 operaciones) correctos.
+
+La misma secuencia se comprobó luego por HTTP contra Express: selección `200`, replay del pretoken `401`, cambio de rol `200`, token previo `401`, token nuevo `200`, logout `204` y token revocado `401`; cancelar el pretoken devuelve `204` y luego no se puede reutilizar (`401`).
+
+### Límite de intentos de autenticación
+
+Se añadió limitación de intentos al endpoint de login: cinco errores por combinación de IP/correo en una ventana de 15 minutos activan bloqueo temporal y respuesta `429 AUTH_RATE_LIMITED` con `Retry-After`. El contador guarda únicamente un hash de IP y correo, nunca contraseñas.
+
+**Comprobación por HTTP real:** cinco credenciales incorrectas respondieron `401`; el sexto intento devolvió `429` y `Retry-After: 900`. El límite se mantiene en memoria del proceso API; una instalación con varias réplicas necesitará un almacén compartido.
