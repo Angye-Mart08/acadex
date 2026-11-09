@@ -130,6 +130,7 @@ export type AdminReport = {
 
 export type CredentialAccount = { id: number; code: string; email: string; name: string; status: string; roles: Role[] }
 export type SuspendedAccount = { id: number; email: string; name: string; failedAttempts: number; lockedUntil: string; passwordChangeRequested: boolean }
+export type PasswordChangeRequestHistory = { id: number; userId: number | null; email: string; name: string; requestType: 'AyudaAdministrador' | 'CodigoCorreo'; status: 'Pendiente' | 'Completada'; requestedAt: string; completedAt: string | null; managedBy: string | null }
 export type TemporaryCredentialExport = { generatedAt: string; role: Role; accounts: Array<Pick<CredentialAccount, 'id' | 'code' | 'email' | 'name' | 'roles'> & { temporaryPassword: string }> }
 export type AppSetting = { id: number; clave: string; valor: string; tipo: string; descripcion?: string; updatedAt?: string }
 
@@ -349,6 +350,10 @@ export function listCredentials(accessToken: string, role = '') {
 
 export function listSuspendedAccounts(accessToken: string) {
   return request<SuspendedAccount[]>('/admin/configuration/suspended-accounts', authenticatedOptions(accessToken))
+}
+
+export function listPasswordChangeRequests(accessToken: string) {
+  return request<PasswordChangeRequestHistory[]>('/admin/configuration/password-change-requests', authenticatedOptions(accessToken))
 }
 
 export function unlockSuspendedAccount(accessToken: string, id: number) {

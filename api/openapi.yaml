@@ -528,6 +528,18 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /admin/configuration/password-change-requests:
+    get:
+      tags: [Administración]
+      summary: Consultar historial de solicitudes de cambio de contraseña
+      operationId: listPasswordChangeRequests
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Historial reciente con estado pendiente o completado., content: { application/json: { schema: { type: array, items: { type: object } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /admin/configuration/suspended-accounts/{id}/unlock:
     post:
       tags: [Administración]

@@ -7,7 +7,7 @@ import { AuthError, cancelRoleSelection, changeActiveRole, currentUserFromToken,
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
 import { DataError, cancelTutorRecovery, completeTutorRecovery, createRequest, createTutorAvailability, createTutorRecovery, dashboard, deleteTutorAvailability, deleteTutorReport, getTutorReport, getTutorReportAttachment, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects, listTutorAssignments, listTutorRecoverableSessions, listTutorRecoveries, listTutorReportableSessions, saveTutorReport, submitTutorReport, tutorDashboard, updateTutorAvailability, updateTutorReport } from './data.js'
-import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminFaculty, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, decideTutorRequest, deleteAdminFaculty, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminFaculties, listAdminPeriods, listAdminPrograms, listAdminRequestSlots, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listSettings, listSuspendedAccounts, resetCredential, unlockSuspendedAccount, updateAdminFaculty, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
+import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminFaculty, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, decideTutorRequest, deleteAdminFaculty, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminFaculties, listAdminPeriods, listAdminPrograms, listAdminRequestSlots, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listPasswordChangeRequests, listSettings, listSuspendedAccounts, resetCredential, unlockSuspendedAccount, updateAdminFaculty, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
 import { getMonthlyTutorReport, listNotifications, markAllNotificationsRead, markNotificationRead, saveMonthlyTutorDraft } from './notifications.js'
 
 const app = express()
@@ -282,6 +282,10 @@ router.get('/admin/configuration/credentials', requireSession, requireRole('Admi
 
 router.get('/admin/configuration/suspended-accounts', requireSession, requireRole('Administrador'), async (_req, res, next) => {
   try { res.json(await listSuspendedAccounts()) } catch (error) { next(error) }
+})
+
+router.get('/admin/configuration/password-change-requests', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listPasswordChangeRequests()) } catch (error) { next(error) }
 })
 
 router.post('/admin/configuration/suspended-accounts/:id/unlock', requireSession, requireRole('Administrador'), async (req, res, next) => {

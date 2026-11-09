@@ -1057,6 +1057,19 @@ export async function listSuspendedAccounts(){
   return rows.map((row:any)=>({...row,id:Number(row.id),failedAttempts:Number(row.failedAttempts),passwordChangeRequested:Boolean(row.passwordChangeRequested)}))
 }
 
+export async function listPasswordChangeRequests(){
+  const [rows]=await pool.query(`
+    SELECT s.id_solicitud AS id,s.id_usuario AS userId,s.correo_solicitante AS email,
+           s.nombre_solicitante AS name,s.tipo_solicitud AS requestType,s.estado AS status,
+           DATE_FORMAT(s.solicitada_en,'%Y-%m-%dT%H:%i:%s-05:00') AS requestedAt,
+           DATE_FORMAT(s.completada_en,'%Y-%m-%dT%H:%i:%s-05:00') AS completedAt,
+           CONCAT(g.nombres,' ',g.apellidos) AS managedBy
+      FROM SolicitudCambioClave s
+      LEFT JOIN Usuario g ON g.id_usuario=s.gestionada_por
+     ORDER BY s.solicitada_en DESC,s.id_solicitud DESC`)
+  return rows.map((row:any)=>({...row,id:Number(row.id),userId:row.userId===null?null:Number(row.userId)}))
+}
+
 export async function unlockSuspendedAccount(id:number){
   const [result]=await pool.execute(`
     UPDATE ControlAcceso SET intentos_fallidos=0,bloqueada_hasta=NULL,
@@ -1083,6 +1096,7 @@ export async function resetCredential(id:number,currentUserId?:number){
     await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
     await connection.execute('UPDATE SesionPreAutenticacion SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
     await connection.execute('UPDATE ControlAcceso SET intentos_fallidos=0,bloqueada_hasta=NULL,tipo_bloqueo=NULL,cambio_clave_solicitado_en=NULL WHERE id_usuario=?',[id])
+    await connection.execute(`UPDATE SolicitudCambioClave SET estado='Completada',completada_en=CURRENT_TIMESTAMP,gestionada_por=? WHERE id_usuario=? AND estado='Pendiente'`,[currentUserId??null,id])
     await connection.commit()
     return {id,temporaryPassword}
   }catch(error){await connection.rollback();throw error}finally{connection.release()}

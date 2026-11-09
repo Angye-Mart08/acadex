@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useState } from 'react'
+import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react'
 import {
   AcademicPeriod,
   AdminProgram,
@@ -14,6 +14,7 @@ import {
   SuspendedAccount,
   DbStatus,
   NotificationItem,
+  PasswordChangeRequestHistory,
   MonthlyTutorReport,
   PortalAvailability,
   PortalSession,
@@ -74,6 +75,7 @@ import {
   getCurrentUser,
   getDbStatus,
   listCredentials,
+  listPasswordChangeRequests,
   listSuspendedAccounts,
   listAdminPeriods,
   listAdminPrograms,
@@ -283,6 +285,7 @@ function App() {
   const [hydratingSession, setHydratingSession] = useState(true)
   const [sessionVersion, setSessionVersion] = useState(0)
   const [view, setView] = useState<View>('dashboard')
+  const [credentialFocusRequest, setCredentialFocusRequest] = useState(0)
   const [portalView, setPortalView] = useState<PortalView>('inicio')
   const [loginError, setLoginError] = useState('')
   const [loginLockout, setLoginLockout] = useState<LoginLockout | null>(null)
@@ -299,6 +302,29 @@ function App() {
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
   const activeView = selectedRole === 'Administrador' ? view : portalView
+
+  useEffect(() => {
+    if (view !== 'configuracion' || !credentialFocusRequest) return
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>('.configuration-grid > .table-panel')
+      if (!target) return
+      setCredentialFocusRequest(0)
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target.setAttribute('tabindex', '-1')
+      target.focus({ preventScroll: true })
+      target.classList.add('credential-management-highlight')
+      window.setTimeout(() => target.classList.remove('credential-management-highlight'), 1800)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [view, credentialFocusRequest])
+
+  const navigateAdmin = (nextView: View, target?: 'credentials') => {
+    setView(nextView)
+    setMobileNav(false)
+    if (nextView === 'configuracion' && target === 'credentials') {
+      setCredentialFocusRequest((request) => request + 1)
+    }
+  }
 
   useEffect(() => {
     // Retira JWT guardados por versiones anteriores en almacenamiento persistente.
@@ -474,10 +500,7 @@ function App() {
       periods={periods}
       activeRole={selectedRole}
       view={view}
-      onNavigate={(nextView) => {
-        setView(nextView)
-        setMobileNav(false)
-      }}
+      onNavigate={navigateAdmin}
       onLogout={logout}
       onChangeRole={() => { setSelectedRole(null); setView('dashboard') }}
       accessToken={accessToken}
@@ -491,7 +514,7 @@ function App() {
       {view === 'asignaturas' && <AcademicCatalogView kind="subjects" accessToken={accessToken} catalogs={adminCatalogs} onCatalogsChange={setAdminCatalogs} />}
       {view === 'programas' && <AcademicCatalogView kind="programs" accessToken={accessToken} catalogs={adminCatalogs} onCatalogsChange={setAdminCatalogs} />}
       {view === 'espacios' && <SpacesView spaces={spaces} accessToken={accessToken} onChange={setSpaces} />}
-      {view === 'solicitudes' && <RequestsView requests={requests} accessToken={accessToken} catalogs={adminCatalogs} onChange={setRequests} />}
+      {view === 'solicitudes' && <RequestsView requests={requests} accessToken={accessToken} catalogs={adminCatalogs} onChange={setRequests} onNavigate={navigateAdmin} />}
       {view === 'reportes' && <ReportsView accessToken={accessToken} catalogs={adminCatalogs} />}
       {view === 'configuracion' && <ConfigurationView accessToken={accessToken} currentUser={currentUser} />}
     </AdminShell><NoticeHost /></>
@@ -653,7 +676,7 @@ function RoleSelector({ user, onSelect, onLogout, error }: { user: User; onSelec
   return <div className="role-selector-backdrop"><section className="role-selector-card" role="dialog" aria-modal="true" aria-labelledby="role-selector-title"><div className="role-selector-header"><div><span className="eyebrow">Acceso institucional</span><h2 id="role-selector-title">¿Con qué rol deseas ingresar?</h2><p>{user.name}, selecciona el espacio que quieres utilizar en esta sesión.</p></div></div><div className="role-selector-grid">{user.roles.map((availableRole) => <button key={availableRole} className={`role-card ${role === availableRole ? 'selected' : ''}`} onClick={() => setRole(availableRole)}><span className="role-card-icon">{icons[availableRole]}</span><span><strong>{availableRole}</strong><small>{descriptions[availableRole]}</small></span>{role === availableRole && <Check size={18} />}</button>)}</div>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<div className="role-selector-actions"><button className="secondary-button" onClick={onLogout}>Cerrar sesión</button><button className="primary-button" onClick={() => onSelect(role)}>Continuar <ArrowRight size={17} /></button></div></section></div>
 }
 
-function AdminShell({ user, activeRole, periodName, periods, children, view, onNavigate, onLogout, onChangeRole, accessToken, mobileNav, onToggleMobileNav }: { user: User; activeRole: Role; periodName: string; periods: AcademicPeriod[]; children: ReactNode; view: View; onNavigate: (view: View) => void; onLogout: () => void; onChangeRole: () => void; accessToken: string; mobileNav: boolean; onToggleMobileNav: () => void }) {
+function AdminShell({ user, activeRole, periodName, periods, children, view, onNavigate, onLogout, onChangeRole, accessToken, mobileNav, onToggleMobileNav }: { user: User; activeRole: Role; periodName: string; periods: AcademicPeriod[]; children: ReactNode; view: View; onNavigate: (view: View, target?: 'credentials') => void; onLogout: () => void; onChangeRole: () => void; accessToken: string; mobileNav: boolean; onToggleMobileNav: () => void }) {
   const [periodModalOpen, setPeriodModalOpen] = useState(false)
   const navItems: { id: View; label: string; icon: ReactNode }[] = [
     { id: 'dashboard', label: 'Resumen general', icon: <LayoutDashboard size={19} /> },
@@ -790,12 +813,21 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
   </div>
 }
 
-function NotificationCenter({accessToken,activeRole,onNavigate}:{accessToken:string;activeRole:Role;onNavigate:(view:any)=>void}) {
+function NotificationCenter({accessToken,activeRole,onNavigate}:{accessToken:string;activeRole:Role;onNavigate:(view:any,target?:'credentials')=>void}) {
   const [items,setItems]=useState<NotificationItem[]>([]);const [unread,setUnread]=useState(0);const [open,setOpen]=useState(false)
+  const centerRef=useRef<HTMLDivElement|null>(null)
   useEffect(()=>{let active=true;let initialized=false;let known=new Set<number>();const refresh=async()=>{try{const response=await getNotifications(accessToken);if(!active)return;const incoming=response.items;if(initialized){incoming.filter(item=>!known.has(item.id)&&!item.read).slice(0,3).forEach(item=>window.dispatchEvent(new CustomEvent('acadex:notice',{detail:`${item.title}: ${item.message}`})))}known=new Set(incoming.map(item=>item.id));initialized=true;setItems(incoming);setUnread(response.unread)}catch{/* La bandeja volverá a consultar en el siguiente intervalo. */}};void refresh();const timer=window.setInterval(()=>void refresh(),30000);return()=>{active=false;window.clearInterval(timer)}},[accessToken])
-  const openItem=async(item:NotificationItem)=>{try{if(!item.read){await markNotificationRead(accessToken,item.id);setItems(current=>current.map(row=>row.id===item.id?{...row,read:true}:row));setUnread(value=>Math.max(0,value-1))}}catch{/* El refresco periódico sincroniza el estado. */}setOpen(false);if(activeRole==='Administrador')onNavigate(item.category==='Informe'?'reportes':'solicitudes');else if(activeRole==='Tutor')onNavigate(item.category==='Informe'?'informes':item.category==='Sesion'?'sesiones':'solicitudes');else if(activeRole==='Estudiante')onNavigate(item.category==='Sesion'?'mis-sesiones':'mis-solicitudes');else onNavigate(item.category==='Sesion'?'sesiones':'solicitudes')}
+  useEffect(()=>{if(!open)return;const closeOutside=(event:PointerEvent)=>{if(!centerRef.current?.contains(event.target as Node))setOpen(false)};const closeOnEscape=(event:KeyboardEvent)=>{if(event.key==='Escape')setOpen(false)};document.addEventListener('pointerdown',closeOutside);document.addEventListener('keydown',closeOnEscape);return()=>{document.removeEventListener('pointerdown',closeOutside);document.removeEventListener('keydown',closeOnEscape)}},[open])
+  const openItem=async(item:NotificationItem)=>{
+    setOpen(false)
+    try{if(!item.read){await markNotificationRead(accessToken,item.id);setItems(current=>current.map(row=>row.id===item.id?{...row,read:true}:row));setUnread(value=>Math.max(0,value-1))}}catch{/* El refresco periódico sincroniza el estado. */}
+    if(activeRole==='Administrador'){if(item.entityType==='credencial'){onNavigate('configuracion','credentials');return}onNavigate(item.category==='Informe'?'reportes':'solicitudes')}
+    else if(activeRole==='Tutor')onNavigate(item.category==='Informe'?'informes':item.category==='Sesion'?'sesiones':'solicitudes')
+    else if(activeRole==='Estudiante')onNavigate(item.category==='Sesion'?'mis-sesiones':'mis-solicitudes')
+    else onNavigate(item.category==='Sesion'?'sesiones':'solicitudes')
+  }
   const markAll=async()=>{try{await markAllNotificationsRead(accessToken);setItems(current=>current.map(item=>({...item,read:true})));setUnread(0)}catch(error){window.dispatchEvent(new CustomEvent('acadex:notice',{detail:error instanceof Error?error.message:'No se pudieron marcar como leídas.'}))}}
-  return <div className={`notification-center ${open?'is-open':''}`}><button type="button" className="notification-trigger" aria-label={`Notificaciones${unread?`, ${unread} sin leer`:''}`} aria-expanded={open} onClick={()=>setOpen(value=>!value)}><Bell size={19}/>{unread>0&&<span className="notification-count">{unread>99?'99+':unread}</span>}</button>{open&&<section className="notification-popover" aria-label="Bandeja de notificaciones"><div className="notification-heading"><div><strong>Notificaciones</strong><small>{unread} sin leer</small></div>{unread>0&&<button type="button" onClick={()=>void markAll()}>Marcar todas</button>}</div><div className="notification-list">{items.length?items.map(item=><button type="button" key={item.id} className={`notification-item ${item.read?'read':''}`} onClick={()=>void openItem(item)}><span className="notification-dot"/><span><strong>{item.title}</strong><small>{item.message}</small><time>{new Date(item.createdAt).toLocaleString('es-CO',{dateStyle:'short',timeStyle:'short'})}</time></span></button>):<p className="notification-empty">No tienes notificaciones por ahora.</p>}</div></section>}</div>
+  return <div ref={centerRef} className={`notification-center ${open?'is-open':''}`}><button type="button" className="notification-trigger" aria-label={`Notificaciones${unread?`, ${unread} sin leer`:''}`} aria-expanded={open} onClick={()=>setOpen(value=>!value)}><Bell size={19}/>{unread>0&&<span className="notification-count">{unread>99?'99+':unread}</span>}</button>{open&&<section className="notification-popover" aria-label="Bandeja de notificaciones"><div className="notification-heading"><div><strong>Notificaciones</strong><small>{unread} sin leer</small></div>{unread>0&&<button type="button" onClick={()=>void markAll()}>Marcar todas</button>}</div><div className="notification-list">{items.length?items.map(item=><button type="button" key={item.id} className={`notification-item ${item.read?'read':''}`} onClick={()=>void openItem(item)}><span className="notification-dot"/><span><strong>{item.title}</strong><small>{item.message}</small><time>{new Date(item.createdAt).toLocaleString('es-CO',{dateStyle:'short',timeStyle:'short'})}</time></span></button>):<p className="notification-empty">No tienes notificaciones por ahora.</p>}</div></section>}</div>
 }
 
 function MonthlyReportReminder({accessToken,onNavigate}:{accessToken:string;onNavigate:(view:PortalView)=>void}){const [pending,setPending]=useState(false);useEffect(()=>{const month=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Bogota',year:'numeric',month:'2-digit'}).format(new Date()).slice(0,7);void getMonthlyTutorReport(accessToken,month).then(result=>setPending(result.sessions.length>0&&!result.draft)).catch(()=>setPending(false))},[accessToken]);return pending?<div className="notice-card tutor-reminder"><span><strong>Informe mensual pendiente</strong><small>Tienes sesiones reportadas este mes y aún no has creado el borrador de cierre.</small></span><button type="button" className="text-button" onClick={()=>onNavigate('informe-mensual')}>Crear informe <ArrowRight size={15}/></button></div>:null}
@@ -986,10 +1018,16 @@ function TutorReportReminder({accessToken}:{accessToken:string}){const [pending,
 
 function StudentRequestForm({ accessToken, subjects, user, requests, onChange }: { accessToken: string; subjects: Array<{ id: number; codigo: string; nombre: string }>; user: User; requests: Request[]; onChange: (requests: Request[]) => void }) {
   const [sent, setSent] = useState(false)
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const [reason, setReason] = useState('')
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    setSent(false)
+    setError('')
+    setSubmitting(true)
     try {
       const saved = await createRequestApi(accessToken, {
         subject: String(form.get('subject') ?? ''),
@@ -1000,9 +1038,11 @@ function StudentRequestForm({ accessToken, subjects, user, requests, onChange }:
       onChange([saved as Request, ...requests])
       setSent(true)
       setReason('')
-      event.currentTarget.reset()
+      formElement.reset()
     } catch (error) {
-      window.alert(error instanceof ApiError ? error.message : 'No fue posible registrar la solicitud.')
+      setError(error instanceof ApiError ? error.message : 'No fue posible registrar la solicitud. Revisa tu conexión e inténtalo de nuevo.')
+    } finally {
+      setSubmitting(false)
     }
   }
   return <>
@@ -1015,20 +1055,20 @@ function StudentRequestForm({ accessToken, subjects, user, requests, onChange }:
         </div>
         <div className="quick-icon blue-bg"><Send size={18} /></div>
       </div>
-      <form className="portal-form" onSubmit={submit}>
+      <form className="portal-form" onSubmit={submit} onInvalidCapture={() => setSent(false)}>
         <div className="form-columns">
           <label>Código institucional del estudiante
             <input value={user.code} readOnly className="readonly-code-input" title="Código institucional asociado a tu cuenta" />
             <span className="form-field-hint">Código único asignado a tu perfil institucional (no editable).</span>
           </label>
           <label>Tipo de acompañamiento
-            <select name="type">
+            <select name="type" onChange={() => { setSent(false); setError('') }}>
               <option>Monitoría</option>
               <option>Tutoría</option>
             </select>
           </label>
           <label>Prioridad estimada
-            <select name="priority" defaultValue="Media">
+            <select name="priority" defaultValue="Media" onChange={() => { setSent(false); setError('') }}>
               <option>Media</option>
               <option>Alta</option>
               <option>Baja</option>
@@ -1036,7 +1076,7 @@ function StudentRequestForm({ accessToken, subjects, user, requests, onChange }:
           </label>
         </div>
         <label>Asignatura registrada en MariaDB
-          <select name="subject" required defaultValue="">
+          <select name="subject" required defaultValue="" onChange={() => { setSent(false); setError('') }}>
             <option value="">Selecciona la asignatura que estás cursando</option>
             {subjects.map((s) => <option key={s.id} value={s.nombre}>[{s.codigo}] {s.nombre}</option>)}
           </select>
@@ -1048,14 +1088,15 @@ function StudentRequestForm({ accessToken, subjects, user, requests, onChange }:
             minLength={5}
             maxLength={500}
             value={reason}
-            onChange={(e) => setReason(e.target.value)}
+            onChange={(e) => { setReason(e.target.value); setSent(false); setError('') }}
             placeholder="Describe brevemente los temas o dificultades que deseas reforzar (ej. Repaso para parcial de cálculo o apoyo en ejercicios prácticos)..."
           />
           <div className="form-field-meta">
             <span>{reason.length}/500 caracteres</span>
           </div>
         </label>
-        <button className="primary-button" type="submit"><Send size={17} /> Enviar solicitud</button>
+        {error && <div className="form-error" role="alert"><CircleAlert size={16} />{error}</div>}
+        <button className="primary-button" type="submit" disabled={submitting}><Send size={17} /> {submitting ? 'Enviando…' : 'Enviar solicitud'}</button>
         {sent && <div className="success-message"><Check size={16} /> Solicitud registrada con éxito en MariaDB. Puedes seguir su avance en “Mis solicitudes”.</div>}
       </form>
     </section>
@@ -1682,7 +1723,24 @@ function SpacesView({ spaces, accessToken, onChange }: { spaces: Space[]; access
   </>
 }
 
-function RequestsView({ requests, accessToken, catalogs, onChange }: { requests: Request[]; accessToken: string; catalogs: AdminCatalogs | null; onChange: (requests: Request[]) => void }) {
+function PasswordChangeRequestsPanel({ accessToken, onManage }: { accessToken: string; onManage: (view: View, target?: 'credentials') => void }) {
+  const [requests, setRequests] = useState<PasswordChangeRequestHistory[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    listPasswordChangeRequests(accessToken)
+      .then((rows) => { if (active) { setRequests(rows); setError('') } })
+      .catch((loadError) => { if (active) setError(loadError instanceof ApiError ? loadError.message : 'No se pudieron cargar las solicitudes de cambio de contraseña.') })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [accessToken])
+
+  return <section className="panel table-panel password-change-requests-panel"><div className="panel-heading"><div><h3>Solicitudes de cambio de contraseña</h3><p>Historial de solicitudes recibidas y cambios de contraseña completados.</p></div><KeyRound size={20}/></div>{error&&<div className="form-error"><CircleAlert size={16}/>{error}</div>}<div className="table-scroll"><table><thead><tr><th>CUENTA</th><th>TIPO</th><th>FECHA DE SOLICITUD</th><th>ESTADO</th><th>FECHA DE CAMBIO</th><th/></tr></thead><tbody>{requests.map((request)=><tr key={request.id}><td><strong>{request.name}</strong><span className="table-subtext">{request.email}</span></td><td>{request.requestType==='CodigoCorreo'?'Código por correo':'Ayuda al administrador'}</td><td>{new Date(request.requestedAt).toLocaleString('es-CO',{dateStyle:'short',timeStyle:'short'})}</td><td><span className={`password-request-status ${request.status==='Completada'?'completed':'pending'}`}>{request.status}</span></td><td>{request.completedAt?new Date(request.completedAt).toLocaleString('es-CO',{dateStyle:'short',timeStyle:'short'}):'—'}</td><td className="align-right">{request.status==='Pendiente'&&<button type="button" className="row-action" onClick={()=>onManage('configuracion','credentials')}>Gestionar clave</button>}</td></tr>)}{!requests.length&&<tr><td colSpan={6}>{loading?'Cargando historial de solicitudes…':'No hay solicitudes de cambio de contraseña registradas.'}</td></tr>}</tbody></table></div></section>
+}
+
+function RequestsView({ requests, accessToken, catalogs, onChange, onNavigate }: { requests: Request[]; accessToken: string; catalogs: AdminCatalogs | null; onChange: (requests: Request[]) => void; onNavigate: (view: View, target?: 'credentials') => void }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('Todos los estados')
   const [subjectId, setSubjectId] = useState('Todos')
@@ -1833,6 +1891,7 @@ function RequestsView({ requests, accessToken, catalogs, onChange }: { requests:
         </div>
       }
     />
+    <PasswordChangeRequestsPanel accessToken={accessToken} onManage={onNavigate} />
     <section className="panel table-panel">
       <div className="table-toolbar">
         <div className="search-input"><Search size={17} /><input placeholder="Buscar por estudiante, programa, asignatura o motivo..." value={query} onChange={(event) => setQuery(event.target.value)} /></div>
@@ -2139,6 +2198,7 @@ function ConfigurationView({ accessToken, currentUser }: { accessToken: string; 
   const [resetBusy, setResetBusy] = useState(false)
   const [passwordCopied, setPasswordCopied] = useState(false)
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [exportingSecrets, setExportingSecrets] = useState(false)
   const loadAccounts = async (selectedRole = role) => { setLoading(true); try { setAccounts(await listCredentials(accessToken, selectedRole)) } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cargar las credenciales.') } finally { setLoading(false) } }
@@ -2161,7 +2221,7 @@ function ConfigurationView({ accessToken, currentUser }: { accessToken: string; 
     try { await navigator.clipboard.writeText(temporaryPassword.value); setPasswordCopied(true) }
     catch { setPasswordCopied(false) }
   }
-  const savePassword = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { await changePassword(accessToken, passwords); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }); window.alert('Contraseña actualizada correctamente.') } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cambiar la contraseña.') } }
+  const savePassword = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { await changePassword(accessToken, passwords); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }); setPasswordModalOpen(false); window.alert('Contraseña actualizada correctamente.') } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cambiar la contraseña.') } }
   const exportCredentials = () => downloadCsv(`cuentas${role ? `-${role.toLowerCase()}` : ''}.csv`, accounts.map((account) => ({ nombre: account.name, codigo: account.code, correo: account.email, roles: account.roles.join(' / '), estado: account.status })))
   const eligibleForSecretExport = accounts.filter((account) => account.status === 'Activo' && account.id !== currentUser.id && Boolean(role) && account.roles.includes(role as Role))
   const exportTemporaryPasswords = async () => {
@@ -2177,8 +2237,8 @@ function ConfigurationView({ accessToken, currentUser }: { accessToken: string; 
     } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible generar la exportación segura.') }
     finally { setExportingSecrets(false) }
   }
-  return <><PageHeader eyebrow="Administración / Configuración" title="Configuración y credenciales" description="Gestiona el acceso de usuarios y la operación académica del sistema." action={<button className="secondary-button" onClick={exportCredentials} disabled={!accounts.length}><Download size={17} /> Exportar listado</button>} /><section className="configuration-section"><header className="configuration-section-heading"><span>OPERACIÓN ACADÉMICA</span><h2>Supervisión y periodos</h2><p>Estado de MariaDB y vigencia del calendario académico.</p></header><div className="configuration-stack"><DatabaseControlPanel accessToken={accessToken} /><AcademicPeriodsPanel accessToken={accessToken} /></div></section><section className="configuration-section"><header className="configuration-section-heading"><span>SEGURIDAD</span><h2>Acceso y credenciales</h2><p>Consulta cuentas, restablece claves temporales y actualiza tu contraseña.</p></header><SuspendedAccountsPanel accessToken={accessToken} /><div className="configuration-grid"><section className="panel table-panel"><div className="panel-heading"><div><h3>Credenciales de usuarios</h3><p>Las claves guardadas no se muestran. Solo se exportan claves temporales de un uso.</p></div><KeyRound size={20} /></div><div className="table-toolbar config-toolbar"><select value={role} onChange={(event) => { setRole(event.target.value); void loadAccounts(event.target.value) }}><option value="">Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Tutor</option><option>Monitor</option></select><button className="secondary-button filter-button" onClick={() => void loadAccounts()}><RefreshCw size={16} /> {loading ? 'Cargando...' : 'Actualizar'}</button></div><div className="credential-export-panel"><div><strong>Exportar claves temporales</strong><span>Selecciona un rol. Las claves actuales se revocan y se exige cambiarlas en el primer acceso.</span></div><button className="secondary-button" type="button" onClick={() => void exportTemporaryPasswords()} disabled={!role || loading || !eligibleForSecretExport.length || exportingSecrets}>{exportingSecrets ? 'Generando...' : `Generar CSV (${eligibleForSecretExport.length})`} <Download size={16} /></button></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CLAVE</th><th>ESTADO</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td><div className="user-roles">{account.roles.map((item) => <span className="role-pill" key={item}>{item}</span>)}</div></td><td><code className="credential-code">Protegida</code></td><td>{account.status}</td><td className="align-right"><button className="row-action" disabled={account.id===currentUser.id || account.status!=='Activo'} title={account.id===currentUser.id ? 'Usa el formulario Cambiar mi contraseña' : 'Generar una clave temporal de un solo uso'} onClick={() => void reset(account)}>Generar clave temporal</button></td></tr>)}</tbody></table></div></section><section className="panel form-panel"><div className="panel-heading"><div><h3>Cambiar mi contraseña</h3><p>Usa una contraseña nueva de 8 a 72 caracteres.</p></div><LockKeyhole size={20} /></div><form className="portal-form" onSubmit={savePassword}><label>Contraseña actual<input type="password" required value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar contraseña<input type="password" minLength={8} maxLength={72} required value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label><button className="primary-button" type="submit"><KeyRound size={17} /> Cambiar contraseña</button></form></section></div></section>
-{resetTarget && <Modal title="Restablecer contraseña" subtitle={`Se generará una clave temporal para ${resetTarget.name}.`} onClose={() => { if (!resetBusy) setResetTarget(null) }}><div className="credential-reset-dialog"><div className="credential-reset-notice"><ShieldCheck size={20}/><p>La contraseña actual dejará de funcionar. En el próximo inicio de sesión, la persona deberá cambiar esta clave temporal por una propia.</p></div>{resetError && <div className="form-error"><CircleAlert size={16}/>{resetError}</div>}<div className="modal-actions"><button type="button" className="secondary-button" autoFocus disabled={resetBusy} onClick={() => setResetTarget(null)}>Cancelar</button><button type="button" className="primary-button" disabled={resetBusy} onClick={() => void confirmReset()}>{resetBusy ? 'Generando…' : 'Generar clave temporal'}</button></div></div></Modal>}
+  return <><PageHeader eyebrow="Administración / Configuración" title="Configuración y credenciales" description="Gestiona el acceso de usuarios y la operación académica del sistema." action={<div className="configuration-header-actions"><button type="button" className="secondary-button" onClick={() => setPasswordModalOpen(true)}><LockKeyhole size={17} /> Cambiar mi contraseña</button><button className="secondary-button" onClick={exportCredentials} disabled={!accounts.length}><Download size={17} /> Exportar listado</button></div>} /><section className="configuration-section"><header className="configuration-section-heading"><span>OPERACIÓN ACADÉMICA</span><h2>Supervisión y periodos</h2><p>Estado de MariaDB y vigencia del calendario académico.</p></header><div className="configuration-stack"><DatabaseControlPanel accessToken={accessToken} /><AcademicPeriodsPanel accessToken={accessToken} /></div></section><section className="configuration-section"><header className="configuration-section-heading"><span>SEGURIDAD</span><h2>Acceso y credenciales</h2><p>Consulta cuentas, restablece claves temporales y actualiza tu contraseña.</p></header><SuspendedAccountsPanel accessToken={accessToken} /><div className="configuration-grid"><section className="panel table-panel"><div className="panel-heading"><div><h3>Credenciales de usuarios</h3><p>Las claves guardadas no se muestran. Solo se exportan claves temporales de un uso.</p></div><KeyRound size={20} /></div><div className="table-toolbar config-toolbar"><select value={role} onChange={(event) => { setRole(event.target.value); void loadAccounts(event.target.value) }}><option value="">Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Tutor</option><option>Monitor</option></select><button className="secondary-button filter-button" onClick={() => void loadAccounts()}><RefreshCw size={16} /> {loading ? 'Cargando...' : 'Actualizar'}</button></div><div className="credential-export-panel"><div><strong>Exportar claves temporales</strong><span>Selecciona un rol. Las claves actuales se revocan y se exige cambiarlas en el primer acceso.</span></div><button className="secondary-button" type="button" onClick={() => void exportTemporaryPasswords()} disabled={!role || loading || !eligibleForSecretExport.length || exportingSecrets}>{exportingSecrets ? 'Generando...' : `Generar CSV (${eligibleForSecretExport.length})`} <Download size={16} /></button></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CLAVE</th><th>ESTADO</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td><div className="user-roles">{account.roles.map((item) => <span className="role-pill" key={item}>{item}</span>)}</div></td><td><code className="credential-code">Protegida</code></td><td>{account.status}</td><td className="align-right"><button className="row-action" disabled={account.id===currentUser.id || account.status!=='Activo'} title={account.id===currentUser.id ? 'Usa el formulario Cambiar mi contraseña' : 'Generar una clave temporal de un solo uso'} onClick={() => void reset(account)} aria-label="Generar clave temporal">Generar clave</button></td></tr>)}</tbody></table></div></section></div></section>
+{passwordModalOpen && <Modal title="Cambiar mi contraseña" subtitle="Usa una contraseña nueva de 8 a 72 caracteres." onClose={() => { setPasswordModalOpen(false); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }) }}><form className="modal-form password-change-modal-form" onSubmit={savePassword}><label>Contraseña actual<input type="password" required autoComplete="current-password" value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setPasswordModalOpen(false); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }) }}>Cancelar</button><button className="primary-button" type="submit"><KeyRound size={17} /> Guardar contraseña</button></div></form></Modal>}{resetTarget && <Modal title="Restablecer contraseña" subtitle={`Se generará una clave temporal para ${resetTarget.name}.`} onClose={() => { if (!resetBusy) setResetTarget(null) }}><div className="credential-reset-dialog"><div className="credential-reset-notice"><ShieldCheck size={20}/><p>La contraseña actual dejará de funcionar. En el próximo inicio de sesión, la persona deberá cambiar esta clave temporal por una propia.</p></div>{resetError && <div className="form-error"><CircleAlert size={16}/>{resetError}</div>}<div className="modal-actions"><button type="button" className="secondary-button" autoFocus disabled={resetBusy} onClick={() => setResetTarget(null)}>Cancelar</button><button type="button" className="primary-button" disabled={resetBusy} onClick={() => void confirmReset()}>{resetBusy ? 'Generando…' : 'Generar clave temporal'}</button></div></div></Modal>}
 {temporaryPassword && <Modal title="Clave temporal generada" subtitle={`Cuenta de ${temporaryPassword.account.name}`} onClose={() => setTemporaryPassword(null)}><div className="credential-reset-dialog"><div className="credential-temporary-password"><span>CLAVE TEMPORAL · USO INICIAL</span><code>{temporaryPassword.value}</code></div><div className="credential-reset-notice"><ShieldCheck size={20}/><p>Comparte esta clave por un canal seguro. La persona deberá cambiarla al iniciar sesión. Esta clave solo se muestra ahora.</p></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => void copyTemporaryPassword()}><Copy size={16}/>{passwordCopied ? 'Copiada' : 'Copiar clave'}</button><button type="button" className="primary-button" onClick={() => setTemporaryPassword(null)}>Listo</button></div></div></Modal>}</>
 }
 

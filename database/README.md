@@ -33,6 +33,11 @@ SOURCE C:/Users/brayh/acadex/database/gestion_monitorias_tutorias.sql;
 Este script no elimina la base de datos. La API además sustituye el nombre de
 la base en memoria cuando se usa otro `DATABASE_NAME` para una prueba aislada.
 
+Las migraciones `002` a `008` se aplican automáticamente al iniciar la API. La
+migración `008_historial_solicitudes_cambio_clave.sql` crea un historial durable
+de solicitudes, conserva las pendientes existentes y actualiza su estado a
+**Completada** cuando una contraseña se restablece.
+
 ## Usuario de conexión de la API
 
 La API utiliza por defecto el usuario `tutorias_app`. En el flujo recomendado,

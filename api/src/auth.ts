@@ -344,6 +344,11 @@ export async function requestPasswordChange(payload: unknown) {
         return genericResponse
       }
       await connection.execute('UPDATE ControlAcceso SET cambio_clave_solicitado_en=CURRENT_TIMESTAMP WHERE id_usuario=?', [account.id])
+      await connection.execute(
+        `INSERT INTO SolicitudCambioClave(id_usuario,correo_solicitante,nombre_solicitante,tipo_solicitud)
+         VALUES (?, ?, ?, 'AyudaAdministrador')`,
+        [account.id, account.email, account.name],
+      )
       const [admins] = await connection.query(
         `SELECT DISTINCT u.id_usuario AS id
            FROM Usuario u JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario
@@ -385,6 +390,11 @@ export async function requestPasswordChange(payload: unknown) {
         ? 'El envío de códigos no está configurado todavía. Contacta al administrador del sistema.'
         : 'No se pudo enviar el código. Inténtalo de nuevo más tarde.')
     }
+    await pool.execute(
+      `INSERT INTO SolicitudCambioClave(id_usuario,correo_solicitante,nombre_solicitante,tipo_solicitud)
+       VALUES (?, ?, ?, 'CodigoCorreo')`,
+      [adminCodeRequest.id, adminCodeRequest.email, adminCodeRequest.name],
+    )
   }
   return genericResponse
 }
@@ -456,6 +466,12 @@ export async function resetAdminPassword(payload: unknown) {
         `UPDATE ControlAcceso SET intentos_fallidos=0,bloqueada_hasta=NULL,tipo_bloqueo=NULL,
           cambio_clave_solicitado_en=NULL WHERE id_usuario=?`,
         [userId],
+      )
+      await connection.execute(
+        `UPDATE SolicitudCambioClave
+            SET estado='Completada',completada_en=CURRENT_TIMESTAMP,gestionada_por=?
+          WHERE id_usuario=? AND estado='Pendiente'`,
+        [userId, userId],
       )
       await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL', [userId])
       await connection.execute('UPDATE SesionPreAutenticacion SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL', [userId])
