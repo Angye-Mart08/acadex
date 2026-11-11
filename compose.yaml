@@ -1,0 +1,66 @@
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: gestion_monitorias_tutorias
+      MARIADB_USER: tutorias_app
+      MARIADB_PASSWORD: ${DOCKER_DATABASE_PASSWORD:?Configura DOCKER_DATABASE_PASSWORD en .env}
+      MARIADB_ROOT_PASSWORD: ${DOCKER_DATABASE_ROOT_PASSWORD:?Configura DOCKER_DATABASE_ROOT_PASSWORD en .env}
+    volumes:
+      - database_data:/var/lib/mysql
+      - ./database/gestion_monitorias_tutorias.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: ${DOCKER_NODE_ENV:-development}
+      PORT: "3000"
+      API_PREFIX: /api/v1
+      DATABASE_HOST: db
+      DATABASE_PORT: "3306"
+      DATABASE_NAME: gestion_monitorias_tutorias
+      DATABASE_USER: tutorias_app
+      DATABASE_PASSWORD: ${DOCKER_DATABASE_PASSWORD:?Configura DOCKER_DATABASE_PASSWORD en .env}
+      JWT_SECRET: ${JWT_SECRET:?Configura JWT_SECRET en .env}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-8h}
+      PRE_AUTH_TOKEN_TTL: ${PRE_AUTH_TOKEN_TTL:-5m}
+      CORS_ORIGIN: ${DOCKER_CORS_ORIGIN:-http://localhost:5173}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${DOCKER_WEB_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  database_data:
