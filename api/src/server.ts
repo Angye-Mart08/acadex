@@ -3,11 +3,11 @@ import cors from 'cors'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import { randomUUID } from 'node:crypto'
 import { z, ZodError } from 'zod'
-import { AuthError, cancelRoleSelection, changeActiveRole, currentUserFromToken, login, requestPasswordChange, resetAdminPassword, revokeSession, selectRole } from './auth.js'
+import { AuthError, cancelRoleSelection, changeAccountPasswordWithCode, changeActiveRole, changeLockedOutPassword, currentUserFromToken, login, requestAccountPasswordCode, requestPasswordChange, revokeSession, selectRole, verifyAccountPasswordCode, verifyLockoutPasswordCode } from './auth.js'
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
 import { DataError, cancelTutorRecovery, completeTutorRecovery, createRequest, createTutorAvailability, createTutorRecovery, dashboard, deleteTutorAvailability, deleteTutorReport, getTutorReport, getTutorReportAttachment, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects, listTutorAssignments, listTutorRecoverableSessions, listTutorRecoveries, listTutorReportableSessions, saveTutorReport, submitTutorReport, tutorDashboard, updateTutorAvailability, updateTutorReport } from './data.js'
-import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminFaculty, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, decideTutorRequest, deleteAdminFaculty, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminFaculties, listAdminPeriods, listAdminPrograms, listAdminRequestSlots, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listPasswordChangeRequests, listSettings, listSuspendedAccounts, resetCredential, unlockSuspendedAccount, updateAdminFaculty, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
+import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, assignStudentRequest, changePassword, createAdminFaculty, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, decideTutorRequest, deleteAdminFaculty, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminFaculties, listAdminPeriods, listAdminPrograms, listAdminRequestSlots, listAdminRequestStaff, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listPasswordChangeRequests, listSettings, listStudentRequestStaff, listSuspendedAccounts, resetCredential, unlockSuspendedAccount, updateAdminFaculty, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
 import { getMonthlyTutorReport, listNotifications, markAllNotificationsRead, markNotificationRead, saveMonthlyTutorDraft } from './notifications.js'
 
 const app = express()
@@ -110,8 +110,24 @@ router.post('/auth/request-password-change', async (req, res, next) => {
   try { res.status(202).json(await requestPasswordChange(req.body)) } catch (error) { next(error) }
 })
 
-router.post('/auth/reset-admin-password', async (req, res, next) => {
-  try { res.status(200).json(await resetAdminPassword(req.body)) } catch (error) { next(error) }
+router.post('/auth/verify-lockout-password-code', async (req, res, next) => {
+  try { res.status(200).json(await verifyLockoutPasswordCode(req.body)) } catch (error) { next(error) }
+})
+
+router.post('/auth/change-locked-out-password', async (req, res, next) => {
+  try { res.status(200).json(await changeLockedOutPassword(req.body)) } catch (error) { next(error) }
+})
+
+router.post('/auth/account/password-code/request', requireSession, async (req, res, next) => {
+  try { res.status(202).json(await requestAccountPasswordCode(req.session.user.id)) } catch (error) { next(error) }
+})
+
+router.post('/auth/account/password-code/verify', requireSession, async (req, res, next) => {
+  try { res.json(await verifyAccountPasswordCode(req.session.user.id, req.body)) } catch (error) { next(error) }
+})
+
+router.post('/auth/account/password-code/change', requireSession, async (req, res, next) => {
+  try { res.json(await changeAccountPasswordWithCode(req.session.user.id, req.body, req.session.sessionId)) } catch (error) { next(error) }
 })
 
 router.post('/auth/select-role', async (req, res, next) => {
@@ -266,6 +282,12 @@ router.delete('/admin/faculties/:id', requireSession, requireRole('Administrador
 router.get('/admin/request-slots', requireSession, requireRole('Administrador'), async (req, res, next) => {
   try { res.json(await listAdminRequestSlots(requestSlotQuerySchema.parse(req.query))) } catch (error) { next(error) }
 })
+router.get('/admin/request-staff', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try {
+    const query = z.object({ subjectId: z.coerce.number().int().positive(), periodId: z.coerce.number().int().positive(), role: z.enum(['Tutor','Monitor']) }).strict().parse(req.query)
+    res.json(await listAdminRequestStaff(query))
+  } catch (error) { next(error) }
+})
 router.post('/admin/programs', requireSession, requireRole('Administrador'), async (req, res, next) => {
   try { res.status(201).json(await createAdminProgram(req.body)) } catch (error) { next(error) }
 })
@@ -356,6 +378,22 @@ router.get('/catalogs/subjects', requireSession, async (_req, res, next) => {
   try { res.json(await listSubjects()) } catch (error) { next(error) }
 })
 
+router.get('/requests/eligible-staff', requireSession, requireRole('Estudiante'), async (req, res, next) => {
+  try {
+    const query = z.object({ subjectId: z.coerce.number().int().positive(), periodId: z.coerce.number().int().positive(), role: z.enum(['Tutor','Monitor']) }).strict().parse(req.query)
+    res.json(await listStudentRequestStaff(req.session, query))
+  } catch (error) { next(error) }
+})
+
+router.get('/requests/available-slots', requireSession, requireRole('Estudiante'), async (req, res, next) => {
+  try {
+    const query = z.object({ userId: z.coerce.number().int().positive(), subjectId: z.coerce.number().int().positive(), periodId: z.coerce.number().int().positive(), role: z.enum(['Tutor','Monitor']) }).strict().parse(req.query)
+    const eligible = await listStudentRequestStaff(req.session, { subjectId: query.subjectId, periodId: query.periodId, role: query.role })
+    if (!eligible.some((item: any) => Number(item.userId) === query.userId)) throw new DataError(403,'STAFF_NOT_ELIGIBLE','El responsable no tiene una asignación activa para esta asignatura y periodo.')
+    res.json(await listAdminRequestSlots(query))
+  } catch (error) { next(error) }
+})
+
 router.get('/catalogs/periods', requireSession, async (_req, res, next) => {
   try { res.json(await listPeriods()) } catch (error) { next(error) }
 })
@@ -384,8 +422,13 @@ router.patch('/requests/:id', requireSession, requireRole('Administrador'), asyn
   try { res.json(await updateAdminRequest(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
 })
 
-router.post('/requests/:id/assign', requireSession, requireRole('Administrador'), async (req, res, next) => {
-  try { res.json(await assignAdminRequest(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+router.post('/requests/:id/assign', requireSession, async (req, res, next) => {
+  try {
+    const id = idParamSchema.parse(req.params.id)
+    res.json(req.session.activeRole === 'Administrador'
+      ? await assignAdminRequest(id, req.body)
+      : await assignStudentRequest(req.session, id, req.body))
+  } catch (error) { next(error) }
 })
 
 router.patch('/requests/:id/attendance', requireSession, async (req, res, next) => {

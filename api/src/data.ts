@@ -337,11 +337,12 @@ export async function listRequests({ session, search = '', status = '', page = 1
 }
 
 const requestInputSchema = z.object({
-  subject: z.string().trim().min(2).max(150),
-  type: z.enum(['Monitoría', 'Tutoría']),
+  subjectId: z.coerce.number().int().positive(),
+  type: z.enum(['Monitoría', 'Tutoría', 'Acompañamiento']),
   priority: z.enum(['Alta', 'Media', 'Baja']),
-  reason: z.string().trim().min(5).max(500),
-  preferredModality: z.enum(['Presencial', 'Virtual', 'Híbrida']).optional(),
+  motive: z.string().trim().min(3).max(500),
+  description: z.string().trim().min(3).max(500),
+  periodId: z.coerce.number().int().positive(),
 }).strict()
 
 export async function createRequest(session: any, payload: unknown) {
@@ -349,19 +350,20 @@ export async function createRequest(session: any, payload: unknown) {
   const input = requestInputSchema.parse(payload)
   const [studentRows] = await pool.query('SELECT e.id_estudiante, ep.id_programa FROM Estudiante e LEFT JOIN EstudiantePrograma ep ON ep.id_estudiante = e.id_estudiante AND ep.principal = 1 AND ep.estado = \'Activo\' WHERE e.id_usuario = ? AND e.estado = \'Activo\'', [session.user.id])
   if (!studentRows.length || !studentRows[0].id_programa) throw new DataError(422, 'STUDENT_PROFILE_INCOMPLETE', 'El estudiante no tiene un programa académico activo.')
-  const [subjectRows] = await pool.query('SELECT id_asignatura FROM Asignatura WHERE nombre = ? AND estado = \'Activo\'', [input.subject])
+  const [subjectRows] = await pool.query('SELECT id_asignatura FROM Asignatura WHERE id_asignatura = ? AND estado = \'Activo\'', [input.subjectId])
   const [typeRows] = await pool.query('SELECT id_tipo_solicitud FROM TipoSolicitud WHERE nombre = ? AND estado = \'Activo\'', [input.type])
-  const [periodRows] = await pool.query("SELECT id_periodo FROM PeriodoAcademico WHERE estado = 'Activo' ORDER BY fecha_inicio DESC LIMIT 1")
+  const [periodRows] = await pool.query("SELECT id_periodo FROM PeriodoAcademico WHERE id_periodo=? AND estado IN ('Activo','Planeado') AND fecha_fin>=CURRENT_DATE", [input.periodId])
   if (!subjectRows.length) throw new DataError(422, 'SUBJECT_NOT_FOUND', 'La asignatura seleccionada no está disponible.')
-  if (!typeRows.length || !periodRows.length) throw new DataError(422, 'CATALOG_NOT_AVAILABLE', 'No hay catálogos académicos activos para registrar la solicitud.')
+  if (!typeRows.length) throw new DataError(422, 'CATALOG_NOT_AVAILABLE', 'El tipo de acompañamiento no está disponible.')
+  if (!periodRows.length) throw new DataError(422, 'PERIOD_NOT_AVAILABLE', 'El periodo académico no está activo o ya finalizó.')
   const [result] = await pool.execute(
     `INSERT INTO Solicitud (id_estudiante, id_programa, id_asignatura, id_tipo_solicitud, id_periodo, fecha_solicitud, motivo, descripcion, prioridad, estado)
      VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, ?, 'Pendiente')`,
-    [studentRows[0].id_estudiante, studentRows[0].id_programa, subjectRows[0].id_asignatura, typeRows[0].id_tipo_solicitud, periodRows[0].id_periodo, input.reason, input.preferredModality ? `Modalidad preferida: ${input.preferredModality}` : null, input.priority],
+    [studentRows[0].id_estudiante, studentRows[0].id_programa, subjectRows[0].id_asignatura, typeRows[0].id_tipo_solicitud, periodRows[0].id_periodo, input.motive, input.description, input.priority],
   )
-  const resultData = await listRequests({ session, page: 1, pageSize: 100 })
-  const created = resultData.data.find((request) => request.id === result.insertId)
-  await publishRoleNotification('Administrador', { category: 'Solicitud', title: 'Nueva solicitud estudiantil', message: `Se registró una solicitud de ${created?.student ?? 'un estudiante'} para ${created?.subject ?? input.subject}.`, entityType: 'solicitud', entityId: Number(result.insertId) })
+  const [createdRows] = await pool.query(`${requestSelect} WHERE s.id_solicitud=?`, [result.insertId])
+  const created = normalizeRequest(createdRows[0])
+  await publishRoleNotification('Administrador', { category: 'Solicitud', title: 'Nueva solicitud estudiantil', message: `Se registró una solicitud de ${created?.student ?? 'un estudiante'} para ${created?.subject ?? 'una asignatura'}.`, entityType: 'solicitud', entityId: Number(result.insertId) })
   return created
 }
 
@@ -379,7 +381,7 @@ export async function listSubjects() {
 }
 
 export async function listPeriods() {
-  const [rows] = await pool.query("SELECT id_periodo AS id, nombre, estado FROM PeriodoAcademico ORDER BY fecha_inicio DESC")
+  const [rows] = await pool.query("SELECT id_periodo AS id, nombre, estado, DATE_FORMAT(fecha_inicio,'%Y-%m-%d') AS startDate, DATE_FORMAT(fecha_fin,'%Y-%m-%d') AS endDate FROM PeriodoAcademico ORDER BY fecha_inicio DESC")
   return rows
 }
 

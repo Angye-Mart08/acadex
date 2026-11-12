@@ -3,6 +3,7 @@ import {
   AcademicPeriod,
   AdminProgram,
   AdminRequestSlot,
+  StudentRequestStaff,
   AdminSubject,
   AdminFaculty,
   AdminCatalogs,
@@ -27,6 +28,8 @@ import {
   RoleProfiles,
   assignRequest as assignRequestApi,
   changePassword,
+  changeAccountPasswordWithCode,
+  changeLockedOutPassword,
   cancelTutorRecovery,
   cancelRoleSelection as cancelRoleSelectionApi,
   completeTutorRecovery,
@@ -80,7 +83,10 @@ import {
   listAdminPeriods,
   listAdminPrograms,
   listAdminFaculties,
+  listAdminRequestStaff as listAdminRequestStaffApi,
   listAdminRequestSlots,
+  listStudentRequestStaff as listStudentRequestStaffApi,
+  listStudentRequestSlots as listStudentRequestSlotsApi,
   listAdminSubjects,
   listPeriods as listPeriodsApi,
   listPortalAvailability as listPortalAvailabilityApi,
@@ -92,7 +98,9 @@ import {
   markAssignedRequestAttended,
   login as loginApi,
   requestPasswordChange as requestPasswordChangeApi,
-  resetAdminPassword as resetAdminPasswordApi,
+  requestAccountPasswordCode,
+  verifyAccountPasswordCode,
+  verifyLockoutPasswordCode,
   changeActiveRole as changeActiveRoleApi,
   logout as logoutApi,
   resetCredential,
@@ -114,6 +122,8 @@ import {
   CalendarClock,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   Copy,
   Clock3,
@@ -403,7 +413,7 @@ function App() {
   }, [accessToken, selectedRole, sessionVersion, currentUser?.mustChangePassword])
   const currentPeriod = periods.find((period) => period.estado === 'Activo')?.nombre ?? 'No disponible'
 
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (event: FormEvent<HTMLFormElement>): Promise<boolean> => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const email = String(form.get('email') ?? '').trim().toLowerCase()
@@ -422,19 +432,25 @@ function App() {
         window.sessionStorage.setItem(accessTokenStorageKey, response.accessToken)
       }
       setLoginError('')
+      return true
     } catch (error) {
       if (error instanceof ApiError && error.lockout) setLoginLockout(error.lockout)
       setLoginError(error instanceof ApiError ? error.message : 'No fue posible iniciar sesión.')
+      return false
     }
   }
 
-  const handlePasswordChangeRequest = async (email: string) => {
-    const response = await requestPasswordChangeApi(email)
+  const handlePasswordChangeRequest = async (email: string, method: 'ayuda-admin' | 'codigo') => {
+    const response = await requestPasswordChangeApi(email, method)
     return response.message
   }
 
-  const handleAdminPasswordReset = async (input: { email: string; code: string; newPassword: string; confirmPassword: string }) => {
-    await resetAdminPasswordApi(input)
+  const handleLockoutCodeVerify = async (email: string, code: string) => {
+    await verifyLockoutPasswordCode(email, code)
+  }
+
+  const handleLockedPasswordChange = async (input: { email: string; newPassword: string; confirmPassword: string }) => {
+    await changeLockedOutPassword(input)
   }
 
   const handleRoleSelect = async (role: Role) => {
@@ -483,7 +499,7 @@ function App() {
   }
 
   if (hydratingSession) return <><div className="session-loading">Validando sesión...</div><NoticeHost /></>
-  if (!authenticated || !currentUser) return <><LoginPage onSubmit={handleLogin} error={loginError} lockout={loginLockout} onEmailChange={() => { setLoginError(''); setLoginLockout(null) }} onRequestPasswordChange={handlePasswordChangeRequest} onAdminPasswordReset={handleAdminPasswordReset} /><NoticeHost /></>
+  if (!authenticated || !currentUser) return <><LoginPage onSubmit={handleLogin} error={loginError} lockout={loginLockout} onEmailChange={() => { setLoginError(''); setLoginLockout(null) }} onRequestPasswordChange={handlePasswordChangeRequest} onVerifyResetCode={handleLockoutCodeVerify} onChangeLockedPassword={handleLockedPasswordChange} /><NoticeHost /></>
 
   if (!selectedRole) return <><RoleSelector user={currentUser} onSelect={(role) => { void handleRoleSelect(role); setPortalView('inicio') }} onLogout={logout} error={loginError} /><NoticeHost /></>
 
@@ -550,7 +566,7 @@ function FirstPasswordChange({ accessToken, onLogout, onComplete }: { accessToke
   return <div className="role-selector-backdrop"><section className="role-selector-card" role="dialog" aria-modal="true" aria-labelledby="first-password-title"><div className="role-selector-header"><div><span className="eyebrow">Actualización de seguridad</span><h2 id="first-password-title">Crea tu contraseña personal</h2><p>Este acceso usa una clave temporal. Cámbiala antes de continuar.</p></div></div><form className="portal-form" onSubmit={submit}><label>Contraseña temporal o actual<input type="password" required autoComplete="current-password" value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<div className="role-selector-actions"><button type="button" className="secondary-button" onClick={onLogout}>Cerrar sesión</button><button type="submit" className="primary-button" disabled={saving}>{saving ? 'Guardando...' : 'Guardar contraseña'} <ArrowRight size={17} /></button></div></form></section></div>
 }
 
-function LoginPage({ onSubmit, error, lockout, onEmailChange, onRequestPasswordChange, onAdminPasswordReset }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; error: string; lockout: LoginLockout | null; onEmailChange: () => void; onRequestPasswordChange: (email: string) => Promise<string>; onAdminPasswordReset: (input: { email: string; code: string; newPassword: string; confirmPassword: string }) => Promise<void> }) {
+function LoginPage({ onSubmit, error, lockout, onEmailChange, onRequestPasswordChange, onVerifyResetCode, onChangeLockedPassword }: { onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<boolean>; error: string; lockout: LoginLockout | null; onEmailChange: () => void; onRequestPasswordChange: (email: string, method: 'ayuda-admin' | 'codigo') => Promise<string>; onVerifyResetCode: (email: string, code: string) => Promise<void>; onChangeLockedPassword: (input: { email: string; newPassword: string; confirmPassword: string }) => Promise<void> }) {
   const [showPassword, setShowPassword] = useState(false)
   const [email, setEmail] = useState(() => window.localStorage.getItem('acadex:remembered-email') ?? '')
   const [rememberEmail, setRememberEmail] = useState(() => Boolean(window.localStorage.getItem('acadex:remembered-email')))
@@ -558,6 +574,8 @@ function LoginPage({ onSubmit, error, lockout, onEmailChange, onRequestPasswordC
   const [requestingChange, setRequestingChange] = useState(false)
   const [requestMessage, setRequestMessage] = useState('')
   const [resetCodeRequested, setResetCodeRequested] = useState(false)
+  const [recoveryMethod, setRecoveryMethod] = useState<'ayuda-admin' | 'codigo' | null>(null)
+  const [resetCodeVerified, setResetCodeVerified] = useState(false)
   const [resetCode, setResetCode] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmNewPassword, setConfirmNewPassword] = useState('')
@@ -577,30 +595,45 @@ function LoginPage({ onSubmit, error, lockout, onEmailChange, onRequestPasswordC
     return [hours, minutes, rest].map((value) => String(value).padStart(2, '0')).join(':')
   }
 
-  const requestPasswordHelp = async () => {
+  const requestPasswordHelp = async (method: 'ayuda-admin' | 'codigo') => {
     setRequestingChange(true)
     setRequestMessage('')
     setResetError('')
     try {
-      const message = await onRequestPasswordChange(email)
-      if (lockout?.canResetWithCode) {
+      const message = await onRequestPasswordChange(email, method)
+      setRecoveryMethod(method)
+      if (method === 'codigo') {
         setResetCodeRequested(true)
         setRequestMessage('Si la cuenta cumple los requisitos, enviamos un código al correo institucional registrado. Revisa tu bandeja de entrada.')
-      } else setRequestMessage(message)
+      } else setRequestMessage(message || 'La solicitud fue enviada a los administradores registrados.')
     } catch (error) { setRequestMessage(error instanceof ApiError ? error.message : 'No fue posible enviar la solicitud.') }
+    finally { setRequestingChange(false) }
+  }
+
+  const verifyResetCode = async () => {
+    setResetError('')
+    if (!/^\d{6}$/.test(resetCode)) { setResetError('Escribe el código de seis dígitos que recibiste.'); return }
+    setRequestingChange(true)
+    try {
+      await onVerifyResetCode(email, resetCode)
+      setResetCodeVerified(true)
+      setRequestMessage('Código verificado. Ahora puedes elegir una contraseña nueva.')
+    } catch (error) { setResetError(error instanceof ApiError ? error.message : 'No fue posible verificar el código.') }
     finally { setRequestingChange(false) }
   }
 
   const submitPasswordReset = async () => {
     setResetError('')
-    if (!/^\d{6}$/.test(resetCode)) { setResetError('Escribe el código de seis dígitos que recibiste.'); return }
+    if (!resetCodeVerified) { setResetError('Primero verifica el código que recibiste.'); return }
     if (newPassword.length < 8) { setResetError('La nueva contraseña debe tener al menos 8 caracteres.'); return }
     if (newPassword !== confirmNewPassword) { setResetError('La nueva contraseña y su confirmación no coinciden.'); return }
     setRequestingChange(true)
     try {
-      await onAdminPasswordReset({ email, code: resetCode, newPassword, confirmPassword: confirmNewPassword })
+      await onChangeLockedPassword({ email, newPassword, confirmPassword: confirmNewPassword })
       setRequestMessage('Contraseña actualizada. Ya puedes iniciar sesión con tu nueva contraseña.')
       setResetCodeRequested(false)
+      setRecoveryMethod(null)
+      setResetCodeVerified(false)
       setResetCode('')
       setNewPassword('')
       setConfirmNewPassword('')
@@ -609,16 +642,44 @@ function LoginPage({ onSubmit, error, lockout, onEmailChange, onRequestPasswordC
     finally { setRequestingChange(false) }
   }
 
-  const submitLogin = (event: FormEvent<HTMLFormElement>) => {
-    const submittedEmail = String(new FormData(event.currentTarget).get('email') ?? '').trim()
+  const submitLogin = async (event: FormEvent<HTMLFormElement>) => {
+    const formData = new FormData(event.currentTarget)
+    const submittedEmail = String(formData.get('email') ?? '').trim()
+    const submittedPassword = String(formData.get('password') ?? '')
     if (rememberEmail && submittedEmail) window.localStorage.setItem('acadex:remembered-email', submittedEmail)
     else window.localStorage.removeItem('acadex:remembered-email')
-    onSubmit(event)
+    const authenticated = await onSubmit(event)
+    const PasswordCredentialConstructor = (window as Window & { PasswordCredential?: new (data: { id: string; password: string; name?: string }) => Credential }).PasswordCredential
+    if (authenticated && rememberEmail && PasswordCredentialConstructor && navigator.credentials?.store) {
+      try { await navigator.credentials.store(new PasswordCredentialConstructor({ id: submittedEmail, password: submittedPassword, name: submittedEmail })) } catch { /* Browser may not support credential storage; autocomplete still works. */ }
+    }
   }
 
   return (
     <main className="login-page">
       <section className="login-hero">
+        <div className="login-sky" aria-hidden="true">
+          <span className="login-cloud cloud-one" />
+          <span className="login-cloud cloud-two" />
+          <span className="login-cloud cloud-three" />
+          <span className="login-star star-one" />
+          <span className="login-star star-two" />
+          <span className="login-star star-three" />
+          <span className="login-star star-four" />
+          <span className="login-star star-five" />
+          <span className="login-star star-six" />
+          <span className="login-star star-seven" />
+          <span className="login-star star-eight" />
+          <span className="login-star star-nine" />
+          <span className="login-star star-ten" />
+          <span className="login-star star-eleven" />
+          <span className="login-star star-twelve" />
+          <span className="shooting-star comet-one" />
+          <span className="shooting-star comet-two" />
+          <span className="shooting-star comet-three" />
+          <span className="shooting-star comet-four" />
+          <span className="shooting-star comet-five" />
+        </div>
         <div className="hero-brand-row"><AcadexBrand light /><UniversitySignature onGreen /></div>
         <div className="hero-copy">
           <span className="eyebrow">Acompañamiento que impulsa tu futuro</span>
@@ -646,9 +707,9 @@ function LoginPage({ onSubmit, error, lockout, onEmailChange, onRequestPasswordC
           <form className="login-form" onSubmit={submitLogin}>
             <label>Correo institucional<div className="login-input"><Mail size={18} /><input name="email" type="email" pattern=".+@unitropico[.]edu[.]co" title="Usa tu correo institucional @unitropico.edu.co." placeholder="nombre@unitropico.edu.co" autoComplete="username" value={email} onChange={(event) => { setEmail(event.target.value); onEmailChange(); setRequestMessage(''); setResetCodeRequested(false); setResetCode('') }} required /></div></label>
             <label>Contraseña<div className="password-field login-input"><LockKeyhole size={18} /><input name="password" type={showPassword ? 'text' : 'password'} placeholder="Ingresa tu contraseña" autoComplete="current-password" minLength={1} maxLength={72} required /><button type="button" aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
-            <div className="form-row"><label className="check-label"><input type="checkbox" checked={rememberEmail} onChange={(event) => setRememberEmail(event.target.checked)} /> <span>Recordarme</span></label></div>
+            <div className="form-row"><label className="check-label"><input name="rememberMe" type="checkbox" checked={rememberEmail} onChange={(event) => setRememberEmail(event.target.checked)} /> <span>Recordarme en este navegador</span></label></div>
             {error && !(lockout && remainingSeconds === 0) && <div className="form-error"><CircleAlert size={16} />{error}</div>}
-            {lockout && <div className="login-lockout-notice" role="status"><strong>{lockout.type === 'suspension24h' ? 'Cuenta suspendida temporalmente' : 'Pausa de seguridad'}</strong><span>{remainingSeconds > 0 ? `Podrás volver a intentar en ${formatRemaining(remainingSeconds)}.` : 'Ya puedes volver a intentar iniciar sesión.'}</span>{lockout.type === 'suspension24h' && remainingSeconds > 0 && <button className="secondary-button" type="button" onClick={() => void requestPasswordHelp()} disabled={requestingChange || !/.+@unitropico\.edu\.co$/i.test(email)}>{requestingChange ? 'Enviando...' : lockout.canResetWithCode ? 'Enviar código para cambiar mi contraseña' : 'Notificar al administrador para cambiar mi contraseña'}</button>}{requestMessage && <small>{requestMessage}</small>}{resetCodeRequested && lockout.canResetWithCode && <div className="admin-reset-code-form"><label>Código de 6 dígitos<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" /></label><label>Nueva contraseña<input type="password" autoComplete="new-password" minLength={8} maxLength={72} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><label>Confirmar nueva contraseña<input type="password" autoComplete="new-password" minLength={8} maxLength={72} value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} /></label>{resetError && <small className="admin-reset-error" role="alert">{resetError}</small>}<button className="primary-button" type="button" disabled={requestingChange} onClick={() => void submitPasswordReset()}>{requestingChange ? 'Actualizando...' : 'Verificar código y cambiar contraseña'}</button></div>}</div>}
+            {lockout && <div className="login-lockout-notice" role="status"><strong>{lockout.type === 'suspension24h' ? 'Cuenta suspendida temporalmente' : 'Pausa de seguridad'}</strong><span>{remainingSeconds > 0 ? `Podrás volver a intentar en ${formatRemaining(remainingSeconds)}.` : 'Ya puedes volver a intentar iniciar sesión.'}</span>{lockout.type === 'suspension24h' && remainingSeconds > 0 && !recoveryMethod && <div className="login-recovery-options"><p>¿Cómo deseas recuperar el acceso?</p><button className="secondary-button" type="button" onClick={() => void requestPasswordHelp('ayuda-admin')} disabled={requestingChange || !/.+@unitropico\.edu\.co$/i.test(email)}>Pedir ayuda a un administrador</button><button className="secondary-button" type="button" onClick={() => void requestPasswordHelp('codigo')} disabled={requestingChange || !/.+@unitropico\.edu\.co$/i.test(email)}>Recibir un código por correo</button></div>}{requestMessage && <small>{requestMessage}</small>}{resetCodeRequested && recoveryMethod === 'codigo' && <div className="admin-reset-code-form"><label>Código de 6 dígitos<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={resetCode} disabled={resetCodeVerified} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" /></label>{!resetCodeVerified ? <button className="primary-button" type="button" disabled={requestingChange} onClick={() => void verifyResetCode()}>{requestingChange ? 'Verificando…' : 'Verificar código'}</button> : <><label>Nueva contraseña<input type="password" autoComplete="new-password" minLength={8} maxLength={72} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><label>Confirmar nueva contraseña<input type="password" autoComplete="new-password" minLength={8} maxLength={72} value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} /></label><button className="primary-button" type="button" disabled={requestingChange} onClick={() => void submitPasswordReset()}>{requestingChange ? 'Actualizando…' : 'Cambiar contraseña'}</button></>}{resetError && <small className="admin-reset-error" role="alert">{resetError}</small>}</div>}</div>}
             <button className="primary-button login-button" type="submit" disabled={lockout?.type === 'espera' && remainingSeconds > 0}>Iniciar sesión <ArrowRight size={18} /></button>
           </form>
           <p className="login-note">Al continuar, accederás con tus credenciales institucionales.</p>
@@ -677,8 +738,12 @@ function RoleSelector({ user, onSelect, onLogout, error }: { user: User; onSelec
   return <div className="role-selector-backdrop"><section className="role-selector-card" role="dialog" aria-modal="true" aria-labelledby="role-selector-title"><div className="role-selector-header"><div><span className="eyebrow">Acceso institucional</span><h2 id="role-selector-title">¿Con qué rol deseas ingresar?</h2><p>{user.name}, selecciona el espacio que quieres utilizar en esta sesión.</p></div></div><div className="role-selector-grid">{user.roles.map((availableRole) => <button key={availableRole} className={`role-card ${role === availableRole ? 'selected' : ''}`} onClick={() => setRole(availableRole)}><span className="role-card-icon">{icons[availableRole]}</span><span><strong>{availableRole}</strong><small>{descriptions[availableRole]}</small></span>{role === availableRole && <Check size={18} />}</button>)}</div>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<div className="role-selector-actions"><button className="secondary-button" onClick={onLogout}>Cerrar sesión</button><button className="primary-button" onClick={() => onSelect(role)}>Continuar <ArrowRight size={17} /></button></div></section></div>
 }
 
+function SidebarSky() { return <div className="login-sky sidebar-sky" aria-hidden="true"><span className="login-cloud cloud-one"/><span className="login-cloud cloud-two"/><span className="login-cloud cloud-three"/>{Array.from({length:12},(_,index)=><span className={`login-star star-${['one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve'][index]}`} key={index}/>)}{Array.from({length:5},(_,index)=><span className={`shooting-star comet-${['one','two','three','four','five'][index]}`} key={index}/>)}</div> }
+
 function AdminShell({ user, activeRole, periodName, periods, children, view, onNavigate, onLogout, onChangeRole, accessToken, mobileNav, onToggleMobileNav }: { user: User; activeRole: Role; periodName: string; periods: AcademicPeriod[]; children: ReactNode; view: View; onNavigate: (view: View, target?: 'credentials') => void; onLogout: () => void; onChangeRole: () => void; accessToken: string; mobileNav: boolean; onToggleMobileNav: () => void }) {
   const [periodModalOpen, setPeriodModalOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('acadex:sidebar-collapsed') === 'true')
+  const toggleSidebar = () => setSidebarCollapsed((collapsed) => { const next = !collapsed; window.localStorage.setItem('acadex:sidebar-collapsed', String(next)); return next })
   const navItems: { id: View; label: string; icon: ReactNode }[] = [
     { id: 'dashboard', label: 'Resumen general', icon: <LayoutDashboard size={19} /> },
     { id: 'usuarios', label: 'Gestión de usuarios', icon: <UsersRound size={19} /> },
@@ -691,14 +756,15 @@ function AdminShell({ user, activeRole, periodName, periods, children, view, onN
   ]
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${mobileNav ? 'mobile-open' : ''}`}>
+      <aside className={`sidebar ${sidebarCollapsed && !mobileNav ? 'sidebar-collapsed' : ''} ${mobileNav ? 'mobile-open' : ''}`}>
+        <SidebarSky />
+        <button className="sidebar-collapse-toggle" type="button" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Desplegar menú' : 'Contraer menú'} aria-expanded={!sidebarCollapsed} aria-controls="main-sidebar-navigation" title={sidebarCollapsed ? 'Desplegar menú' : 'Contraer menú'}>{sidebarCollapsed ? <ChevronRight size={17}/> : <ChevronLeft size={17}/>}</button>
         <div className="sidebar-top">
           <AcadexBrand className="sidebar-brand" />
           <button className="sidebar-close" onClick={onToggleMobileNav}><X size={18} /></button>
           <div className="workspace-card"><div className="workspace-icon"><Settings2 size={16} /></div><div><span>Espacio de trabajo</span><strong>Administración</strong></div></div>
-          <nav className="main-nav"><span className="nav-label">MENÚ PRINCIPAL</span>{navItems.map((item) => <button key={item.id} className={view === item.id ? 'nav-item active' : 'nav-item'} onClick={() => onNavigate(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
+          <nav id="main-sidebar-navigation" className="main-nav"><span className="nav-label">MENÚ PRINCIPAL</span>{navItems.map((item) => <button key={item.id} title={sidebarCollapsed ? item.label : undefined} className={view === item.id ? 'nav-item active' : 'nav-item'} onClick={() => onNavigate(item.id)}>{item.icon}<span>{item.label}</span></button>)}<a className="help-card menu-help-item" href="mailto:soporte.tutorias@unitropico.edu.co?subject=Soporte%20Acadex" title={sidebarCollapsed ? '¿Necesitas ayuda? · Contactar soporte' : undefined} aria-label="¿Necesitas ayuda? Contactar soporte"><Mail size={17}/><div><strong>¿Necesitas ayuda?</strong><span>Contactar soporte</span></div><ArrowRight size={15}/></a><UniversitySignature onGreen /></nav>
         </div>
-        <div className="sidebar-bottom"><UniversitySignature onGreen /><a className="help-card" href="mailto:soporte.tutorias@unitropico.edu.co?subject=Soporte%20Acadex"><Mail size={17} /><div><strong>¿Necesitas ayuda?</strong><span>Contactar soporte</span></div><ArrowRight size={15} /></a></div>
       </aside>
       {mobileNav && <button className="mobile-overlay" aria-label="Cerrar menú" onClick={onToggleMobileNav} />}
       <div className="main-area">
@@ -736,6 +802,8 @@ function ProfileMenu({ user, activeRole, onLogout }: { user: User; activeRole: R
 function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, onLogout, onChangeRole, accessToken, requests, subjects, sessions, availability, onSessionsChange, dataError, dataLoading, onRequestsChange }: { user: User; activeRole: PortalRole; periodName: string; periods: AcademicPeriod[]; view: PortalView; onNavigate: (view: PortalView) => void; onLogout: () => void; onChangeRole: () => void; accessToken: string; requests: Request[]; subjects: Array<{ id: number; codigo: string; nombre: string }>; sessions: PortalSession[]; availability: PortalAvailability[]; onSessionsChange: (sessions: PortalSession[]) => void; dataError: string; dataLoading: boolean; onRequestsChange: (requests: Request[]) => void }) {
   const [mobileNav, setMobileNav] = useState(false)
   const [periodModalOpen, setPeriodModalOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('acadex:sidebar-collapsed') === 'true')
+  const toggleSidebar = () => setSidebarCollapsed((collapsed) => { const next = !collapsed; window.localStorage.setItem('acadex:sidebar-collapsed', String(next)); return next })
   const navByRole: Record<PortalRole, { id: PortalView; label: string; icon: ReactNode }[]> = {
     Tutor: [
       { id: 'inicio', label: 'Mi resumen', icon: <LayoutDashboard size={19} /> },
@@ -751,12 +819,14 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
       { id: 'horarios', label: 'Mis horarios', icon: <CalendarClock size={19} /> },
       { id: 'solicitudes', label: 'Solicitudes asignadas', icon: <ClipboardIcon /> },
       { id: 'sesiones', label: 'Mis sesiones', icon: <CalendarDays size={19} /> },
+      { id: 'configuracion', label: 'Configuración', icon: <Settings2 size={19} /> },
     ],
     Estudiante: [
       { id: 'inicio', label: 'Mi resumen', icon: <LayoutDashboard size={19} /> },
       { id: 'solicitar', label: 'Solicitar acompañamiento', icon: <Send size={19} /> },
       { id: 'mis-solicitudes', label: 'Mis solicitudes', icon: <ClipboardIcon /> },
       { id: 'mis-sesiones', label: 'Mis sesiones', icon: <CalendarDays size={19} /> },
+      { id: 'configuracion', label: 'Configuración', icon: <Settings2 size={19} /> },
     ],
   }
   const portalRole = activeRole
@@ -764,14 +834,15 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
   const go = (nextView: PortalView) => { onNavigate(nextView); setMobileNav(false) }
 
   return <div className="app-shell">
-    <aside className={`sidebar ${mobileNav ? 'mobile-open' : ''}`}>
+    <aside className={`sidebar ${sidebarCollapsed && !mobileNav ? 'sidebar-collapsed' : ''} ${mobileNav ? 'mobile-open' : ''}`}>
+      <SidebarSky />
+      <button className="sidebar-collapse-toggle" type="button" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Desplegar menú' : 'Contraer menú'} aria-expanded={!sidebarCollapsed} aria-controls="main-sidebar-navigation" title={sidebarCollapsed ? 'Desplegar menú' : 'Contraer menú'}>{sidebarCollapsed ? <ChevronRight size={17}/> : <ChevronLeft size={17}/>}</button>
       <div className="sidebar-top">
         <AcadexBrand className="sidebar-brand" />
         <button className="sidebar-close" onClick={() => setMobileNav(false)}><X size={18} /></button>
         <div className="workspace-card"><div className="workspace-icon"><GraduationCap size={16} /></div><div><span>Portal personal</span><strong>{activeRole}</strong></div></div>
-        <nav className="main-nav"><span className="nav-label">MI ESPACIO</span>{navItems.map((item) => <button key={item.id} className={view === item.id ? 'nav-item active' : 'nav-item'} onClick={() => go(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
+        <nav id="main-sidebar-navigation" className="main-nav"><span className="nav-label">MI ESPACIO</span>{navItems.map((item) => <button key={item.id} title={sidebarCollapsed ? item.label : undefined} className={view === item.id ? 'nav-item active' : 'nav-item'} onClick={() => go(item.id)}>{item.icon}<span>{item.label}</span></button>)}<a className="help-card menu-help-item" href="mailto:soporte.tutorias@unitropico.edu.co?subject=Soporte%20Acadex" title={sidebarCollapsed ? '¿Necesitas ayuda? · Contactar soporte' : undefined} aria-label="¿Necesitas ayuda? Contactar soporte"><Mail size={17}/><div><strong>¿Necesitas ayuda?</strong><span>Contactar soporte</span></div><ArrowRight size={15}/></a><UniversitySignature onGreen /></nav>
       </div>
-      <div className="sidebar-bottom"><UniversitySignature onGreen /><a className="help-card" href="mailto:soporte.tutorias@unitropico.edu.co?subject=Soporte%20Acadex"><Mail size={17} /><div><strong>¿Necesitas ayuda?</strong><span>Contactar soporte</span></div><ArrowRight size={15} /></a></div>
     </aside>
     {mobileNav && <button className="mobile-overlay" aria-label="Cerrar menú" onClick={() => setMobileNav(false)} />}
     <div className="main-area">
@@ -802,12 +873,13 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
         {view === 'disponibilidad' && <AvailabilityView periodName={periodName} availability={availability} accessToken={accessToken} />}
         {view === 'horarios' && <ScheduleView user={user} periodName={periodName} availability={availability} />}
         {(view === 'sesiones' || view === 'mis-sesiones') && <PortalSessions sessions={sessions} activeRole={activeRole} periodName={periodName} accessToken={accessToken} onChange={onSessionsChange} />}
-        {view === 'solicitar' && <StudentRequestForm accessToken={accessToken} subjects={subjects} user={user} requests={requests} onChange={onRequestsChange} />}
+        {view === 'solicitar' && <StudentRequestForm accessToken={accessToken} subjects={subjects} periods={periods} user={user} requests={requests} onChange={onRequestsChange} />}
         {view === 'mis-solicitudes' && <MyRequests requests={requests} />}
         {view === 'solicitudes' && <AssignedRequests accessToken={accessToken} activeRole={activeRole} requests={requests} onChange={onRequestsChange} />}
         {view === 'informes' && activeRole === 'Tutor' && <TutorReports accessToken={accessToken} sessions={sessions} />}
         {view === 'informe-mensual' && activeRole === 'Tutor' && <MonthlyTutorReportView accessToken={accessToken} />}
-        {view === 'configuracion' && activeRole === 'Tutor' && <TutorConfiguration accessToken={accessToken} />}
+        {view === 'configuracion' && activeRole === 'Tutor' && <TutorConfiguration accessToken={accessToken} email={user.email} />}
+        {view === 'configuracion' && activeRole !== 'Tutor' && <AccountSecurityView accessToken={accessToken} email={user.email} />}
       </main>
       {periodModalOpen && <PeriodModal periodName={periodName} periods={periods} onClose={() => setPeriodModalOpen(false)} />}
     </div>
@@ -993,7 +1065,7 @@ function PortalSessions({ sessions, activeRole, periodName, accessToken, onChang
   const upcoming=sessions.filter(session=>['Programada','Confirmada','Reprogramada','En Proceso'].includes(session.status)).length
   const completed=sessions.filter(session=>['Realizada','Finalizada'].includes(session.status)).length
   const complete=async(session:PortalSession)=>{if(!session.requestId)return;if(!window.confirm(`¿Marcar como realizada la tutoría de ${session.subject}?`))return;try{await markAssignedRequestAttended(accessToken,session.requestId);onChange(sessions.map(item=>item.id===session.id?{...item,status:'Realizada'}:item));setError('')}catch(e){setError(e instanceof ApiError?e.message:'No se pudo cerrar la tutoría como realizada.')}}
-  return <><PageHeader eyebrow={`Mi espacio / ${activeRole==='Estudiante'?'Mis sesiones':'Mis sesiones'}`} title="Mis sesiones" description={activeRole==='Tutor'?'Consulta tu agenda y registra la atención cuando finalice cada tutoría.':'Revisa aquí las sesiones registradas para tu rol en el periodo académico activo.'}/><section className="metrics-grid sessions-summary"><MetricCard label="En agenda" value={String(upcoming)} detail={`Periodo ${periodName}`} icon={<CalendarDays size={20}/>} tone="blue"/><MetricCard label="Realizadas" value={String(completed)} detail="Atenciones completadas" icon={<Check size={20}/>} tone="green"/><MetricCard label="Total" value={String(sessions.length)} detail="Sesiones registradas" icon={<Clock3 size={20}/>} tone="purple"/></section>{error&&<div className="error-message">{error}</div>}<section className="panel sessions-panel"><div className="sessions-toolbar"><label className="sessions-search"><Search size={18}/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar por asignatura, lugar o modalidad" aria-label="Buscar sesiones"/></label><label className="sessions-filter-label">Estado<select value={filter} onChange={event=>setFilter(event.target.value)}>{statuses.map(status=><option key={status}>{status}</option>)}</select></label><span className="sessions-result-count">{filtered.length} de {sessions.length}</span></div><div className="session-card-list">{filtered.map(session=><article className="session-card" key={session.id}><div className="session-card-date"><strong>{new Date(`${session.date}T12:00:00`).getDate()}</strong><span>{new Intl.DateTimeFormat('es-CO',{month:'short'}).format(new Date(`${session.date}T12:00:00`))}</span></div><div className="session-card-main"><div className="session-card-heading"><div><span className="session-reference">Sesión #{String(session.id).padStart(4,'0')}</span><h3>{session.subject}</h3></div><RequestStatus status={session.status}/></div><div className="session-card-details"><span><Clock3 size={15}/>{formatDate(session.date)} · {session.startTime}–{session.endTime}</span><span><Building2 size={15}/>{session.place||'Sin espacio asignado'}</span><span><CalendarClock size={15}/>{session.modality}</span></div></div>{activeRole==='Tutor'&&session.requestId&&['Confirmada','Programada','Reprogramada','En Proceso'].includes(session.status)&&<button className="secondary-button small-button session-complete-action" onClick={()=>void complete(session)}><Check size={16}/> Marcar realizada</button>}</article>)}{!filtered.length&&<div className="sessions-empty"><CalendarDays size={28}/><strong>{sessions.length?'No hay sesiones que coincidan con los filtros.':'Aún no tienes sesiones registradas.'}</strong><span>{sessions.length?'Ajusta la búsqueda o el estado seleccionado.':'Cuando se asigne una tutoría o monitoría aparecerá aquí.'}</span></div>}</div></section></>
+  return <><PageHeader eyebrow="Mi espacio / Mis sesiones" title="Mis sesiones" description={activeRole==='Tutor'?'Consulta tu agenda y registra la atención cuando finalice cada tutoría.':'Revisa tus sesiones del periodo académico activo.'}/><section className="metrics-grid sessions-summary"><MetricCard label="En agenda" value={String(upcoming)} detail={`Periodo ${periodName}`} icon={<CalendarDays size={20}/>} tone="blue"/><MetricCard label="Realizadas" value={String(completed)} detail="Atenciones completadas" icon={<Check size={20}/>} tone="green"/><MetricCard label="Total" value={String(sessions.length)} detail="Sesiones registradas" icon={<Clock3 size={20}/>} tone="purple"/></section>{error&&<div className="error-message">{error}</div>}<section className="panel sessions-panel"><div className="sessions-toolbar"><label className="sessions-search"><Search size={18}/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar por asignatura, lugar o modalidad" aria-label="Buscar sesiones"/></label><label className="sessions-filter-label">Estado<select value={filter} onChange={event=>setFilter(event.target.value)}>{statuses.map(status=><option key={status}>{status}</option>)}</select></label><span className="sessions-result-count">{filtered.length} de {sessions.length}</span></div><div className="session-card-list">{filtered.map(session=><details className="session-card compact-session-card" key={session.id}><summary className="compact-session-summary"><span className="session-card-date"><strong>{new Date(`${session.date}T12:00:00`).getDate()}</strong><span>{new Intl.DateTimeFormat('es-CO',{month:'short'}).format(new Date(`${session.date}T12:00:00`))}</span></span><span className="compact-session-main"><span className="session-reference">Sesión #{String(session.id).padStart(4,'0')}</span><strong>{session.subject}</strong><small><Clock3 size={14}/>{session.startTime}–{session.endTime}</small></span><RequestStatus status={session.status}/><span className="compact-session-toggle">Ver detalles</span></summary><div className="compact-session-details"><span><CalendarDays size={15}/>{formatDate(session.date)}</span><span><Building2 size={15}/>{session.place||'Sin espacio asignado'}</span><span><CalendarClock size={15}/>{session.modality}</span>{activeRole==='Tutor'&&session.requestId&&['Confirmada','Programada','Reprogramada','En Proceso'].includes(session.status)&&<button className="secondary-button small-button session-complete-action" onClick={()=>void complete(session)}><Check size={16}/> Marcar realizada</button>}</div></details>)}{!filtered.length&&<div className="sessions-empty"><CalendarDays size={28}/><strong>{sessions.length?'No hay sesiones que coincidan con los filtros.':'Aún no tienes sesiones registradas.'}</strong><span>{sessions.length?'Ajusta la búsqueda o el estado seleccionado.':'Cuando se asigne una tutoría o monitoría aparecerá aquí.'}</span></div>}</div></section></>
 }
 function TutorReports({accessToken,sessions:portalSessions}:{accessToken:string;sessions:PortalSession[]}){
   const [sessions,setSessions]=useState<TutorReportableSession[]>([]);const [active,setActive]=useState<(TutorReportableSession&Partial<TutorReportRecord>)|null>(null);const [viewOnly,setViewOnly]=useState(false);const [attendees,setAttendees]=useState<number[]>([]);const [satIds,setSatIds]=useState<number[]>([]);const [satText,setSatText]=useState<Record<number,string>>({});const [error,setError]=useState('');const [success,setSuccess]=useState('');const [busy,setBusy]=useState(false)
@@ -1015,90 +1087,108 @@ function TutorReports({accessToken,sessions:portalSessions}:{accessToken:string;
   return <><PageHeader eyebrow="Mi espacio / Reportes" title="Reportes de tutoría" description="Crea reportes para sesiones finalizadas, edita borradores o reportes devueltos y consulta los enviados." />{error&&<div className="error-message">{error}</div>}{success&&<div className="success-message"><Check size={16}/>{success}</div>}{!hasPortalSessions&&<div className="form-field-hint">No se cargaron sesiones para este periodo.</div>}{sessions.length>0&&pendingReports===0&&<div className="notice-card" role="status">Todas las tutorías finalizadas ya tienen un reporte. Los reportes enviados, aprobados o entregados se conservan como historial; se habilita Crear cuando finalice una tutoría aún no reportada.</div>}<section className="panel table-panel"><div className="table-meta"><span><strong>{sessions.length}</strong> sesiones realizadas</span><span>El reporte queda ligado a la sesión</span></div><div className="table-scroll"><table><thead><tr><th>SESIÓN</th><th>FECHA</th><th>ESTADO DEL REPORTE</th><th className="align-right">ACCIÓN</th></tr></thead><tbody>{sessions.map(row=><tr key={row.id}><td><strong>{row.subject}</strong>{row.isRecovery&&<span className="table-subtext">Recuperación de tutoría</span>}<span className="table-subtext">{row.student} · {row.startTime}–{row.endTime}</span></td><td>{formatDate(row.date)}</td><td>{row.reportStatus??'Pendiente'}</td><td className="align-right">{!row.reportId?<button className="primary-button small-button" onClick={()=>void begin(row)}>Crear reporte</button>:row.reportStatus==='Borrador'||row.reportStatus==='Devuelto'?<div className="report-actions"><button className="secondary-button small-button" onClick={()=>void begin(row)}>Editar</button><button className="primary-button small-button" onClick={()=>void submit(row)}>Enviar</button>{row.reportStatus==='Borrador'&&<button className="delete-action" aria-label="Eliminar borrador" title="Eliminar borrador" onClick={()=>void remove(row)}><Trash2 size={16}/></button>}</div>:<button className="secondary-button small-button" onClick={()=>void begin(row,true)}>Ver reporte</button>}</td></tr>)}{!sessions.length&&<tr><td colSpan={4} className="empty-table-cell">No hay tutorías finalizadas que requieran reporte. Los reportes existentes permanecen disponibles en el historial.</td></tr>}</tbody></table></div></section>{active&&<Modal title={viewOnly?`Reporte · ${active.reportTitle??active.subject}`:'Reporte de tutoría'} subtitle={`${active.isRecovery?'Recuperación de tutoría':'Tutoría'} · ${active.subject} · ${formatDate(active.date)} · ${active.student}`} wide onClose={()=>setActive(null)}><form className="modal-form tutor-report-form" onSubmit={save}><fieldset className="report-fields" disabled={viewOnly}><label>Título del reporte<input name="title" required minLength={3} maxLength={200} defaultValue={active.reportTitle??`Tutoría de ${active.subject} · ${active.date}`}/></label><div className="form-columns"><label>Día de tutoría<input type="date" value={active.date} readOnly/></label><label>Lugar de la tutoría<input name="place" required minLength={2} maxLength={255} defaultValue={active.place||''}/></label></div><div className="form-columns"><label>Hora real de inicio<input name="startTime" type="time" required defaultValue={active.startTime}/></label><label>Hora real de fin<input name="endTime" type="time" required defaultValue={active.endTime}/></label></div><label>Descripción de la tutoría<textarea name="description" required minLength={5} maxLength={5000} defaultValue={active.description??''}/></label><fieldset className="role-profile-fieldset"><legend>Asistencia · {active.student}</legend><label className="check-row"><input type="checkbox" checked={attendees.includes(active.studentId)} onChange={()=>toggle(active.studentId,'attendee')}/> {active.student} asistió</label>{attendees.includes(active.studentId)&&<label className="check-row"><input type="checkbox" checked={satIds.includes(active.studentId)} onChange={()=>toggle(active.studentId,'sat')}/> Este estudiante pertenece a categoría SAT</label>}{satIds.includes(active.studentId)&&<label>Seguimiento del estudiante SAT<textarea required minLength={5} maxLength={1000} value={satText[active.studentId]??''} onChange={e=>setSatText({...satText,[active.studentId]:e.target.value})} placeholder="Describe su participación, dificultades y seguimiento recomendado."/></label>}<p className="form-field-hint">Asistentes seleccionados: {attendees.length} · Estudiantes SAT: {satIds.length}</p></fieldset><label>Actividades realizadas<textarea name="activities" maxLength={2000} defaultValue={active.activities??''}/></label><div className="form-columns"><label>Logros<textarea name="achievements" maxLength={1000} defaultValue={active.achievements??''}/></label><label>Dificultades<textarea name="difficulties" maxLength={1000} defaultValue={active.difficulties??''}/></label></div><label>Recomendaciones<textarea name="recommendations" maxLength={1000} defaultValue={active.recommendations??''}/></label><fieldset className="role-profile-fieldset"><legend>Adjuntos (máximo 4 MB cada uno)</legend><label>Listado de asistencia (PDF o imagen)<input name="Asistencia" type="file" accept="application/pdf,image/png,image/jpeg,image/webp"/></label><label>Actividades realizadas (PDF, imagen o Word)<input name="Actividades" type="file" accept="application/pdf,image/png,image/jpeg,image/webp,.doc,.docx"/></label><div className="form-columns"><label>Evidencia de inicio<input name="EvidenciaInicio" type="file" accept="image/png,image/jpeg,image/webp"/></label><label>Evidencia de fin<input name="EvidenciaFin" type="file" accept="image/png,image/jpeg,image/webp"/></label></div></fieldset></fieldset>{Boolean(active.reportId&&active.attachments?.length)&&<div className="report-attachments"><strong>Adjuntos existentes</strong>{active.attachments?.map(file=><button type="button" key={file.id} onClick={()=>void downloadAttachment(Number(active.reportId),file)}><Download size={15}/><span>{file.name}</span><small>{file.category}</small></button>)}</div>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={()=>setActive(null)}>{viewOnly?'Cerrar':'Cancelar'}</button>{!viewOnly&&<button className="primary-button" disabled={busy}>{busy?'Guardando…':active.reportId?'Actualizar borrador':'Guardar borrador'}</button>}</div></form></Modal>}</>
 }
 
-function TutorReportReminder({accessToken}:{accessToken:string}){const [pending,setPending]=useState<TutorReportableSession[]>([]);useEffect(()=>{void listTutorReportableSessions(accessToken).then(rows=>setPending(rows.filter(row=>!row.reportId))).catch(()=>undefined)},[accessToken]);const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Bogota'}).format(new Date());const late=pending.filter(row=>row.date<today);if(localStorage.getItem('acadex:tutor-report-reminders')==='false'||!late.length)return null;const day=new Intl.DateTimeFormat('en-US',{weekday:'long',timeZone:'America/Bogota'}).format(new Date());const catchup=['Friday','Saturday','Sunday'].includes(day);return <div className={catchup?'notice-card':'error-message'} role="status">Tienes {late.length} tutoría(s) realizada(s) sin reporte. {catchup?'Puedes completar ahora los reportes atrasados.':'Podrás completar los reportes pendientes desde el viernes y durante el fin de semana.'}</div>}function TutorConfiguration({accessToken}:{accessToken:string}){const [error,setError]=useState('');const [success,setSuccess]=useState('');const [busy,setBusy]=useState(false);const [reminders,setReminders]=useState(()=>localStorage.getItem('acadex:tutor-report-reminders')!=='false');const submit=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();const form=new FormData(event.currentTarget);const currentPassword=String(form.get('currentPassword')??''),newPassword=String(form.get('newPassword')??''),confirmPassword=String(form.get('confirmPassword')??'');if(newPassword!==confirmPassword){setError('La nueva contraseña y la confirmación no coinciden.');return}setBusy(true);setError('');setSuccess('');try{await changePassword(accessToken,{currentPassword,newPassword,confirmPassword});event.currentTarget.reset();setSuccess('La contraseña se actualizó correctamente.')}catch(e){setError(e instanceof ApiError?e.message:'No se pudo actualizar la contraseña.')}finally{setBusy(false)}};return <><PageHeader eyebrow="Mi espacio / Configuración" title="Configuración de cuenta" description="Administra de forma segura tus credenciales y preferencias personales."/><div className="tutor-settings-grid"><section className="panel form-panel"><div className="panel-heading"><div><h3>Cambiar contraseña</h3><p>Usa una contraseña robusta de al menos 8 caracteres.</p></div><LockKeyhole size={20}/></div>{error&&<div className="error-message">{error}</div>}{success&&<div className="success-message"><Check size={16}/>{success}</div>}<form className="portal-form" onSubmit={submit}><label>Contraseña actual<input name="currentPassword" type="password" required autoComplete="current-password"/></label><label>Nueva contraseña<input name="newPassword" type="password" required minLength={8} maxLength={72} autoComplete="new-password"/></label><label>Confirmar nueva contraseña<input name="confirmPassword" type="password" required minLength={8} maxLength={72} autoComplete="new-password"/></label><button className="primary-button" disabled={busy}><LockKeyhole size={17}/>{busy?'Actualizando…':'Actualizar contraseña'}</button></form></section><section className="panel form-panel"><div className="panel-heading"><div><h3>Preferencias de trabajo</h3><p>Información visible para organizar tu actividad docente.</p></div><Settings2 size={20}/></div><label className="tutor-pref-toggle"><input type="checkbox" checked={reminders} onChange={event=>{setReminders(event.target.checked);localStorage.setItem("acadex:tutor-report-reminders",String(event.target.checked))}}/><span><strong>Avisos de reportes pendientes</strong><small>Mostrar recordatorios de tutorías realizadas sin reporte.</small></span></label><ul className="tutor-preference-list"><li><Check size={16}/> Periodo académico: datos sincronizados con el periodo activo.</li><li><Check size={16}/> Disponibilidad: gestionada desde el calendario semanal.</li><li><Check size={16}/> Reportes: guarda borradores antes de enviarlos.</li><li><ShieldCheck size={16}/> La preferencia de avisos se guarda en este navegador.</li></ul></section></div></>}
+function TutorReportReminder({accessToken}:{accessToken:string}){const [pending,setPending]=useState<TutorReportableSession[]>([]);useEffect(()=>{void listTutorReportableSessions(accessToken).then(rows=>setPending(rows.filter(row=>!row.reportId))).catch(()=>undefined)},[accessToken]);const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Bogota'}).format(new Date());const late=pending.filter(row=>row.date<today);if(localStorage.getItem('acadex:tutor-report-reminders')==='false'||!late.length)return null;const day=new Intl.DateTimeFormat('en-US',{weekday:'long',timeZone:'America/Bogota'}).format(new Date());const catchup=['Friday','Saturday','Sunday'].includes(day);return <div className={catchup?'notice-card':'error-message'} role="status">Tienes {late.length} tutoría(s) realizada(s) sin reporte. {catchup?'Puedes completar ahora los reportes atrasados.':'Podrás completar los reportes pendientes desde el viernes y durante el fin de semana.'}</div>}
+function AccountPasswordCode({accessToken,email}:{accessToken:string;email:string}){const [sent,setSent]=useState(false);const [verified,setVerified]=useState(false);const [code,setCode]=useState('');const [newPassword,setNewPassword]=useState('');const [confirmPassword,setConfirmPassword]=useState('');const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [success,setSuccess]=useState('');const request=async()=>{setBusy(true);setError('');setSuccess('');try{const result=await requestAccountPasswordCode(accessToken);setSent(true);setSuccess(result.message)}catch(e){setError(e instanceof ApiError?e.message:'No se pudo enviar el código.')}finally{setBusy(false)}};const verify=async()=>{setBusy(true);setError('');try{await verifyAccountPasswordCode(accessToken,code);setVerified(true);setSuccess('Código verificado. Ahora puedes elegir tu contraseña nueva.')}catch(e){setError(e instanceof ApiError?e.message:'No se pudo verificar el código.')}finally{setBusy(false)}};const save=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();setBusy(true);setError('');setSuccess('');try{await changeAccountPasswordWithCode(accessToken,{newPassword,confirmPassword});setSent(false);setVerified(false);setCode('');setNewPassword('');setConfirmPassword('');setSuccess('La contraseña se actualizó correctamente.')}catch(e){setError(e instanceof ApiError?e.message:'No se pudo actualizar la contraseña.')}finally{setBusy(false)}};return <section className="panel form-panel"><div className="panel-heading"><div><h3>Cambiar contraseña</h3><p>Verificaremos tu identidad mediante un código enviado al correo de tu cuenta.</p></div><LockKeyhole size={20}/></div><p className="account-security-email">Correo registrado: <strong>{email}</strong></p>{error&&<div className="error-message" role="alert">{error}</div>}{success&&<div className="success-message" role="status"><Check size={16}/>{success}</div>}{!sent?<button className="primary-button" type="button" disabled={busy} onClick={()=>void request()}>{busy?'Enviando…':'Enviar código de verificación'}</button>:<form className="portal-form" onSubmit={save}><label>Código de 6 dígitos<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} required disabled={verified} value={code} onChange={event=>setCode(event.target.value.replace(/\D/g,'').slice(0,6))} placeholder="123456"/></label>{!verified?<button className="primary-button" type="button" disabled={busy||code.length!==6} onClick={()=>void verify()}>{busy?'Verificando…':'Verificar código'}</button>:<><label>Nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={newPassword} onChange={event=>setNewPassword(event.target.value)}/></label><label>Confirmar nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label><button className="primary-button" disabled={busy}>{busy?'Guardando…':'Actualizar contraseña'}</button></>}</form>}</section>}
+function AccountSecurityView({accessToken,email}:{accessToken:string;email:string}){return <><PageHeader eyebrow="Mi espacio / Configuración" title="Seguridad de la cuenta" description="Actualiza tu contraseña con una verificación enviada a tu correo institucional."/><div className="tutor-settings-grid"><AccountPasswordCode accessToken={accessToken} email={email}/></div></>}
+function TutorConfiguration({accessToken,email}:{accessToken:string;email:string}){const [reminders,setReminders]=useState(()=>localStorage.getItem('acadex:tutor-report-reminders')!=='false');return <><PageHeader eyebrow="Mi espacio / Configuración" title="Configuración de cuenta" description="Administra de forma segura tus credenciales y preferencias personales."/><div className="tutor-settings-grid"><AccountPasswordCode accessToken={accessToken} email={email}/><section className="panel form-panel"><div className="panel-heading"><div><h3>Preferencias de trabajo</h3><p>Información visible para organizar tu actividad docente.</p></div><Settings2 size={20}/></div><label className="tutor-pref-toggle"><input type="checkbox" checked={reminders} onChange={event=>{setReminders(event.target.checked);localStorage.setItem("acadex:tutor-report-reminders",String(event.target.checked))}}/><span><strong>Avisos de reportes pendientes</strong><small>Mostrar recordatorios de tutorías realizadas sin reporte.</small></span></label><ul className="tutor-preference-list"><li><Check size={16}/> Periodo académico: datos sincronizados con el periodo activo.</li><li><Check size={16}/> Disponibilidad: gestionada desde el calendario semanal.</li><li><Check size={16}/> Reportes: guarda borradores antes de enviarlos.</li><li><ShieldCheck size={16}/> La preferencia de avisos se guarda en este navegador.</li></ul></section></div></>}
 
-function StudentRequestForm({ accessToken, subjects, user, requests, onChange }: { accessToken: string; subjects: Array<{ id: number; codigo: string; nombre: string }>; user: User; requests: Request[]; onChange: (requests: Request[]) => void }) {
+function StudentRequestForm({ accessToken, subjects, periods, user, requests, onChange }: { accessToken: string; subjects: Array<{ id: number; codigo: string; nombre: string }>; periods: AcademicPeriod[]; user: User; requests: Request[]; onChange: (requests: Request[]) => void }) {
+  const todayDate = new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Bogota'}).format(new Date())
+  const activePeriods = periods.filter((period) => ['Activo','Planeado'].includes(period.estado) && (!period.endDate || period.endDate >= todayDate))
+  const initialPeriod = activePeriods.find((period) => period.estado === 'Activo')?.id ?? activePeriods[0]?.id ?? 0
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [reason, setReason] = useState('')
+  const [subjectId, setSubjectId] = useState('')
+  const [periodId, setPeriodId] = useState(String(initialPeriod || ''))
+  const [type, setType] = useState<'Monitoría'|'Tutoría'|'Acompañamiento'>('Monitoría')
+  const [priority, setPriority] = useState<'Alta'|'Media'|'Baja'>('Media')
+  const [accompanimentRole, setAccompanimentRole] = useState<'Tutor'|'Monitor'>('Monitor')
+  const [motive, setMotive] = useState('')
+  const [description, setDescription] = useState('')
+  const [staff, setStaff] = useState<StudentRequestStaff[]>([])
+  const [staffId, setStaffId] = useState('')
+  const [staffLoading, setStaffLoading] = useState(false)
+  const [slots, setSlots] = useState<AdminRequestSlot[]>([])
+  const [slotKey, setSlotKey] = useState('')
+  const [slotsLoading, setSlotsLoading] = useState(false)
+  const [createdRequestId, setCreatedRequestId] = useState<number | null>(null)
+  const role: 'Tutor'|'Monitor' = type === 'Tutoría' ? 'Tutor' : type === 'Monitoría' ? 'Monitor' : accompanimentRole
+
+  useEffect(() => { if(!periodId&&initialPeriod)setPeriodId(String(initialPeriod)) },[initialPeriod,periodId])
+
+  useEffect(() => {
+    let active = true
+    setStaff([]); setStaffId(''); setSlots([]); setSlotKey(''); setError('')
+    if (!subjectId || !periodId) return
+    setStaffLoading(true)
+    void listStudentRequestStaffApi(accessToken,{subjectId:Number(subjectId),periodId:Number(periodId),role})
+      .then((rows) => { if(active) setStaff(rows) })
+      .catch((e) => { if(active) setError(e instanceof ApiError ? e.message : 'No fue posible consultar tutores y monitores disponibles.') })
+      .finally(() => { if(active) setStaffLoading(false) })
+    return () => { active = false }
+  },[accessToken,subjectId,periodId,role])
+
+  useEffect(() => {
+    let active = true
+    setSlots([]); setSlotKey('')
+    if (!staffId || !subjectId || !periodId) return
+    setSlotsLoading(true)
+    void listStudentRequestSlotsApi(accessToken,{userId:Number(staffId),role,subjectId:Number(subjectId),periodId:Number(periodId)})
+      .then((rows) => { if(active) setSlots(rows) })
+      .catch((e) => { if(active) setError(e instanceof ApiError ? e.message : 'No fue posible consultar los horarios disponibles.') })
+      .finally(() => { if(active) setSlotsLoading(false) })
+    return () => { active = false }
+  },[accessToken,staffId,subjectId,periodId,role])
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const formElement = event.currentTarget
-    const form = new FormData(formElement)
-    setSent(false)
-    setError('')
-    setSubmitting(true)
+    const selectedSlot = slots.find((slot) => `${slot.date}|${slot.startTime}|${slot.endTime}|${slot.modality}` === slotKey)
+    if (!staffId || !selectedSlot) { setError('Selecciona un tutor o monitor y un horario disponible antes de crear la solicitud.'); return }
+    setSent(false); setError(''); setSubmitting(true)
     try {
-      const saved = await createRequestApi(accessToken, {
-        subject: String(form.get('subject') ?? ''),
-        type: String(form.get('type') ?? 'Monitoría') as 'Monitoría' | 'Tutoría',
-        priority: String(form.get('priority') ?? 'Media') as 'Alta' | 'Media' | 'Baja',
-        reason,
-      })
-      onChange([saved as Request, ...requests])
-      setSent(true)
-      setReason('')
-      formElement.reset()
-    } catch (error) {
-      setError(error instanceof ApiError ? error.message : 'No fue posible registrar la solicitud. Revisa tu conexión e inténtalo de nuevo.')
-    } finally {
-      setSubmitting(false)
-    }
+      if (createdRequestId) {
+        const assigned = await assignRequestApi(accessToken,createdRequestId,{userId:Number(staffId),role,date:selectedSlot.date,startTime:selectedSlot.startTime,endTime:selectedSlot.endTime,modality:selectedSlot.modality})
+        onChange([assigned as Request,...requests.filter((item)=>item.id!==assigned.id)])
+        setCreatedRequestId(null); setSent(true); setMotive(''); setDescription('')
+        return
+      }
+      const saved = await createRequestApi(accessToken,{subjectId:Number(subjectId),periodId:Number(periodId),type,priority,motive:motive.trim(),description:description.trim()})
+      try {
+        const assigned = await assignRequestApi(accessToken,saved.id,{userId:Number(staffId),role,date:selectedSlot.date,startTime:selectedSlot.startTime,endTime:selectedSlot.endTime,modality:selectedSlot.modality})
+        onChange([assigned as Request,...requests.filter((item)=>item.id!==assigned.id)])
+        setSent(true); setMotive(''); setDescription('')
+      } catch (assignmentError) {
+        onChange([saved as Request,...requests.filter((item)=>item.id!==saved.id)])
+        setCreatedRequestId(saved.id)
+        setError(`La solicitud #${saved.id} quedó registrada, pero no se pudo programar la primera sesión: ${assignmentError instanceof ApiError ? assignmentError.message : 'error al reservar el horario'}. Ya puedes verla en “Mis solicitudes”; si sigue pendiente, contacta a administración.`)
+      }
+    } catch (submitError) {
+      setError(submitError instanceof ApiError ? submitError.message : 'No fue posible registrar la solicitud. Revisa tu conexión e inténtalo de nuevo.')
+    } finally { setSubmitting(false) }
   }
+
+  const studentProfile = user.profiles?.estudiante
   return <>
-    <PageHeader eyebrow="Mi espacio / Solicitudes" title="Solicitar acompañamiento" description="Cuéntanos en qué asignatura necesitas apoyo y te ayudaremos a encontrar el acompañamiento adecuado." />
+    <PageHeader eyebrow="Mi espacio / Solicitudes" title="Solicitar acompañamiento" description="Completa los datos académicos, elige un responsable con horario disponible y envía tu solicitud." />
     <section className="panel form-panel">
-      <div className="panel-heading">
-        <div>
-          <h3>Nueva solicitud de acompañamiento</h3>
-          <p>La coordinación académica revisará tu requerimiento y asignará un tutor o monitor calificado.</p>
-        </div>
-        <div className="quick-icon blue-bg"><Send size={18} /></div>
-      </div>
+      <div className="panel-heading"><div><h3>Nueva solicitud de acompañamiento</h3><p>Al enviar, se registrará la solicitud y la primera sesión quedará programada con el responsable que elijas.</p></div><div className="quick-icon blue-bg"><Send size={18}/></div></div>
       <form className="portal-form" onSubmit={submit} onInvalidCapture={() => setSent(false)}>
+        <div className="student-selected-banner"><div><strong>{user.name} · {studentProfile?.studentCode ?? user.code}</strong><span>Programa académico: {studentProfile?.programName ?? 'Asignado a tu perfil institucional'}</span></div></div>
         <div className="form-columns">
-          <label>Código institucional del estudiante
-            <input value={user.code} readOnly className="readonly-code-input" title="Código institucional asociado a tu cuenta" />
-            <span className="form-field-hint">Código único asignado a tu perfil institucional (no editable).</span>
-          </label>
-          <label>Tipo de acompañamiento
-            <select name="type" onChange={() => { setSent(false); setError('') }}>
-              <option>Monitoría</option>
-              <option>Tutoría</option>
-            </select>
-          </label>
-          <label>Prioridad estimada
-            <select name="priority" defaultValue="Media" onChange={() => { setSent(false); setError('') }}>
-              <option>Media</option>
-              <option>Alta</option>
-              <option>Baja</option>
-            </select>
-          </label>
+          <label>Asignatura<select required value={subjectId} onChange={(event)=>{setSubjectId(event.target.value);setSent(false)}}><option value="">Selecciona la asignatura</option>{subjects.map((subject)=><option key={subject.id} value={subject.id}>[{subject.codigo}] {subject.nombre}</option>)}</select></label>
+          <label>Periodo académico<select required value={periodId} onChange={(event)=>{setPeriodId(event.target.value);setSent(false)}}><option value="">Selecciona un periodo</option>{activePeriods.map((period)=><option key={period.id} value={period.id}>{period.nombre} · {period.estado}</option>)}</select></label>
+          <label>Tipo de acompañamiento<select value={type} onChange={(event)=>{setType(event.target.value as typeof type);setSent(false)}}><option>Monitoría</option><option>Tutoría</option><option>Acompañamiento</option></select></label>
+          <label>Nivel de prioridad<select value={priority} onChange={(event)=>setPriority(event.target.value as typeof priority)}><option>Alta</option><option>Media</option><option>Baja</option></select></label>
         </div>
-        <label>Asignatura registrada en MariaDB
-          <select name="subject" required defaultValue="" onChange={() => { setSent(false); setError('') }}>
-            <option value="">Selecciona la asignatura que estás cursando</option>
-            {subjects.map((s) => <option key={s.id} value={s.nombre}>[{s.codigo}] {s.nombre}</option>)}
-          </select>
-        </label>
-        <label>Motivo y necesidad académica
-          <textarea
-            name="reason"
-            required
-            minLength={5}
-            maxLength={500}
-            value={reason}
-            onChange={(e) => { setReason(e.target.value); setSent(false); setError('') }}
-            placeholder="Describe brevemente los temas o dificultades que deseas reforzar (ej. Repaso para parcial de cálculo o apoyo en ejercicios prácticos)..."
-          />
-          <div className="form-field-meta">
-            <span>{reason.length}/500 caracteres</span>
-          </div>
-        </label>
-        {error && <div className="form-error" role="alert"><CircleAlert size={16} />{error}</div>}
-        <button className="primary-button" type="submit" disabled={submitting}><Send size={17} /> {submitting ? 'Enviando…' : 'Enviar solicitud'}</button>
-        {sent && <div className="success-message"><Check size={16} /> Solicitud registrada con éxito en MariaDB. Puedes seguir su avance en “Mis solicitudes”.</div>}
+        {!activePeriods.length && <div className="period-empty-state" role="status"><strong>No hay un periodo académico vigente para crear solicitudes.</strong><span>{periods.length ? `Periodos registrados: ${periods.map((period)=>`${period.nombre} (${period.endDate&&period.endDate<todayDate?'vencido al '+formatDate(period.endDate):period.estado})`).join(' · ')}. Un administrador debe crear o activar el periodo actual desde Configuración → Periodos académicos.` : 'Un administrador debe crear y activar el periodo actual desde Configuración → Periodos académicos.'}</span></div>}
+        {type==='Acompañamiento'&&<label>Rol responsable<select value={accompanimentRole} onChange={(event)=>setAccompanimentRole(event.target.value as 'Tutor'|'Monitor')}><option value="Monitor">Monitor</option><option value="Tutor">Tutor</option></select></label>}
+        {subjectId&&periodId&&<section className="request-assignment-fields" aria-label="Responsable y horario de la solicitud"><label>{role} responsable<select required value={staffId} onChange={(event)=>setStaffId(event.target.value)} disabled={staffLoading}><option value="">{staffLoading?'Consultando responsables…':staff.length?`Selecciona ${role.toLowerCase()}`:`No hay ${role.toLowerCase()} asignados a esta asignatura y periodo`}</option>{staff.map((person)=><option key={person.userId} value={person.userId}>{person.name} · {person.weeklyHours} h/semana</option>)}</select>{!staffLoading&&!staff.length&&<small className="form-field-hint">No hay responsables con asignación activa para la asignatura y el periodo seleccionados. Prueba otra asignatura o periodo, o contacta a administración.</small>}</label>{staffId&&<label>Fecha y bloque horario disponible<select required value={slotKey} onChange={(event)=>setSlotKey(event.target.value)} disabled={slotsLoading}><option value="">{slotsLoading?'Consultando horarios…':slots.length?'Selecciona una fecha y bloque disponible':'No hay horarios disponibles para este responsable'}</option>{slots.map((slot)=>{const key=`${slot.date}|${slot.startTime}|${slot.endTime}|${slot.modality}`;return <option key={key} value={key}>{formatDate(slot.date)} · {slot.day} · {slot.startTime}–{slot.endTime} · {slot.modality}</option>})}</select>{!slotsLoading&&!slots.length&&staffId&&<small className="form-field-hint">El responsable no tiene bloques libres en el periodo seleccionado. Elige otra persona o consulta a administración.</small>}</label>}</section>}
+        <label>Motivo principal<input required minLength={3} maxLength={500} value={motive} onChange={(event)=>setMotive(event.target.value)} placeholder="Ej. Preparación para parcial o refuerzo en un tema específico"/><span className="form-field-hint">{motive.length}/500 caracteres</span></label>
+        <label>Descripción detallada de la necesidad<textarea required minLength={3} maxLength={500} value={description} onChange={(event)=>setDescription(event.target.value)} placeholder="Explica el contexto, las dificultades con los contenidos y el apoyo que necesitas."/><span className="form-field-hint">{description.length}/500 caracteres</span></label>
+        {error&&<div className="form-error" role="alert"><CircleAlert size={16}/>{error}</div>}
+        <button className="primary-button" type="submit" disabled={submitting||!activePeriods.length||staffLoading||slotsLoading}><Send size={17}/>{submitting?(createdRequestId?'Programando…':'Registrando y programando…'):createdRequestId?`Reintentar programación de solicitud #${createdRequestId}`:'Crear solicitud y programar sesión'}</button>
+        {sent&&<div className="success-message" role="status"><Check size={16}/> Solicitud y primera sesión registradas correctamente. Puedes consultar el seguimiento en “Mis solicitudes” y la fecha en “Mis sesiones”.</div>}
       </form>
     </section>
   </>
@@ -1753,6 +1843,9 @@ function RequestsView({ requests, accessToken, catalogs, onChange, onNavigate }:
   const [assignmentScheduleSlots,setAssignmentScheduleSlots]=useState<AdminRequestSlot[]>([])
   const [assignmentSlotKey,setAssignmentSlotKey]=useState('')
   const [assignmentSlotsLoading,setAssignmentSlotsLoading]=useState(false)
+  const [assignmentStaff,setAssignmentStaff]=useState<StudentRequestStaff[]>([])
+  const [assignmentStaffLoading,setAssignmentStaffLoading]=useState(false)
+  const [assignmentStaffError,setAssignmentStaffError]=useState('')
   const [requestScheduleSlots,setRequestScheduleSlots]=useState<AdminRequestSlot[]>([])
   const [requestSlotKey,setRequestSlotKey]=useState('')
   const [requestSlotsLoading,setRequestSlotsLoading]=useState(false)
@@ -1778,6 +1871,18 @@ function RequestsView({ requests, accessToken, catalogs, onChange, onNavigate }:
       .then(rows=>{if(active)setRequestScheduleSlots(rows)}).catch(error=>{if(active)window.alert(error instanceof ApiError?error.message:'No fue posible consultar el horario del responsable.')}).finally(()=>{if(active)setRequestSlotsLoading(false)})
     return ()=>{active=false}
   },[accessToken,newRequestStaffId,newRequestSubjectId,newRequestPeriodId,createAssignmentRole])
+
+  useEffect(()=>{
+    let active=true
+    setAssignmentStaff([]);setAssignmentStaffError('');setAssignmentUserId('')
+    if(!assigningRequest||!assigningRequest.subjectId||!assigningRequest.periodId)return
+    setAssignmentStaffLoading(true)
+    void listAdminRequestStaffApi(accessToken,{subjectId:assigningRequest.subjectId,periodId:assigningRequest.periodId,role:assignmentRole})
+      .then(rows=>{if(active)setAssignmentStaff(rows)})
+      .catch(error=>{if(active)setAssignmentStaffError(error instanceof ApiError?error.message:'No fue posible cargar tutores y monitores asignados.')})
+      .finally(()=>{if(active)setAssignmentStaffLoading(false)})
+    return ()=>{active=false}
+  },[accessToken,assigningRequest,assignmentRole])
 
   useEffect(()=>{
     let active=true
@@ -1861,7 +1966,6 @@ function RequestsView({ requests, accessToken, catalogs, onChange, onNavigate }:
     }
   }
   const clearFilters = () => { setQuery(''); setStatus('Todos los estados'); setSubjectId('Todos') }
-  const eligibleAssignments = catalogs?.staffAssignments.filter((item) => item.subjectId === assigningRequest?.subjectId && item.periodId === assigningRequest?.periodId && item.role === assignmentRole) ?? []
   const openAssignment = (request: Request) => { setAssigningRequest(request); setAssignmentRole(request.type === 'Tutoría' ? 'Tutor' : 'Monitor'); setAssignmentUserId('');setAssignmentScheduleSlots([]);setAssignmentSlotKey('') }
   const submitAssignment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1913,12 +2017,12 @@ function RequestsView({ requests, accessToken, catalogs, onChange, onNavigate }:
         <button className="secondary-button filter-button" onClick={clearFilters}><RefreshCw size={16} /> Limpiar</button>
       </div>
       <div className="table-meta"><span><strong>{filtered.length}</strong> solicitudes encontradas</span><span><span className="priority-dot" /> Datos persistidos en MariaDB</span></div>
-      <div className="table-scroll"><table><thead><tr><th>SOLICITUD</th><th>PROGRAMA</th><th>TIPO</th><th>PRIORIDAD</th><th>ESTADO</th><th>FECHA</th><th className="align-right">ACCIONES</th></tr></thead><tbody>{filtered.map((request) => <tr key={request.id}><td><div className="request-cell"><div className="request-id">#{String(request.id).padStart(4, '0')}</div><div><strong>{request.subject}</strong><span>{request.student}</span>{request.motive && <small className="table-subtext">{request.motive}</small>}{request.cancellationReason && <small className="table-subtext cancellation-note">Cancelación del tutor: {request.cancellationReason}</small>}</div></div></td><td>{request.program ?? '—'}</td><td><span className="type-label"><span className={request.type === 'Monitoría' ? 'type-dot blue-dot' : 'type-dot purple-dot'} />{request.type}</span></td><td><span className={`priority ${request.priority.toLowerCase()}`}><span />{request.priority}</span></td><td><RequestStatus status={request.status} /></td><td><span className="muted-cell">{request.date}</span></td><td className="align-right"><div className="actions-inline">{['Pendiente','Aprobada'].includes(request.status)&&<><button className="reject-action" onClick={()=>void updateStatus(request.id,'Cancelada')} title="Cancelar solicitud">Cancelar</button><button className="row-action" onClick={() => openAssignment(request)}>Asignar tutor/monitor</button></>}{request.status==='Atendida'&&<button className="row-action" onClick={()=>void updateStatus(request.id,'Finalizada')}>Cerrar solicitud</button>}<button className="delete-action" onClick={() => deleteRequestPermanently(request)} title="Eliminar permanentemente de MariaDB"><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>
+      <div className="table-scroll"><table><thead><tr><th>SOLICITUD</th><th>PROGRAMA</th><th>TIPO</th><th>PRIORIDAD</th><th>ESTADO</th><th>FECHA</th><th className="align-right">ACCIONES</th></tr></thead><tbody>{filtered.map((request) => <tr key={request.id}><td><div className="request-cell"><div className="request-id">#{String(request.id).padStart(4, '0')}</div><div><strong>{request.subject}</strong><span>{request.student}</span>{request.motive && <small className="table-subtext">{request.motive}</small>}{request.cancellationReason && <small className="table-subtext cancellation-note">Cancelación del tutor: {request.cancellationReason}</small>}</div></div></td><td>{request.program ?? '—'}</td><td><span className="type-label"><span className={request.type === 'Monitoría' ? 'type-dot blue-dot' : 'type-dot purple-dot'} />{request.type}</span></td><td><span className={`priority ${request.priority.toLowerCase()}`}><span />{request.priority}</span></td><td><RequestStatus status={request.status} /></td><td><span className="muted-cell">{request.date}</span></td><td className="align-right"><div className="actions-inline"><div className="request-action-stack">{['Pendiente','Aprobada'].includes(request.status)&&<><button className="row-action request-compact-action" onClick={() => openAssignment(request)}>Asignar tutor/monitor</button><button className="reject-action request-compact-action" onClick={()=>void updateStatus(request.id,'Cancelada')} title="Cancelar solicitud">Cancelar</button></>}{request.status==='Atendida'&&<button className="row-action request-compact-action" onClick={()=>void updateStatus(request.id,'Finalizada')}>Cerrar solicitud</button>}</div><button className="delete-action" onClick={() => deleteRequestPermanently(request)} title="Eliminar permanentemente de MariaDB"><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>
     </section>
 
     {calendarModalOpen && <CalendarModal requests={requests} onClose={() => setCalendarModalOpen(false)} />}
 
-    {assigningRequest && <Modal title="Asignar acompañamiento" subtitle={`${assigningRequest.student} · ${assigningRequest.subject} · ${assigningRequest.period ?? 'Periodo actual'}`} wide onClose={() => setAssigningRequest(null)}><form className="modal-form" onSubmit={submitAssignment}><div className="form-columns"><label>Rol responsable<select value={assignmentRole} onChange={(event) => { setAssignmentRole(event.target.value as 'Tutor' | 'Monitor'); setAssignmentUserId('') }}><option value="Monitor">Monitor</option><option value="Tutor">Tutor</option></select></label><label>{assignmentRole} con asignación activa<select name="userId" required value={assignmentUserId} onChange={(event) => setAssignmentUserId(event.target.value)}><option value="">Selecciona una persona</option>{eligibleAssignments.map((item) => <option key={`${item.role}-${item.userId}`} value={item.userId}>{item.name} · {item.weeklyHours} h/semana</option>)}</select>{eligibleAssignments.length === 0 && <small className="form-field-hint">No hay {assignmentRole.toLowerCase()} asignados a esta asignatura y periodo. Revisa Gestión de usuarios.</small>}</label></div><label>Fecha y bloque horario disponible<select name="scheduleSlot" required value={assignmentSlotKey} onChange={event=>setAssignmentSlotKey(event.target.value)}><option value="">{assignmentSlotsLoading?"Consultando horarios…":"Selecciona una fecha y bloque del horario activo"}</option>{assignmentScheduleSlots.map(slot=>{const key=`${slot.date}|${slot.startTime}|${slot.endTime}|${slot.modality}`;return <option key={key} value={key}>{formatDate(slot.date)} · {slot.day} · {slot.startTime}–{slot.endTime} · {slot.modality}</option>})}</select>{!assignmentSlotsLoading&&!assignmentScheduleSlots.length&&assignmentUserId&&<small className="form-field-hint">El responsable no tiene fechas libres en su horario activo para este periodo. Revisa su horario semanal o selecciona otra persona.</small>}</label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setAssigningRequest(null)}>Cancelar</button><button className="primary-button" type="submit" disabled={!eligibleAssignments.length || !assignmentUserId}><CalendarClock size={17} /> Asignar y programar sesión</button></div></form></Modal>}
+    {assigningRequest && <Modal title="Asignar acompañamiento" subtitle={`${assigningRequest.student} · ${assigningRequest.subject} · ${assigningRequest.period ?? 'Periodo actual'}`} wide onClose={() => setAssigningRequest(null)}><form className="modal-form" onSubmit={submitAssignment}><div className="form-columns"><label>Rol responsable<select value={assignmentRole} onChange={(event) => { setAssignmentRole(event.target.value as 'Tutor' | 'Monitor'); setAssignmentUserId('') }}><option value="Monitor">Monitor</option><option value="Tutor">Tutor</option></select></label><label>{assignmentRole} con asignación activa<select name="userId" required value={assignmentUserId} onChange={(event) => setAssignmentUserId(event.target.value)} disabled={assignmentStaffLoading}><option value="">{assignmentStaffLoading?'Buscando asignaciones…':'Selecciona una persona'}</option>{assignmentStaff.map((item) => <option key={`${item.role}-${item.userId}`} value={item.userId}>{item.name} · {item.weeklyHours} h/semana</option>)}</select>{assignmentStaffError&&<small className="form-field-hint" role="alert">{assignmentStaffError}</small>}{!assignmentStaffLoading&&!assignmentStaffError&&assignmentStaff.length === 0 && <small className="form-field-hint">No hay {assignmentRole.toLowerCase()} con asignación activa para esta asignatura y periodo. Revisa Gestión de usuarios y que la asignación corresponda a “{assigningRequest.subject}”.</small>}</label></div><label>Fecha y bloque horario disponible<select name="scheduleSlot" required value={assignmentSlotKey} onChange={event=>setAssignmentSlotKey(event.target.value)} disabled={!assignmentUserId||assignmentSlotsLoading}><option value="">{assignmentSlotsLoading?"Consultando horarios…":"Selecciona una fecha y bloque del horario activo"}</option>{assignmentScheduleSlots.map(slot=>{const key=`${slot.date}|${slot.startTime}|${slot.endTime}|${slot.modality}`;return <option key={key} value={key}>{formatDate(slot.date)} · {slot.day} · {slot.startTime}–{slot.endTime} · {slot.modality}</option>})}</select>{!assignmentSlotsLoading&&!assignmentScheduleSlots.length&&assignmentUserId&&<small className="form-field-hint">El responsable no tiene fechas libres en su horario activo para este periodo. Revisa su horario semanal o selecciona otra persona.</small>}</label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setAssigningRequest(null)}>Cancelar</button><button className="primary-button" type="submit" disabled={assignmentStaffLoading||!assignmentStaff.length||!assignmentUserId||assignmentSlotsLoading||!assignmentScheduleSlots.length}><CalendarClock size={17} /> Asignar y programar sesión</button></div></form></Modal>}
 
     {modal && <Modal title="Crear solicitud administrativa" subtitle="Selecciona al estudiante y la asignatura en MariaDB." wide onClose={() => setModal(false)}>
       <form className="modal-form" onSubmit={createRequest}>
@@ -2131,10 +2235,13 @@ function AcademicPeriodsPanel({ accessToken }: { accessToken: string }) {
   const emptyForm: PeriodForm = { name: '', startDate: '', endDate: '', status: 'Planeado' }
   const [periods, setPeriods] = useState<AcademicPeriod[]>([])
   const [form, setForm] = useState<PeriodForm>(emptyForm)
-  const [editingId, setEditingId] = useState<number | null>(null)
+  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [editingPeriod, setEditingPeriod] = useState<AcademicPeriod | null>(null)
+  const [editForm, setEditForm] = useState<PeriodForm>(emptyForm)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [editError, setEditError] = useState('')
   const load = async () => {
     setLoading(true)
     try { setPeriods(await listAdminPeriods(accessToken)); setError('') }
@@ -2147,17 +2254,29 @@ function AcademicPeriodsPanel({ accessToken }: { accessToken: string }) {
     setSaving(true)
     setError('')
     try {
-      if (editingId) await updateAcademicPeriod(accessToken, editingId, form)
-      else await createAcademicPeriod(accessToken, form)
+      await createAcademicPeriod(accessToken, form)
       setForm(emptyForm)
-      setEditingId(null)
+      setCreateModalOpen(false)
       await load()
     } catch (saveError) { setError(saveError instanceof ApiError ? saveError.message : 'No fue posible guardar el periodo.') }
     finally { setSaving(false) }
   }
   const edit = (period: AcademicPeriod) => {
-    setEditingId(period.id)
-    setForm({ name: period.nombre, startDate: period.startDate ?? '', endDate: period.endDate ?? '', status: period.estado })
+    setEditingPeriod(period)
+    setEditForm({ name: period.nombre, startDate: period.startDate ?? '', endDate: period.endDate ?? '', status: period.estado })
+    setEditError('')
+  }
+  const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!editingPeriod) return
+    setSaving(true)
+    setEditError('')
+    try {
+      await updateAcademicPeriod(accessToken, editingPeriod.id, editForm)
+      setEditingPeriod(null)
+      await load()
+    } catch (saveError) { setEditError(saveError instanceof ApiError ? saveError.message : 'No fue posible guardar los cambios del periodo.') }
+    finally { setSaving(false) }
   }
   const remove = async (period: AcademicPeriod) => {
     if (!window.confirm(`¿Eliminar permanentemente el periodo ${period.nombre}? Solo se permite si no está activo y no tiene solicitudes, horarios ni asignaciones asociadas.`)) return
@@ -2165,8 +2284,31 @@ function AcademicPeriodsPanel({ accessToken }: { accessToken: string }) {
     try { await deleteAcademicPeriod(accessToken, period.id); await load() }
     catch (deleteError) { setError(deleteError instanceof ApiError ? deleteError.message : 'No fue posible eliminar el periodo.') }
   }
-  const cancelEdit = () => { setEditingId(null); setForm(emptyForm) }
-  return <section className="panel form-panel settings-panel"><div className="panel-heading"><div><h3>Periodos académicos</h3><p>CRUD administrativo. Los periodos vinculados a solicitudes, horarios o asignaciones no se pueden eliminar.</p></div><CalendarDays size={20} /></div>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<form className="settings-form" onSubmit={save}><label>Nombre<input required minLength={4} maxLength={20} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="2026-2" /></label><div className="form-columns"><label>Fecha inicial<input type="date" required value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label><label>Fecha final<input type="date" required value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.target.value })} /></label><label>Estado<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as AcademicPeriod['estado'] })}><option>Planeado</option><option>Activo</option><option>Finalizado</option></select></label></div><div className="modal-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Crear periodo'}</button>{editingId && <button type="button" className="secondary-button" onClick={cancelEdit}>Cancelar edición</button>}</div></form><div className="table-scroll"><table><thead><tr><th>PERIODO</th><th>VIGENCIA</th><th>ESTADO</th><th /></tr></thead><tbody>{periods.map((period) => <tr key={period.id}><td><strong>{period.nombre}</strong></td><td>{period.startDate} — {period.endDate}</td><td>{period.estado}</td><td className="align-right"><button className="row-action" onClick={() => edit(period)}>Editar</button><button className="delete-action" onClick={() => void remove(period)} title="Eliminar periodo"><Trash2 size={16} /></button></td></tr>)}{!periods.length && <tr><td colSpan={4}>{loading ? 'Cargando periodos...' : 'No hay periodos registrados.'}</td></tr>}</tbody></table></div></section>
+  return <>
+    <section className="panel form-panel settings-panel">
+      <div className="panel-heading"><div><h3>Periodos académicos</h3><p>Los periodos vinculados a solicitudes, horarios o asignaciones no se pueden eliminar.</p></div><button type="button" className="primary-button" onClick={() => { setForm(emptyForm); setError(''); setCreateModalOpen(true) }}><Plus size={17}/> Nuevo periodo</button></div>
+      {error && !createModalOpen && <div className="form-error"><CircleAlert size={16} />{error}</div>}
+      <div className="table-scroll"><table><thead><tr><th>PERIODO</th><th>VIGENCIA</th><th>ESTADO</th><th /></tr></thead><tbody>{periods.map((period) => <tr key={period.id}><td><strong>{period.nombre}</strong></td><td>{period.startDate} — {period.endDate}</td><td>{period.estado}</td><td className="align-right"><button type="button" className="row-action" onClick={() => edit(period)}>Editar</button><button type="button" className="delete-action" onClick={() => void remove(period)} title="Eliminar periodo"><Trash2 size={16} /></button></td></tr>)}{!periods.length && <tr><td colSpan={4}>{loading ? 'Cargando periodos...' : 'No hay periodos registrados.'}</td></tr>}</tbody></table></div>
+    </section>
+    {createModalOpen && <Modal title="Crear periodo académico" subtitle="Ingresa el nombre, las fechas oficiales y su estado." onClose={() => { if (!saving) setCreateModalOpen(false) }}>
+      <form className="modal-form" onSubmit={save}>
+        {error && <div className="form-error"><CircleAlert size={16}/>{error}</div>}
+        <label>Nombre<input required minLength={4} maxLength={20} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="2026-2" /></label>
+        <div className="form-columns"><label>Fecha inicial<input type="date" required value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label><label>Fecha final<input type="date" required value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.target.value })} /></label></div>
+        <label>Estado<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as AcademicPeriod['estado'] })}><option>Planeado</option><option>Activo</option><option>Finalizado</option></select></label>
+        <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setCreateModalOpen(false)} disabled={saving}>Cancelar</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Creando...' : 'Crear periodo'}</button></div>
+      </form>
+    </Modal>}
+    {editingPeriod && <Modal title="Editar periodo académico" subtitle={`Actualiza los datos de ${editingPeriod.nombre}.`} onClose={() => setEditingPeriod(null)}>
+      <form className="modal-form" onSubmit={saveEdit}>
+        {editError && <div className="form-error"><CircleAlert size={16}/>{editError}</div>}
+        <label>Nombre<input required minLength={4} maxLength={20} value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /></label>
+        <div className="form-columns"><label>Fecha inicial<input type="date" required value={editForm.startDate} onChange={(event) => setEditForm({ ...editForm, startDate: event.target.value })} /></label><label>Fecha final<input type="date" required value={editForm.endDate} onChange={(event) => setEditForm({ ...editForm, endDate: event.target.value })} /></label></div>
+        <label>Estado<select value={editForm.status} onChange={(event) => setEditForm({ ...editForm, status: event.target.value as AcademicPeriod['estado'] })}><option>Planeado</option><option>Activo</option><option>Finalizado</option></select></label>
+        <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setEditingPeriod(null)} disabled={saving}>Cancelar</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Guardar cambios'}</button></div>
+      </form>
+    </Modal>}
+  </>
 }
 
 function SuspendedAccountsPanel({ accessToken }: { accessToken: string }) {
@@ -2198,7 +2340,6 @@ function ConfigurationView({ accessToken, currentUser }: { accessToken: string; 
   const [resetError, setResetError] = useState('')
   const [resetBusy, setResetBusy] = useState(false)
   const [passwordCopied, setPasswordCopied] = useState(false)
-  const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [exportingSecrets, setExportingSecrets] = useState(false)
@@ -2222,7 +2363,6 @@ function ConfigurationView({ accessToken, currentUser }: { accessToken: string; 
     try { await navigator.clipboard.writeText(temporaryPassword.value); setPasswordCopied(true) }
     catch { setPasswordCopied(false) }
   }
-  const savePassword = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { await changePassword(accessToken, passwords); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }); setPasswordModalOpen(false); window.alert('Contraseña actualizada correctamente.') } catch (error) { window.alert(error instanceof ApiError ? error.message : 'No fue posible cambiar la contraseña.') } }
   const exportCredentials = () => downloadCsv(`cuentas${role ? `-${role.toLowerCase()}` : ''}.csv`, accounts.map((account) => ({ nombre: account.name, codigo: account.code, correo: account.email, roles: account.roles.join(' / '), estado: account.status })))
   const eligibleForSecretExport = accounts.filter((account) => account.status === 'Activo' && account.id !== currentUser.id && Boolean(role) && account.roles.includes(role as Role))
   const exportTemporaryPasswords = async () => {
@@ -2239,7 +2379,7 @@ function ConfigurationView({ accessToken, currentUser }: { accessToken: string; 
     finally { setExportingSecrets(false) }
   }
   return <><PageHeader eyebrow="Administración / Configuración" title="Configuración y credenciales" description="Gestiona el acceso de usuarios y la operación académica del sistema." action={<div className="configuration-header-actions"><button type="button" className="secondary-button" onClick={() => setPasswordModalOpen(true)}><LockKeyhole size={17} /> Cambiar mi contraseña</button><button className="secondary-button" onClick={exportCredentials} disabled={!accounts.length}><Download size={17} /> Exportar listado</button></div>} /><section className="configuration-section"><header className="configuration-section-heading"><span>OPERACIÓN ACADÉMICA</span><h2>Supervisión y periodos</h2><p>Estado de MariaDB y vigencia del calendario académico.</p></header><div className="configuration-stack"><DatabaseControlPanel accessToken={accessToken} /><AcademicPeriodsPanel accessToken={accessToken} /></div></section><section className="configuration-section"><header className="configuration-section-heading"><span>SEGURIDAD</span><h2>Acceso y credenciales</h2><p>Consulta cuentas, restablece claves temporales y actualiza tu contraseña.</p></header><SuspendedAccountsPanel accessToken={accessToken} /><div className="configuration-grid"><section className="panel table-panel"><div className="panel-heading"><div><h3>Credenciales de usuarios</h3><p>Las claves guardadas no se muestran. Solo se exportan claves temporales de un uso.</p></div><KeyRound size={20} /></div><div className="table-toolbar config-toolbar"><select value={role} onChange={(event) => { setRole(event.target.value); void loadAccounts(event.target.value) }}><option value="">Todos los roles</option><option>Administrador</option><option>Estudiante</option><option>Tutor</option><option>Monitor</option></select><button className="secondary-button filter-button" onClick={() => void loadAccounts()}><RefreshCw size={16} /> {loading ? 'Cargando...' : 'Actualizar'}</button></div><div className="credential-export-panel"><div><strong>Exportar claves temporales</strong><span>Selecciona un rol. Las claves actuales se revocan y se exige cambiarlas en el primer acceso.</span></div><button className="secondary-button" type="button" onClick={() => void exportTemporaryPasswords()} disabled={!role || loading || !eligibleForSecretExport.length || exportingSecrets}>{exportingSecrets ? 'Generando...' : `Generar CSV (${eligibleForSecretExport.length})`} <Download size={16} /></button></div><div className="table-scroll"><table><thead><tr><th>USUARIO</th><th>ROLES</th><th>CLAVE</th><th>ESTADO</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><strong>{account.name}</strong><span className="table-subtext">{account.email}</span></td><td><div className="user-roles">{account.roles.map((item) => <span className="role-pill" key={item}>{item}</span>)}</div></td><td><code className="credential-code">Protegida</code></td><td>{account.status}</td><td className="align-right"><button className="row-action" disabled={account.id===currentUser.id || account.status!=='Activo'} title={account.id===currentUser.id ? 'Usa el formulario Cambiar mi contraseña' : 'Generar una clave temporal de un solo uso'} onClick={() => void reset(account)} aria-label="Generar clave temporal">Generar clave</button></td></tr>)}</tbody></table></div></section></div></section>
-{passwordModalOpen && <Modal title="Cambiar mi contraseña" subtitle="Usa una contraseña nueva de 8 a 72 caracteres." onClose={() => { setPasswordModalOpen(false); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }) }}><form className="modal-form password-change-modal-form" onSubmit={savePassword}><label>Contraseña actual<input type="password" required autoComplete="current-password" value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} /></label><label>Nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} /></label><label>Confirmar nueva contraseña<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={passwords.confirmPassword} onChange={(event) => setPasswords({ ...passwords, confirmPassword: event.target.value })} /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setPasswordModalOpen(false); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }) }}>Cancelar</button><button className="primary-button" type="submit"><KeyRound size={17} /> Guardar contraseña</button></div></form></Modal>}{resetTarget && <Modal title="Restablecer contraseña" subtitle={`Se generará una clave temporal para ${resetTarget.name}.`} onClose={() => { if (!resetBusy) setResetTarget(null) }}><div className="credential-reset-dialog"><div className="credential-reset-notice"><ShieldCheck size={20}/><p>La contraseña actual dejará de funcionar. En el próximo inicio de sesión, la persona deberá cambiar esta clave temporal por una propia.</p></div>{resetError && <div className="form-error"><CircleAlert size={16}/>{resetError}</div>}<div className="modal-actions"><button type="button" className="secondary-button" autoFocus disabled={resetBusy} onClick={() => setResetTarget(null)}>Cancelar</button><button type="button" className="primary-button" disabled={resetBusy} onClick={() => void confirmReset()}>{resetBusy ? 'Generando…' : 'Generar clave temporal'}</button></div></div></Modal>}
+{passwordModalOpen && <Modal title="Cambiar mi contraseña" subtitle="Verifica primero tu identidad mediante un código enviado a tu correo." onClose={() => setPasswordModalOpen(false)}><AccountPasswordCode accessToken={accessToken} email={currentUser.email}/></Modal>}{resetTarget && <Modal title="Restablecer contraseña" subtitle={`Se generará una clave temporal para ${resetTarget.name}.`} onClose={() => { if (!resetBusy) setResetTarget(null) }}><div className="credential-reset-dialog"><div className="credential-reset-notice"><ShieldCheck size={20}/><p>La contraseña actual dejará de funcionar. En el próximo inicio de sesión, la persona deberá cambiar esta clave temporal por una propia.</p></div>{resetError && <div className="form-error"><CircleAlert size={16}/>{resetError}</div>}<div className="modal-actions"><button type="button" className="secondary-button" autoFocus disabled={resetBusy} onClick={() => setResetTarget(null)}>Cancelar</button><button type="button" className="primary-button" disabled={resetBusy} onClick={() => void confirmReset()}>{resetBusy ? 'Generando…' : 'Generar clave temporal'}</button></div></div></Modal>}
 {temporaryPassword && <Modal title="Clave temporal generada" subtitle={`Cuenta de ${temporaryPassword.account.name}`} onClose={() => setTemporaryPassword(null)}><div className="credential-reset-dialog"><div className="credential-temporary-password"><span>CLAVE TEMPORAL · USO INICIAL</span><code>{temporaryPassword.value}</code></div><div className="credential-reset-notice"><ShieldCheck size={20}/><p>Comparte esta clave por un canal seguro. La persona deberá cambiarla al iniciar sesión. Esta clave solo se muestra ahora.</p></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => void copyTemporaryPassword()}><Copy size={16}/>{passwordCopied ? 'Copiada' : 'Copiar clave'}</button><button type="button" className="primary-button" onClick={() => setTemporaryPassword(null)}>Listo</button></div></div></Modal>}</>
 }
 

@@ -70,7 +70,7 @@ paths:
   /auth/request-password-change:
     post:
       tags: [Autenticación]
-      summary: Solicitar código de recuperación de administrador o avisar al administrador
+      summary: Elegir ayuda administrativa o código por correo para una cuenta suspendida
       operationId: requestPasswordChange
       security: []
       requestBody:
@@ -79,19 +79,20 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email]
+              required: [email, method]
               properties:
                 email: { type: string, format: email, example: usuario@unitropico.edu.co }
+                method: { type: string, enum: [ayuda-admin, codigo] }
       responses:
         '202': { description: Solicitud procesada sin revelar si la cuenta existe o está suspendida. }
         '503': { description: El correo saliente no está configurado o no pudo enviar el código. }
         '422': { $ref: '#/components/responses/ValidationError' }
 
-  /auth/reset-admin-password:
+  /auth/verify-lockout-password-code:
     post:
       tags: [Autenticación]
-      summary: Cambiar la contraseña de un administrador con un código de un solo uso
-      operationId: resetAdminPassword
+      summary: Verificar el código enviado a una cuenta suspendida
+      operationId: verifyLockoutPasswordCode
       security: []
       requestBody:
         required: true
@@ -99,16 +100,86 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, code, newPassword, confirmPassword]
+              required: [email, code]
               properties:
-                email: { type: string, format: email, example: admin@unitropico.edu.co }
+                email: { type: string, format: email, example: usuario@unitropico.edu.co }
                 code: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '200': { description: Código verificado; el cliente puede mostrar el formulario de contraseña nueva. }
+        '400': { description: El código no es válido, ya venció o no corresponde a una cuenta suspendida. }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/change-locked-out-password:
+    post:
+      tags: [Autenticación]
+      summary: Actualizar la contraseña tras verificar el código de una cuenta suspendida
+      operationId: changeLockedOutPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, newPassword, confirmPassword]
+              properties:
+                email: { type: string, format: email }
                 newPassword: { type: string, minLength: 8, maxLength: 72 }
                 confirmPassword: { type: string, minLength: 8, maxLength: 72 }
       responses:
-        '200': { description: Contraseña actualizada y bloqueo levantado. }
-        '400': { description: El código no es válido, ya venció o no corresponde a una cuenta suspendida. }
+        '200': { description: Contraseña actualizada y suspensión levantada. }
+        '400': { description: El código no se verificó o ya venció. }
         '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/account/password-code/request:
+    post:
+      tags: [Autenticación]
+      summary: Enviar código al correo de la cuenta autenticada
+      operationId: requestAccountPasswordCode
+      security: [{ bearerAuth: [] }]
+      responses:
+        '202': { description: Código enviado y válido por diez minutos. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/account/password-code/verify:
+    post:
+      tags: [Autenticación]
+      summary: Verificar el código de cambio de contraseña de la cuenta autenticada
+      operationId: verifyAccountPasswordCode
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '200': { description: Código verificado; el cliente puede mostrar el formulario de contraseña nueva. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/account/password-code/change:
+    post:
+      tags: [Autenticación]
+      summary: Cambiar contraseña con el código previamente verificado
+      operationId: changeAccountPasswordWithCode
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword, confirmPassword]
+              properties:
+                newPassword: { type: string, minLength: 8, maxLength: 72 }
+                confirmPassword: { type: string, minLength: 8, maxLength: 72 }
+      responses:
+        '200': { description: Contraseña actualizada. }
+        '400': { description: Primero debe verificarse un código vigente. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /auth/select-role:
     post:
@@ -1105,6 +1176,50 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+  /requests/eligible-staff:
+    get:
+      tags: [Solicitudes]
+      summary: Listar tutores o monitores asignados a una asignatura y periodo
+      operationId: listStudentRequestStaff
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: subjectId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: periodId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: role, in: query, required: true, schema: { type: string, enum: [Tutor, Monitor] } }
+      responses:
+        '200': { description: Responsables con asignación activa para esa asignatura y periodo. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/request-staff:
+    get:
+      tags: [Solicitudes]
+      summary: Consultar tutores o monitores para asignar una solicitud
+      operationId: listAdminRequestStaff
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: subjectId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: periodId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: role, in: query, required: true, schema: { type: string, enum: [Tutor, Monitor] } }
+      responses:
+        '200': { description: Responsables con asignación activa para la asignatura y el periodo indicados. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /requests/available-slots:
+    get:
+      tags: [Solicitudes]
+      summary: Consultar bloques libres de un responsable elegible
+      operationId: listStudentRequestSlots
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: userId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: subjectId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: periodId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: role, in: query, required: true, schema: { type: string, enum: [Tutor, Monitor] } }
+      responses:
+        '200': { description: Fechas y horarios disponibles para crear la primera sesión. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /requests/{id}:
     patch:
       tags: [Solicitudes]
@@ -1157,7 +1272,7 @@ paths:
       tags: [Solicitudes]
       summary: Asignar tutor o monitor y programar la primera sesión
       operationId: assignRequest
-      description: Solo admite personal con asignación académica activa y un bloque horario activo que coincida con fecha, día y horas seleccionados. La sesión se notifica a la persona asignada para que la confirme.
+      description: Administración puede asignar solicitudes; un estudiante solo puede programar su propia solicitud pendiente. En ambos casos se requiere una asignación académica y un bloque horario disponible. La sesión se notifica a la persona asignada para que la confirme.
       security:
         - bearerAuth: []
       parameters:
@@ -1975,13 +2090,14 @@ components:
     RequestInput:
       type: object
       additionalProperties: false
-      required: [subject, type, priority, reason]
+      required: [subjectId, periodId, type, priority, motive, description]
       properties:
-        subject: { type: string, minLength: 2, maxLength: 150 }
-        type: { type: string, enum: [Monitoría, Tutoría] }
+        subjectId: { type: integer, minimum: 1 }
+        periodId: { type: integer, minimum: 1 }
+        type: { type: string, enum: [Monitoría, Tutoría, Acompañamiento] }
         priority: { $ref: '#/components/schemas/Priority' }
-        reason: { type: string, minLength: 5, maxLength: 500 }
-        preferredModality: { $ref: '#/components/schemas/Modality' }
+        motive: { type: string, minLength: 3, maxLength: 500 }
+        description: { type: string, minLength: 3, maxLength: 500 }
     AdminRequestInput:
       type: object
       additionalProperties: false

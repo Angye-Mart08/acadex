@@ -265,7 +265,9 @@ Las rutas `/tutor/recoveries` programan una recuperación para sesiones propias 
 
 La migración `database/migrations/002_reportes_tutor.sql` crea `InformeTutorDetalle` y `AdjuntoInformeTutor`. Se aplica de forma idempotente al iniciar la API y requiere que las credenciales bootstrap tengan permisos DDL en la base ya configurada. El módulo mensual genera una salida provisional; la exportación con plantilla institucional queda pendiente de recibir el formato oficial.
 
-La configuración del tutor permite cambiar su propia contraseña mediante `PATCH /admin/configuration/password`, ruta autenticada que valida la contraseña actual y la nueva.
+Todos los roles pueden cambiar su contraseña desde Configuración. El proceso solicita un código al correo registrado, valida ese código en una operación separada y solo entonces permite guardar la contraseña nueva. La API ofrece `POST /auth/account/password-code/request`, `/verify` y `/change`; los dos últimos requieren una sesión autenticada y el cambio revoca las demás sesiones activas.
+
+Después de cinco intentos fallidos, cualquier rol puede elegir entre pedir ayuda a los administradores o recibir un código en su correo institucional. El código vence en diez minutos y admite cinco intentos de verificación. En este flujo se valida primero con `POST /auth/verify-lockout-password-code` y luego se cambia la contraseña mediante `POST /auth/change-locked-out-password`; al finalizar se levanta la suspensión de 24 horas. La migración `009_codigos_verificacion_clave.sql` almacena códigos hasheados y su estado de verificación.
 
 ## Acuerdos de uso de archivos y reportes
 
