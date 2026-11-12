@@ -6,6 +6,7 @@ Esta carpeta reúne los documentos de diseño y soporte para la revisión del re
 
 - [Modelo de datos](./modelo-datos.md): entidades, relaciones y correspondencia con MariaDB.
 - [Decisiones de arquitectura](./decisiones.md): decisiones técnicas y razones.
+- [Guía para equipo espejo](./guia-despliegue-equipo-espejo.md): instalación en Windows, configuración segura, Docker Compose, comprobaciones y publicación temporal con Cloudflare Quick Tunnel.
 - [Índice de diagramas](./diagramas/README.md): propósito y archivos PDF del análisis.
 - [Índice de wireframes](./wireframes/README.md): capturas de referencia por rol y módulo.
 

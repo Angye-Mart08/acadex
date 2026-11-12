@@ -2,6 +2,37 @@
 
 Plataforma web para administrar el acompañamiento académico mediante tutorías y monitorías de la Universidad Internacional del Trópico Americano.
 
+## Navegación rápida
+
+- [Lista de comprobación de Entrega 4](#lista-de-comprobación--entrega-4)
+- [Ejecución local con Docker Compose o npm](#ejecución-rápida)
+- [Guía del equipo espejo: instalación, ejecución y túnel temporal](./docs/guia-despliegue-equipo-espejo.md)
+- [Preparación de despliegue con VPS y Caddy](#despliegue-público-vps--docker-compose--caddy)
+- [Arquitectura y estructura del repositorio](#arquitectura)
+- [Documentación funcional, API y datos](#documentación-principal)
+- [Equipo del proyecto](#integrantes)
+
+La guía del equipo espejo reproduce el entorno local en otro computador y explica cómo compartir una demostración temporal. La configuración de VPS/Caddy es el procedimiento separado para un despliegue permanente.
+
+## Lista de comprobación — Entrega 4
+
+Revisión del repositorio realizada el **12 de noviembre de 2026**. Por solicitud del equipo, el requisito de URL pública queda **excluido temporalmente** de esta comprobación; no se toma como aprobado ni como pendiente para el resultado de los otros puntos. Se contrastaron los demás requisitos con los archivos disponibles y se ejecutaron las validaciones técnicas que pueden comprobarse en este entorno. **Cumplido** significa que existe evidencia en el repositorio o que la validación indicada se ejecutó; **Parcial** indica que hay preparación, pero falta una comprobación externa o evidencia de aceptación; **Pendiente** indica que el requisito aún no se ha completado. No se declara como realizado ningún despliegue o prueba que no se haya observado.
+
+| # | Requisito | Estado | Evidencia exacta y observación |
+| --- | --- | --- | --- |
+| 1 | URL pública de la aplicación desplegada y funcional | **Excluido temporalmente** | Se deja fuera del resultado de esta revisión por solicitud del equipo. La URL pública sigue sin configurarse; su estado queda documentado en [Despliegue público](#despliegue-público-vps--docker-compose--caddy). |
+| 2 | Repositorio de código fuente actualizado y accesible para evaluación | **Parcial** | Confirmé que [`github.com/Angye-Mart08/acadex`](https://github.com/Angye-Mart08/acadex) existe y es público. Sin embargo, el contenido que GitHub muestra en `main` corresponde a documentación/código anterior al estado local revisado. La rama local es `nicolas`, está un commit adelante de `origin/nicolas` y este README tiene cambios sin commit; por eso no se puede afirmar que la versión actualizada ya esté disponible para evaluación. Falta integrar/publicar los cambios finales en la rama acordada y confirmar que GitHub muestre esta revisión. |
+| 3 | Dockerfile(s) y archivos necesarios para construir imágenes | **Cumple; construcción local comprobada** | [api/Dockerfile](./api/Dockerfile) instala dependencias y empaqueta la API junto con el SQL y sus migraciones; [web/Dockerfile](./web/Dockerfile) compila la SPA y la sirve con Nginx. Se construyeron las imágenes locales de API y web mediante Docker Compose. |
+| 4 | `compose.yaml` o `docker-compose.yml`, si se usa Docker Compose | **Cumple; ejecución local comprobada** | [compose.yaml](./compose.yaml) define MariaDB, API, frontend, volumen de base, red interna y health checks. Los tres contenedores iniciaron y aparecieron saludables. La comprobación corresponde al modo local; el archivo [compose.production.yaml](./compose.production.yaml) y su configuración de dominio, TLS y SMTP todavía requieren los datos reales de despliegue. |
+| 5 | README con instrucciones para configurar, ejecutar y desplegar | **Cumplido** | Este archivo contiene [preparación local](#preparación-local-y-revisión-de-imágenes), [configuración de producción](#crear-vps-dns-y-secretos), [arranque inicial](#arranque-inicial), [actualización](#actualizardesplegar-de-nuevo) y notas de seguridad. La guía es reproducible, pero el despliegue aún está pendiente. |
+| 6 | Documentación de API, cuando aplique | **Cumplido** | El contrato está en [api/openapi.yaml](./api/openapi.yaml), descrito en [api/README_API.md](./api/README_API.md). La validación ejecutada el 12-11-2026 pasó: OpenAPI 3.1.0, **68 rutas, 88 operaciones y 45 esquemas**. |
+| 7 | Evidencias de pruebas funcionales: operaciones principales, roles, persistencia e integraciones | **Parcial** | [docs/BITACORA_PROYECTO.md](./docs/BITACORA_PROYECTO.md) tiene evidencia histórica concreta: selección/cambio de rol y revocación por HTTP; operaciones CRUD temporales con MariaDB; health check y auditoría de tablas; comprobación de horarios e informes. En esta revisión se construyeron y levantaron los servicios locales; `http://localhost:5173/` respondió HTTP 200 y `/health` informó `{"status":"ok","database":"connected"}`. Falta un paquete consolidado de aceptación, probar que los datos sobrevivan a recrear contenedores y verificar la entrega real de correo SMTP. |
+| 8 | Demostración de pasarela de pagos en pruebas, cuando aplique | **No aplica** | El alcance descrito para Acadex es la gestión de tutorías y monitorías. No se encontró una pasarela ni un flujo de pagos en la arquitectura, API o documentación revisadas. Si la consigna del curso exige pagos para este proyecto, hay que aclarar ese alcance con el equipo docente antes de marcarlo como no aplicable. |
+
+### Resultado de esta revisión
+
+De los puntos que sí se revisaron, los puntos **3, 4, 5 y 6** cumplen como entregables documentales/de código; los puntos **3 y 4** también se verificaron en ejecución local. El punto **2** es parcial: el repositorio es público, pero la versión local actual todavía no está reflejada allí. El punto **7** es parcial: hay pruebas funcionales y registros en la bitácora, pero falta consolidar la evidencia específica de aceptación, verificar persistencia después de recrear contenedores y probar SMTP. El punto **8** no aplica al alcance académico encontrado, salvo que la consigna del curso indique lo contrario. El punto **1** queda excluido temporalmente y no se usa para este resultado. La comprobación de Compose se documenta en [Ejecución rápida](#ejecución-rápida).
+
 ## Arquitectura
 
 ```text
@@ -24,7 +55,7 @@ Un VPS de un solo nodo es una opción económica para una primera publicación o
 
 ### Preparación local y revisión de imágenes
 
-Requiere Docker Engine/Compose v2 (Docker Desktop en Windows/Mac). Este entorno de trabajo no tiene el comando Docker instalado, por lo que aún no ha sido posible construir o comprobar las imágenes desde aquí. En un equipo que sí tenga Docker, desde la raíz del repositorio:
+Requiere Docker Engine/Compose v2 (Docker Desktop en Windows/Mac). El modo local de [compose.yaml](./compose.yaml) ya se construyó y ejecutó en Docker Desktop. Los servicios respondieron correctamente en `http://localhost:5173/` y `http://localhost:5173/health`. La configuración de producción aún no se ha desplegado ni validado con un dominio y credenciales reales. Para revisar y construir esa configuración en un equipo con Docker:
 
 ```bash
 docker compose -f compose.yaml -f compose.production.yaml config
@@ -116,11 +147,11 @@ docker compose --env-file .env -f compose.yaml -f compose.production.yaml logs -
 
 Mantén una copia externa, cifrada y periódica del volumen MariaDB antes de actualizaciones. Restaurar una copia debe ensayarse en un entorno separado. `docker compose down` conserva los volúmenes; `down -v` los elimina.
 
-### Errores encontrados durante la preparación
+### Estado y pendientes del despliegue
 
-- Docker CLI no está instalado/disponible en el entorno actual, por lo que no se pudieron construir ni arrancar los contenedores aquí. Solución: instalar Docker Desktop/Engine con Compose v2 en el equipo/VPS de despliegue y ejecutar los comandos de comprobación.
-- La configuración Compose original era de desarrollo y no incluía proxy HTTPS, secretos SMTP de producción, persistencia para adjuntos ni cuenta administrativa separada para migraciones. El archivo `compose.production.yaml` agrega esas piezas sin cambiar las tecnologías.
-- No hay todavía proveedor seleccionado con cuenta autorizada, dominio/DNS ni credenciales de VPS disponibles en el workspace. Por esa razón no hay URL pública ni resultados de autenticación/roles/persistencia que se puedan afirmar.
+- Docker Compose local construye y ejecuta MariaDB, API y web; el estado observado de los tres servicios fue `healthy`. La verificación local no equivale a un despliegue público.
+- `compose.production.yaml` agrega el proxy HTTPS Caddy y configura correo SMTP y almacenamiento persistente de adjuntos. Para activarlo hacen falta un dominio con DNS dirigido al servidor, secretos SMTP, una VPS y las variables definidas en `.env.production.example`.
+- No hay todavía dominio/DNS ni credenciales de VPS disponibles en el workspace. Por esa razón no hay URL pública ni resultados de autenticación/roles/persistencia con la configuración de producción que se puedan afirmar.
 
 ## Estructura del repositorio
 
@@ -134,6 +165,7 @@ acadex/
 │   └── gestion_monitorias_tutorias.sql
 ├── docs/
 │   ├── README.md
+│   ├── guia-despliegue-equipo-espejo.md
 │   ├── modelo-datos.md
 │   ├── decisiones.md
 │   ├── diagramas/
@@ -205,6 +237,35 @@ público en `DOCKER_CORS_ORIGIN` y sirve HTTPS mediante un proxy de despliegue.
 Para cambiar el puerto local, ajusta `DOCKER_WEB_PORT` y `DOCKER_CORS_ORIGIN`.
 El frontend usa una URL relativa para la API y no requiere reconstrucción al cambiar el puerto.
 Detén el frontend de `npm run dev` antes de iniciar Docker si está usando el puerto `5173`.
+
+#### Cómo se preparó y verificó Compose
+
+El archivo [compose.yaml](./compose.yaml) organiza la aplicación en tres servicios conectados por la red interna que crea Compose:
+
+| Servicio | Función | Comprobación |
+| --- | --- | --- |
+| `db` | MariaDB 11.4; crea la base y el usuario de aplicación. Guarda sus datos en el volumen `database_data`. El SQL inicial se carga una sola vez cuando el volumen está vacío. | Health check de MariaDB antes de iniciar la API. |
+| `api` | Construye la imagen desde [api/Dockerfile](./api/Dockerfile), conecta con `db` por el nombre de servicio, y aplica las migraciones incluidas en la imagen. | Health check en `/health`; Compose espera que la API esté saludable antes de iniciar web. |
+| `web` | Construye la SPA con [web/Dockerfile](./web/Dockerfile) y la publica mediante Nginx en el puerto local `5173` por defecto. Nginx envía las peticiones API al servicio `api`. | Health check de Nginx en `/health`. |
+
+Las credenciales de la base Docker son independientes de las variables `DATABASE_*` de MariaDB instalada directamente en Windows. Compose toma `DOCKER_DATABASE_PASSWORD`, `DOCKER_DATABASE_ROOT_PASSWORD` y `JWT_SECRET` del `.env`; no escribas sus valores en este README ni los subas al repositorio. La API recibe la contraseña raíz como `DATABASE_BOOTSTRAP_PASSWORD` para poder crear/aplicar la base y las migraciones en el primer arranque. El Dockerfile de la API copia tanto el SQL inicial como `database/migrations`, que la aplicación necesita en tiempo de ejecución.
+
+La secuencia usada para prepararlo fue:
+
+1. Preparar en `.env` contraseñas Docker aleatorias y diferentes, junto con una clave `JWT_SECRET`; el archivo `.env` se mantiene local y está excluido del repositorio.
+2. Construir y arrancar los servicios desde la raíz del proyecto:
+
+   ```powershell
+   docker compose --env-file .env -f compose.yaml up -d --build
+   docker compose --env-file .env -f compose.yaml ps
+   ```
+
+3. Esperar a que `db`, `api` y `web` figuren como saludables. Consultar la aplicación en `http://localhost:5173/` y el endpoint `http://localhost:5173/health`; este último debe responder `{"status":"ok","database":"connected"}`.
+4. Si un servicio no arranca, revisar sus registros con `docker compose --env-file .env -f compose.yaml logs --tail=100 db api web`.
+
+Durante la primera construcción se corrigieron dos causas que impedían iniciar la API: se añadieron las variables de acceso administrativo de MariaDB al servicio `api` y se incluyó `database/migrations` en su imagen. Después se reconstruyeron las imágenes y se confirmó localmente que los tres servicios quedaran saludables y que la web y su endpoint de estado respondieran HTTP 200.
+
+Esta prueba comprueba construcción, arranque y conexión API–base en el entorno local. No comprueba recuperación ante pérdida del volumen, persistencia tras recrear servicios, correo SMTP ni acceso público. `docker compose down` detiene y elimina los contenedores, conservando `database_data`; **no uses `docker compose down -v` si deseas conservar la base**.
 
 El frontend y la API pueden ejecutarse de manera conjunta desde la raíz del proyecto o en terminales independientes:
 
@@ -307,6 +368,7 @@ Estudiante:    mariaamezquita.es@unitropico.edu.co / 1029663952
 
 ## Documentación principal
 
+- [Guía de instalación y publicación temporal para equipo espejo](./docs/guia-despliegue-equipo-espejo.md)
 - [Documentación de la API](./api/README_API.md)
 - [Contrato OpenAPI 3.1](./api/openapi.yaml)
 - [Modelo de datos](./docs/modelo-datos.md)
