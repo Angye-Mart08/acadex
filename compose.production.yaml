@@ -1,0 +1,46 @@
+services:
+  db:
+    restart: unless-stopped
+
+  api:
+    environment:
+      NODE_ENV: production
+      DATABASE_BOOTSTRAP_USER: root
+      DATABASE_BOOTSTRAP_PASSWORD: ${DOCKER_DATABASE_ROOT_PASSWORD:?Configura DOCKER_DATABASE_ROOT_PASSWORD en el entorno del servidor}
+      CORS_ORIGIN: ${PUBLIC_ORIGIN:?Configura PUBLIC_ORIGIN con el dominio HTTPS de Acadex}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:?Configura SMTP_USER en el entorno del servidor}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?Configura SMTP_PASSWORD en el entorno del servidor}
+      SMTP_FROM: ${SMTP_FROM:?Configura SMTP_FROM en el entorno del servidor}
+    volumes:
+      - tutor_report_uploads:/app/api/uploads
+
+  web:
+    ports: !override []
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      ACADEX_DOMAIN: ${ACADEX_DOMAIN:?Configura ACADEX_DOMAIN con el dominio público}
+      ACADEX_TLS_EMAIL: ${ACADEX_TLS_EMAIL:?Configura ACADEX_TLS_EMAIL para TLS}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+volumes:
+  tutor_report_uploads:
+  caddy_data:
+  caddy_config:

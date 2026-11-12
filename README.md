@@ -8,6 +8,120 @@ Plataforma web para administrar el acompañamiento académico mediante tutorías
 React + TypeScript → API REST con Node.js + TypeScript → MariaDB
 ```
 
+## Despliegue público (VPS + Docker Compose + Caddy)
+
+La arquitectura de producción conserva React/Vite, Node/Express y MariaDB. Nginx sirve la SPA y enruta `/api`; Caddy publica un único origen HTTPS y obtiene/renueva TLS automáticamente. MariaDB y la API no exponen puertos públicos. Compose conserva la base de datos y los adjuntos de informes en volúmenes con nombre.
+
+### Estado del despliegue
+
+El repositorio incluye `compose.production.yaml`, `Caddyfile` y `.env.production.example` como preparación del despliegue. **La aplicación todavía no está publicada ni verificada en Internet**: para hacerlo se necesita contratar/usar una cuenta de alojamiento, disponer de un dominio y sus credenciales DNS/SSH. No inventamos URLs ni registramos resultados de pruebas que no se hayan ejecutado. La URL pública se añadirá aquí tras el despliegue y las verificaciones reales.
+
+### Alojamiento y costo orientativo
+
+La alternativa preparada es un VPS Ubuntu con Docker Compose para alojar frontend, API, MariaDB y Caddy en una misma máquina. Esto conserva exactamente las tecnologías del proyecto y permite una URL en un dominio propio. Como referencia vigente al 9 de noviembre de 2026, DigitalOcean publica un Droplet Basic de 2 vCPU y 4 GiB RAM por USD 24/mes; un dominio se paga aparte y los backups administrados añaden costo. Para producción real se deben configurar respaldos externos y aplicar actualizaciones del sistema. [Tarifas oficiales de Droplets](https://www.digitalocean.com/pricing/droplets).
+
+Un VPS de un solo nodo es una opción económica para una primera publicación o piloto, pero no ofrece alta disponibilidad: si el host falla, toda la aplicación deja de responder. No usar datos personales reales hasta acordar la política de respaldo, acceso administrativo y tratamiento de datos institucionales.
+
+### Preparación local y revisión de imágenes
+
+Requiere Docker Engine/Compose v2 (Docker Desktop en Windows/Mac). Este entorno de trabajo no tiene el comando Docker instalado, por lo que aún no ha sido posible construir o comprobar las imágenes desde aquí. En un equipo que sí tenga Docker, desde la raíz del repositorio:
+
+```bash
+docker compose -f compose.yaml -f compose.production.yaml config
+docker compose -f compose.yaml -f compose.production.yaml build
+```
+
+La primera orden necesita las variables obligatorias definidas; puede validarse con el archivo `.env` temporal de ensayo y valores de ejemplo no reales.
+
+### Crear VPS, DNS y secretos
+
+1. En la consola del proveedor, crea un VPS Ubuntu LTS de 2 vCPU y al menos 4 GiB RAM. Guarda su IPv4. No publiques el puerto `3306` ni el puerto `3000`.
+2. Registra un dominio y crea un registro DNS `A` (por ejemplo `acadex.midominio.edu.co`) apuntando a la IPv4. Si el dominio tiene un `AAAA` que no apunta al VPS, corrígelo o elimínalo antes de pedir TLS.
+3. Entra por SSH usando una llave privada protegida, actualiza el sistema e instala Docker Engine y el plugin Docker Compose según la documentación oficial de Docker para Ubuntu. Configura el firewall para permitir SSH desde una IP controlada y TCP `80`/`443` desde Internet.
+4. Clona el repositorio en el VPS, entra a la carpeta `acadex` y crea el `.env` a partir de `.env.production.example`. Este archivo vive solo en el servidor y está excluido de Git.
+5. Genera secretos diferentes y aleatorios (no reutilices contraseñas locales):
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+   Ejecuta el comando tres veces para `DOCKER_DATABASE_PASSWORD`, `DOCKER_DATABASE_ROOT_PASSWORD` y `JWT_SECRET`. Conserva los valores en un gestor de contraseñas. Completa además dominio, origen público y credenciales SMTP. No compartas secretos en issues, capturas ni este README.
+
+6. La cuenta SMTP debe ser una credencial de aplicación autorizada para el correo remitente; la contraseña normal de Gmail no sirve. Si el correo es de Google Workspace, confirma la política con su administrador.
+
+### Variables de producción
+
+| Variable | Uso |
+| --- | --- |
+| `DOCKER_DATABASE_PASSWORD` | Contraseña de la cuenta limitada `tutorias_app` |
+| `DOCKER_DATABASE_ROOT_PASSWORD` | Cuenta administrativa MariaDB usada al inicializar y aplicar migraciones |
+| `JWT_SECRET` | Firma de tokens; mínimo 32 caracteres aleatorios |
+| `ACADEX_DOMAIN` | Nombre DNS público del sitio |
+| `ACADEX_TLS_EMAIL` | Contacto de Caddy para ACME/Let's Encrypt |
+| `PUBLIC_ORIGIN` | Origen HTTPS exacto permitido por CORS; debe coincidir con el dominio |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` | Transporte SMTP (Gmail: `smtp.gmail.com`, `587`, `false` para STARTTLS) |
+| `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Credenciales y remitente de correo; mantener secretos solo en `.env` |
+
+`DATABASE_HOST=db`, nombre de base, usuario de aplicación, puerto interno y prefijos API se definen dentro de Compose. No se debe definir `VITE_API_URL` como `localhost` en producción: la aplicación se sirve en el mismo origen y usa `/api/v1`.
+
+### Arranque inicial
+
+Desde la raíz del proyecto en el VPS:
+
+```bash
+docker compose --env-file .env -f compose.yaml -f compose.production.yaml config
+docker compose --env-file .env -f compose.yaml -f compose.production.yaml up -d --build
+docker compose --env-file .env -f compose.yaml -f compose.production.yaml ps
+docker compose --env-file .env -f compose.yaml -f compose.production.yaml logs --tail=150 db api web caddy
+```
+
+MariaDB carga el SQL inicial una sola vez al crear su volumen. Luego la API aplica las migraciones `002`–`009` usando `DATABASE_BOOTSTRAP_USER=root` y el secreto raíz. Las credenciales de prueba del SQL son datos de desarrollo y no son aptas para una instancia pública; antes de abrir el sitio deben cambiarse las claves de todas las cuentas demo, retirar/inhabilitar cuentas de prueba y comprobar que las credenciales reales tengan hash bcrypt. El modo `production` rechaza claves heredadas en texto plano.
+
+Caddy obtiene HTTPS cuando el DNS ya apunta al VPS, los puertos 80 y 443 están accesibles y ACME puede validar el dominio. Después, la URL será `https://` más `ACADEX_DOMAIN` (URL definitiva pendiente de contratar/configurar el dominio).
+
+### Comprobaciones y evidencias
+
+Una vez publicado, anotar aquí fecha, versión/commit, URL, comandos y resultados observados:
+
+| Verificación | Evidencia pendiente |
+| --- | --- |
+| HTTPS válido y carga frontend | No ejecutada; no hay dominio/VPS configurados |
+| `/health` responde y confirma MariaDB conectada | No ejecutada públicamente |
+| Inicio de sesión Administrador, Tutor, Monitor y Estudiante | No ejecutada públicamente; requiere credenciales de prueba autorizadas |
+| Operaciones CRUD/principales por rol | No ejecutada públicamente |
+| Persistencia tras recrear contenedores sin borrar volúmenes | No ejecutada públicamente |
+| Adjuntos de informes persisten tras recrear API | No ejecutada públicamente |
+
+Procedimiento de comprobación desde un equipo con `curl`:
+
+```bash
+curl -fsS https://$ACADEX_DOMAIN/health
+curl -fsSI https://$ACADEX_DOMAIN/
+```
+
+Para comprobar persistencia, crear un registro de prueba identificable, ejecutar `docker compose ... up -d --force-recreate db api web`, verificar el registro y borrar la prueba con una cuenta autorizada. Para adjuntos, subir y descargar una evidencia de prueba antes/después de recrear API. **No ejecutar `docker compose down -v`**: borra permanentemente los volúmenes y datos.
+
+Las pruebas de cada rol requieren cuentas ficticias creadas exclusivamente para aceptación, contraseña temporal entregada por un canal seguro y autorización para probar. Registrar evidencia sin mostrar contraseñas, tokens, correos personales ni datos académicos reales.
+
+### Actualizar/desplegar de nuevo
+
+Después de aprobar cambios y publicarlos en la rama acordada, en el VPS:
+
+```bash
+git pull --ff-only
+docker compose --env-file .env -f compose.yaml -f compose.production.yaml up -d --build
+docker compose --env-file .env -f compose.yaml -f compose.production.yaml ps
+docker compose --env-file .env -f compose.yaml -f compose.production.yaml logs --tail=100 api web caddy
+```
+
+Mantén una copia externa, cifrada y periódica del volumen MariaDB antes de actualizaciones. Restaurar una copia debe ensayarse en un entorno separado. `docker compose down` conserva los volúmenes; `down -v` los elimina.
+
+### Errores encontrados durante la preparación
+
+- Docker CLI no está instalado/disponible en el entorno actual, por lo que no se pudieron construir ni arrancar los contenedores aquí. Solución: instalar Docker Desktop/Engine con Compose v2 en el equipo/VPS de despliegue y ejecutar los comandos de comprobación.
+- La configuración Compose original era de desarrollo y no incluía proxy HTTPS, secretos SMTP de producción, persistencia para adjuntos ni cuenta administrativa separada para migraciones. El archivo `compose.production.yaml` agrega esas piezas sin cambiar las tecnologías.
+- No hay todavía proveedor seleccionado con cuenta autorizada, dominio/DNS ni credenciales de VPS disponibles en el workspace. Por esa razón no hay URL pública ni resultados de autenticación/roles/persistencia que se puedan afirmar.
+
 ## Estructura del repositorio
 
 ```text

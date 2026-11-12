@@ -1,0 +1,5 @@
+{$ACADEX_DOMAIN} {
+	tls {$ACADEX_TLS_EMAIL}
+	encode zstd gzip
+	reverse_proxy web:80
+}
