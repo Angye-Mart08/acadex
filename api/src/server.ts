@@ -3,11 +3,12 @@ import cors from 'cors'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import { randomUUID } from 'node:crypto'
 import { z, ZodError } from 'zod'
-import { AuthError, currentUserFromToken, login, selectRole } from './auth.js'
+import { AuthError, cancelRoleSelection, changeActiveRole, currentUserFromToken, login, requestPasswordChange, resetAdminPassword, revokeSession, selectRole } from './auth.js'
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
-import { DataError, createRequest, dashboard, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects } from './data.js'
-import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminPeriod, createAdminRequest, createAdminSpace, createAdminUser, deleteAdminPeriod, deleteAdminRequest, deleteAdminSpace, deleteAdminUser, exportTemporaryCredentials, listAdminPeriods, listAdminRequests, listAdminSpaces, listAdminUsers, listCredentials, listSettings, resetCredential, updateAdminPeriod, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminUser, updateSettings } from './admin.js'
+import { DataError, cancelTutorRecovery, completeTutorRecovery, createRequest, createTutorAvailability, createTutorRecovery, dashboard, deleteTutorAvailability, deleteTutorReport, getTutorReport, getTutorReportAttachment, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects, listTutorAssignments, listTutorRecoverableSessions, listTutorRecoveries, listTutorReportableSessions, saveTutorReport, submitTutorReport, tutorDashboard, updateTutorAvailability, updateTutorReport } from './data.js'
+import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, changePassword, createAdminFaculty, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, decideTutorRequest, deleteAdminFaculty, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminFaculties, listAdminPeriods, listAdminPrograms, listAdminRequestSlots, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listPasswordChangeRequests, listSettings, listSuspendedAccounts, resetCredential, unlockSuspendedAccount, updateAdminFaculty, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
+import { getMonthlyTutorReport, listNotifications, markAllNotificationsRead, markNotificationRead, saveMonthlyTutorDraft } from './notifications.js'
 
 const app = express()
 app.disable('x-powered-by')
@@ -20,7 +21,7 @@ function isAllowedOrigin(origin: string) {
 }
 
 app.use(cors({ origin: (origin, callback) => callback(null, !origin || isAllowedOrigin(origin)) }))
-app.use(express.json({ limit: '16kb' }))
+app.use(express.json({ limit: '14mb' }))
 
 function apiError(res: Response, req: Request, status: number, code: string, message: string, details?: unknown[]) {
   return res.status(status).json({ status, code, message, path: req.path, timestamp: new Date().toISOString(), requestId: req.requestId, ...(details ? { details } : {}) })
@@ -52,6 +53,7 @@ const idParamSchema = z.coerce.number().int().positive()
 const requestQuerySchema = z.object({ search: z.string().trim().max(120).optional(), status: z.enum(['Pendiente','Aprobada','Asignada','Rechazada','Cancelada','Atendida','Finalizada']).optional(), page: z.coerce.number().int().positive().optional(), pageSize: z.coerce.number().int().positive().max(100).optional() }).strict()
 const userQuerySchema = z.object({ search: z.string().trim().max(120).optional(), role: z.enum(['Administrador','Tutor','Monitor','Estudiante']).optional(), page: z.coerce.number().int().positive().optional(), pageSize: z.coerce.number().int().positive().max(100).optional() }).strict()
 const spaceQuerySchema = z.object({ search: z.string().trim().max(120).optional(), status: z.enum(['Activo','Inactivo']).optional(), type: z.enum(['Aula','Laboratorio','Sala','Sala de informática','Biblioteca','Salón de reuniones','Otro','Virtual']).optional(), building: z.string().max(80).optional(), minCapacity: z.coerce.number().int().positive().max(1000).optional() }).strict()
+const requestSlotQuerySchema = z.object({ userId: z.coerce.number().int().positive(), role: z.enum(['Tutor','Monitor']), subjectId: z.coerce.number().int().positive(), periodId: z.coerce.number().int().positive() }).strict()
 const isoDateQuerySchema = z.string().refine((value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`)) && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value, 'La fecha debe tener formato AAAA-MM-DD y ser válida.')
 const reportQuerySchema = z.object({ subjectId: z.coerce.number().int().positive().optional(), from: isoDateQuerySchema.optional(), to: isoDateQuerySchema.optional() }).strict().refine((value) => !value.from || !value.to || value.from <= value.to, { path: ['to'], message: 'La fecha hasta debe ser igual o posterior a la fecha desde.' })
 
@@ -71,6 +73,22 @@ app.get('/health', async (_req, res, next) => {
 
 const router = express.Router()
 
+router.get('/notifications', requireSession, async (req, res, next) => {
+  try { res.json(await listNotifications(req.session)) } catch (error) { next(error) }
+})
+router.patch('/notifications/:id/read', requireSession, async (req, res, next) => {
+  try { res.json(await markNotificationRead(req.session, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+})
+router.post('/notifications/read-all', requireSession, async (req, res, next) => {
+  try { res.json(await markAllNotificationsRead(req.session)) } catch (error) { next(error) }
+})
+router.get('/tutor/monthly-report', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await getMonthlyTutorReport(req.session, z.object({ month: z.string() }).strict().parse(req.query).month)) } catch (error) { next(error) }
+})
+router.put('/tutor/monthly-report', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await saveMonthlyTutorDraft(req.session, req.body)) } catch (error) { next(error) }
+})
+
 router.get('/health', async (_req, res, next) => {
   try {
     await checkDatabaseConnection()
@@ -88,9 +106,35 @@ router.post('/auth/login', async (req, res, next) => {
   }
 })
 
+router.post('/auth/request-password-change', async (req, res, next) => {
+  try { res.status(202).json(await requestPasswordChange(req.body)) } catch (error) { next(error) }
+})
+
+router.post('/auth/reset-admin-password', async (req, res, next) => {
+  try { res.status(200).json(await resetAdminPassword(req.body)) } catch (error) { next(error) }
+})
+
 router.post('/auth/select-role', async (req, res, next) => {
   try {
     res.status(200).json(await selectRole(req.body))
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/auth/cancel-role-selection', async (req, res, next) => {
+  try {
+    const body = z.object({ preAuthToken: z.string().min(1) }).strict().parse(req.body)
+    await cancelRoleSelection(body.preAuthToken)
+    res.status(204).send()
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/auth/change-role', requireSession, async (req, res, next) => {
+  try {
+    res.status(200).json(await changeActiveRole(req.session, req.body))
   } catch (error) {
     next(error)
   }
@@ -107,8 +151,14 @@ router.get('/auth/me', async (req, res, next) => {
   }
 })
 
-// Cierra la sesión del cliente; el JWT stateless permanece válido hasta expirar.
-router.post('/auth/logout', requireSession, (_req, res) => res.status(204).send())
+router.post('/auth/logout', requireSession, async (req, res, next) => {
+  try {
+    await revokeSession(req.header('authorization').slice(7).trim())
+    res.status(204).send()
+  } catch (error) {
+    next(error)
+  }
+})
 
 router.get('/portal/dashboard', requireSession, async (req, res, next) => {
   try { res.json(req.session.activeRole === 'Administrador' ? await adminDashboard() : await dashboard(req.session)) } catch (error) { next(error) }
@@ -116,6 +166,58 @@ router.get('/portal/dashboard', requireSession, async (req, res, next) => {
 
 router.get('/availability', requireSession, async (req, res, next) => {
   try { res.json(await listPortalAvailability(req.session)) } catch (error) { next(error) }
+})
+
+router.get('/tutor/dashboard', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await tutorDashboard(req.session)) } catch (error) { next(error) }
+})
+router.get('/tutor/assignments', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await listTutorAssignments(req.session)) } catch (error) { next(error) }
+})
+router.post('/tutor/availability', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.status(201).json(await createTutorAvailability(req.session, req.body)) } catch (error) { next(error) }
+})
+router.patch('/tutor/availability/:id', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await updateTutorAvailability(req.session, idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+router.delete('/tutor/availability/:id', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { await deleteTutorAvailability(req.session, idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+router.get('/tutor/recoveries', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await listTutorRecoveries(req.session)) } catch (error) { next(error) }
+})
+router.get('/tutor/recoverable-sessions', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await listTutorRecoverableSessions(req.session)) } catch (error) { next(error) }
+})
+router.post('/tutor/recoveries', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.status(201).json(await createTutorRecovery(req.session, req.body)) } catch (error) { next(error) }
+})
+router.delete('/tutor/recoveries/:id', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { await cancelTutorRecovery(req.session, idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+router.post('/tutor/recoveries/:id/complete', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { await completeTutorRecovery(req.session, idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+router.get('/tutor/reportable-sessions', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await listTutorReportableSessions(req.session)) } catch (error) { next(error) }
+})
+router.post('/tutor/reports', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.status(201).json(await saveTutorReport(req.session, req.body)) } catch (error) { next(error) }
+})
+router.get('/tutor/reports/:id', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await getTutorReport(req.session, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+})
+router.get('/tutor/reports/:id/attachments/:attachmentId', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { const file=await getTutorReportAttachment(req.session,idParamSchema.parse(req.params.id),idParamSchema.parse(req.params.attachmentId));res.download(file.path,file.name,error=>{if(error)next(error)}) } catch (error) { next(error) }
+})
+router.patch('/tutor/reports/:id', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await updateTutorReport(req.session, idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+router.delete('/tutor/reports/:id', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await deleteTutorReport(req.session, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+})
+router.post('/tutor/reports/:id/submit', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await submitTutorReport(req.session, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
 })
 
 router.get('/sessions', requireSession, async (req, res, next) => {
@@ -134,8 +236,60 @@ router.get('/admin/catalogs', requireSession, requireRole('Administrador'), asyn
   try { res.json(await adminCatalogs()) } catch (error) { next(error) }
 })
 
+router.get('/admin/subjects', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listAdminSubjects()) } catch (error) { next(error) }
+})
+router.post('/admin/subjects', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.status(201).json(await createAdminSubject(req.body)) } catch (error) { next(error) }
+})
+router.patch('/admin/subjects/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await updateAdminSubject(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+router.delete('/admin/subjects/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { await deleteAdminSubject(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+router.get('/admin/programs', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listAdminPrograms()) } catch (error) { next(error) }
+})
+router.get('/admin/faculties', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listAdminFaculties()) } catch (error) { next(error) }
+})
+router.post('/admin/faculties', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.status(201).json(await createAdminFaculty(req.body)) } catch (error) { next(error) }
+})
+router.patch('/admin/faculties/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await updateAdminFaculty(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+router.delete('/admin/faculties/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { await deleteAdminFaculty(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+router.get('/admin/request-slots', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await listAdminRequestSlots(requestSlotQuerySchema.parse(req.query))) } catch (error) { next(error) }
+})
+router.post('/admin/programs', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.status(201).json(await createAdminProgram(req.body)) } catch (error) { next(error) }
+})
+router.patch('/admin/programs/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await updateAdminProgram(idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+router.delete('/admin/programs/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { await deleteAdminProgram(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+
 router.get('/admin/configuration/credentials', requireSession, requireRole('Administrador'), async (req, res, next) => {
   try { const query=z.object({role:z.enum(['Administrador','Tutor','Monitor','Estudiante']).optional()}).strict().parse(req.query); res.json(await listCredentials(query.role)) } catch (error) { next(error) }
+})
+
+router.get('/admin/configuration/suspended-accounts', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listSuspendedAccounts()) } catch (error) { next(error) }
+})
+
+router.get('/admin/configuration/password-change-requests', requireSession, requireRole('Administrador'), async (_req, res, next) => {
+  try { res.json(await listPasswordChangeRequests()) } catch (error) { next(error) }
+})
+
+router.post('/admin/configuration/suspended-accounts/:id/unlock', requireSession, requireRole('Administrador'), async (req, res, next) => {
+  try { res.json(await unlockSuspendedAccount(idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
 })
 
 router.post('/admin/configuration/credentials/export', requireSession, requireRole('Administrador'), async (req, res, next) => {
@@ -147,7 +301,7 @@ router.post('/admin/configuration/credentials/:id/reset', requireSession, requir
 })
 
 router.patch('/admin/configuration/password', requireSession, async (req, res, next) => {
-  try { res.json(await changePassword(req.session.user.id, req.body)) } catch (error) { next(error) }
+  try { res.json(await changePassword(req.session.user.id, req.body, req.session.sessionId)) } catch (error) { next(error) }
 })
 
 router.get('/admin/configuration/settings', requireSession, requireRole('Administrador'), async (_req, res, next) => {
@@ -241,6 +395,10 @@ router.patch('/requests/:id/attendance', requireSession, async (req, res, next) 
   } catch (error) { next(error) }
 })
 
+router.post('/requests/:id/decision', requireSession, requireRole('Tutor','Monitor'), async (req, res, next) => {
+  try { res.json(await decideTutorRequest(req.session, idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+
 router.delete('/requests/:id', requireSession, requireRole('Administrador'), async (req, res, next) => {
   try { await deleteAdminRequest(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
 })
@@ -254,7 +412,11 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof ZodError) {
     return apiError(res, req, 422, 'VALIDATION_ERROR', 'La información enviada no cumple las reglas de validación.', error.issues.map((issue) => ({ path: issue.path, message: issue.message })))
   }
-  if (error instanceof AuthError) return apiError(res, req, error.status, error.code, error.message)
+  if (error instanceof AuthError) {
+    const retryAfterSeconds = Number(error.metadata?.retryAfterSeconds)
+    if (retryAfterSeconds > 0) res.setHeader('Retry-After', String(retryAfterSeconds))
+    return res.status(error.status).json({ status: error.status, code: error.code, message: error.message, path: req.path, timestamp: new Date().toISOString(), requestId: req.requestId, ...(error.metadata ?? {}) })
+  }
   if (error instanceof DataError) return apiError(res, req, error.status, error.code, error.message)
   console.error(error)
   return apiError(res, req, 500, 'INTERNAL_ERROR', 'Ocurrió un error interno del servidor.')

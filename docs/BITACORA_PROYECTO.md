@@ -662,8 +662,192 @@ Esta actualización deja el código y la documentación preparados para la revis
 - La API valida el formato cuando se proporciona, lo persiste en altas y actualizaciones, y permite conservarlo al omitir el campo en PATCH o quitarlo con un valor vacío/null. El contrato OpenAPI y la documentación del modelo/API quedaron sincronizados.
 - No se modificó el esquema de MariaDB porque la columna ya existe.
 
+## CRUD administrativo de asignaturas
+
+- Se agregaron la pantalla y las rutas protegidas para listar, crear, editar y borrar asignaturas con código, nombre, créditos, descripción y estado.
+- API y OpenAPI validan formato, longitudes y créditos enteros entre 1 y 30. Si hay programas, asignaciones o solicitudes relacionadas, `DELETE` devuelve conflicto y se conserva la opción de inactivar.
+- Verificación MariaDB: un registro temporal se creó, editó y eliminó; se confirmó además que una asignatura ya referenciada no puede borrarse.
+
+## CRUD administrativo de programas académicos
+
+- Se agregaron la pantalla y las rutas protegidas para listar, crear, editar y borrar programas con código, nombre, SNIES opcional, facultad y estado. El formulario usa facultades activas existentes.
+- Se validan tipos, longitudes, facultad válida y duplicados. Si existen estudiantes, asignaturas vinculadas o solicitudes, el borrado físico se bloquea para conservar la relación histórica.
+- Verificación MariaDB: un programa temporal se creó, editó y eliminó; se comprobó además que un programa ya referenciado no puede borrarse.
+
+## Avisos y validaciones de integridad en formularios
+
+- Los avisos del frontend se presentan en una bandeja accesible, cerrable y adaptable, en lugar de interrumpir el flujo con diálogos nativos. Los errores `422` incluyen campo y mensaje legibles. La entrega de claves temporales conserva un diálogo explícito para que el secreto no desaparezca automáticamente.
+- El nombre real de una persona se valida en interfaz y API para permitir letras, espacios, apóstrofes y guiones, y rechazar dígitos. Los datos numéricos de perfiles, catálogos, solicitudes y espacios rechazan letras, decimales o notación exponencial y aplican sus rangos.
+- Verificación: build web, typecheck API y contrato OpenAPI correctos; pruebas negativas para nombre con dígitos, capacidad con letras, créditos en notación exponencial y facultad textual fueron rechazadas antes de persistir. El CRUD integrado de ambas entidades y la protección de borrado con referencias pasaron; los registros de prueba se eliminaron.
+
 ## Selección explícita de roles al crear usuarios
 
 - El alta de usuario inicia con todas las casillas de rol desmarcadas y no genera el código institucional hasta que se selecciona un rol.
 - Se permite desmarcar cualquier rol, incluso el último; al intentar guardar se exige una selección y se aplican las combinaciones válidas. La edición conserva marcados los roles actuales.
 - El código se vuelve a generar al cambiar la selección y queda vacío si se desmarcan todos los roles.
+
+## Portal del tutor: resumen y agenda
+
+Se reemplazó el resumen genérico del tutor por métricas de sus sesiones próximas/realizadas, solicitudes asignadas e informes pendientes, y una lista priorizada de tutorías próximas. Se agregaron accesos al calendario, solicitudes, sesiones, reportes y configuración.
+
+**Comprobación:** compilación de producción del frontend satisfactoria y typecheck de API sin errores tras agregar consultas propias del tutor. La API restringe el resumen y la lista de asignaciones al rol Tutor y al usuario de sesión.
+
+## Disponibilidad semanal y recuperaciones
+
+“Mi disponibilidad” ahora presenta una cuadrícula semanal y CRUD persistente. La API verifica propiedad de la asignación académica, periodo activo, orden de horas y solapamientos; eliminar desactiva el bloque para conservar historial. Se agregó programación de recuperación vinculada a una sesión propia cancelada o no asistida, cancelación mientras está pendiente y cierre como realizada el día correspondiente. La recuperación realizada queda disponible como sesión reportable.
+
+**Comprobación:** typecheck de API, build web y aplicación de migración en MariaDB. El esquema existente incluye `Disponibilidad` y `RecuperacionMonitoria`; la migración amplía el detalle del reporte, sin reiniciar ni sobrescribir datos.
+
+## Gestión de solicitudes del tutor
+
+El tutor puede confirmar una tutoría asignada o cancelarla desde un modal con justificación obligatoria. La operación es transaccional, actualiza la sesión/solicitud y registra motivo, usuario y anticipación en `CancelacionMonitoria`. El motivo se incluye tanto en la consulta del tutor como en la consulta administrativa.
+
+**Comprobación:** API y frontend compilados; el contrato OpenAPI quedó sincronizado con la operación. La justificación se valida en el servidor y no se acepta cancelar si la solicitud ya no está asignada.
+
+## Mis sesiones
+
+La agenda incorpora conteos por estado, búsqueda por asignatura o lugar, filtro por estado y acción para marcar como realizada una tutoría confirmada/programada. Al cerrar la atención se actualiza la sesión y la solicitud; esta transición habilita el formulario de reporte.
+
+**Comprobación:** build web y typecheck API correctos. La actualización usa la ruta protegida existente y valida que el responsable coincida con el rol activo.
+
+## Reportes diarios y de recuperación
+
+Se agregó el formulario enlazado a sesiones realizadas: fecha, hora real, lugar, descripción, asistentes y cantidad, selección de estudiante SAT con seguimiento, actividades, logros, dificultades, recomendaciones y adjuntos de asistencia, actividades y evidencias de inicio/fin. Se admiten PDF, Word e imágenes; el servidor limita cada archivo a 4 MB y el conjunto a 12 MB. Los reportes se guardan como borrador, admiten edición mediante la API y pueden enviarse a administración; el envío bloquea cambios. Los reportes de recuperación quedan identificados con su recuperación original. La vista avisa de sesiones sin reporte y destaca la ventana de recuperación de pendientes desde el viernes y durante el fin de semana.
+
+La migración `database/migrations/002_reportes_tutor.sql` crea `InformeTutorDetalle` y `AdjuntoInformeTutor`; la API la aplica idempotentemente al arrancar, usando credenciales bootstrap. Metadatos e informe se guardan en MariaDB; archivos binarios quedan en `api/uploads/tutor-reports/` y esa carpeta está excluida de Git.
+
+**Comprobación:** migration presente en la base local; la auditoría de MariaDB encontró 38 tablas InnoDB, 57 relaciones foráneas y cero referencias huérfanas. El frontend y API compilan y OpenAPI valida. El CRUD de disponibilidad se probó con dos bloques temporales, luego retirados físicamente; no se modificaron sesiones existentes.
+
+## Exportación de informe institucional: recomendación pendiente
+
+No se generó exportación Word/PDF debido a que falta la plantilla institucional. Implementar sin formato, encabezados, logo, reglas de anexos y versión oficial entregaría un informe que no se puede validar académicamente. La decisión y un flujo propuesto de plantilla DOCX, previsualización editable y conversión PDF se documentan en `docs/decisiones.md`.
+
+## Configuración de tutor
+
+Se habilitó el cambio de contraseña propia, validando la clave actual, la confirmación y el mínimo de longitud. El tutor puede activar o desactivar los avisos de reportes atrasados; la preferencia se guarda localmente en el navegador, no en MariaDB.
+
+**Comprobación final del avance:** `npm run typecheck` en `api/`, `npm run validate` del contrato OpenAPI, `npm run build` en `web/` y auditoría de solo lectura de MariaDB. La auditoría conserva alertas preexistentes en cuentas/datos de demostración y controles CHECK pendientes; se registran en `database/README.md` sin modificar esos datos.
+
+## Justificación de cancelación visible para estudiantes
+
+El portal **Mis solicitudes** muestra la razón registrada por el tutor cuando una solicitud queda cancelada. La API ya incluye el campo `cancellationReason`; ahora también queda visible junto al estado cancelado en la tabla del estudiante.
+
+**Comprobación:** build de producción del frontend satisfactorio. La solicitud del estudiante ya se consulta desde MariaDB y no se agregó una copia local del motivo.
+
+## Notificaciones para los roles y recordatorios del tutor
+
+Se implementó `Notificacion` como bandeja persistente por cuenta, con contador de no leídas, lectura individual y lectura total. La campana está integrada a los encabezados de administrador, tutor, monitor y estudiante; actualiza la lista cada 30 segundos y emite un aviso al detectar eventos nuevos. La API registra notificaciones para solicitudes estudiantiles, solicitudes iniciales creadas por administración, asignaciones, confirmaciones/cancelaciones con su justificación, actualizaciones de estado y reportes diarios remitidos a administración. Los errores de notificación no revierten operaciones ya confirmadas.
+
+En el portal del tutor, el recordatorio de reportes diarios pendientes queda visible en todas las secciones y señala la opción de ponerse al día desde el viernes y durante el fin de semana. También aparece un aviso para crear el borrador mensual si existen sesiones reportadas en el mes actual y todavía no hay borrador.
+
+**Comprobación:** API `typecheck`, validación OpenAPI sincronizada (64 operaciones), build web, `git diff --check`, health check `database: connected` y auditoría MariaDB de solo lectura. La auditoría verificó 40 tablas InnoDB, 59 claves foráneas, 28 restricciones `UNIQUE`, 10 `CHECK` y cero huérfanos. Permanecen hallazgos de datos de demostración documentados en `database/README.md`.
+
+## Informe mensual provisional del tutor
+
+Se agregó una sección independiente **Informe mensual**. Permite seleccionar `AAAA-MM`, consolida las sesiones realizadas con reportes diarios, muestra horas, sesiones, asistencias y estudiantes SAT, lista datos del reporte y metadatos de anexos, y permite editar introducción, logros, dificultades y recomendaciones. El contenido se guarda como borrador único por tutor/mes en MariaDB; la interfaz dispone de vista previa, exportación Word compatible `.doc` e impresión/guardado PDF.
+
+La migración `003_notificaciones_informe_mensual.sql` añade `InformeMensualTutor` junto con la tabla de notificaciones. El formato se identifica explícitamente como provisional y no pretende reproducir el diseño institucional hasta contar con la plantilla. El borrador mensual consolida los reportes de sesión, pero no los reemplaza.
+
+## Revisión posterior de los módulos del tutor
+
+### Dashboard
+
+Se retiró la tarjeta duplicada de accesos rápidos y la acción redundante del encabezado. El resumen queda enfocado en métricas de agenda, solicitudes y reportes, con la lista de próximas tutorías en un panel principal.
+
+### Recuperación de tutoría
+
+El selector ahora consume `GET /tutor/recoverable-sessions`, con sesiones propias canceladas/no asistidas que no tengan recuperación activa. Las opciones identifican asignatura, fecha, horario y estado; si no hay elegibles se informa y se deshabilita el envío. La API impide programar recuperaciones duplicadas y fechas pasadas.
+
+### Solicitudes
+
+La bandeja del tutor/monitor se reorganizó en tarjetas con búsqueda, estado, prioridad, estudiante, asignatura y fecha. El formulario de cancelación presenta contexto de la decisión y conserva motivo obligatorio; las acciones disponibles dependen del rol y del estado. El ejemplo ficticio con ID 1 se retiró de `web/data/ejemplo.json`. La revisión de MariaDB encontró que el registro #1 está relacionado con una sesión; a petición del equipo, no se borraron ni añadieron filas a la base real.
+
+### Sesiones
+
+La tabla y su buscador anterior se reemplazaron por tarjetas responsive con fecha destacada, horario, asignatura, lugar, modalidad y estado. La búsqueda abarca asignatura/lugar/modalidad y el selector filtra por estado.
+
+### CRUD de reportes de tutoría
+
+Se completó lectura detallada, edición de borradores/devueltos, descarga autenticada de adjuntos, envío a revisión y eliminación de borradores aún no enviados. La edición mantiene los anexos si no se cargan reemplazos; si se suben nuevos, el API limpia los antiguos al confirmar. Solo se elimina un `Borrador`; los reportes devueltos/enviados mantienen su historial. Las operaciones verifican tutor propietario, asignación y sesión relacionadas.
+
+### Plantilla oficial
+
+Se reservó `api/templates/plantilla_informe_tutor_unitropico.docx` y se añadió `api/templates/README.md`. El archivo aún no está integrado al generador; cuando se reciba debe mapearse a los campos de `Informe`/`InformeTutorDetalle` y a la descarga de evidencias.
+
+**Comprobación del avance:** `npm run typecheck` y validación OpenAPI (51 rutas, 69 operaciones) en `api/`; build de producción en `web/`; `git diff --check`. Esta entrega no ejecutó cambios de datos ni migraciones sobre MariaDB.
+
+**Comprobación:** arranque real de API, health check local correcto, migration instalada y auditoría de base de datos; `npm run typecheck`, `npm run validate` y `npm run build` satisfactorios. No se tocó la información demostrativa preexistente.
+
+## Ajustes de facultades, solicitudes y reporte institucional
+
+Se añadió el registro de facultades desde Gestión de programas, con validación de duplicados y actualización inmediata del selector de facultad. No se requirió agregar tablas.
+
+La asignación administrativa consulta fechas y bloques de los horarios semanales activos de tutores y monitores. Se sustituyeron los campos de fecha/hora manuales por una selección de bloque; el servidor valida que la opción continúe disponible, corresponda al periodo y no se cruce con otra sesión. La solicitud asignada queda visible en la bandeja del responsable y se notifica a estudiante y responsable. Tutor y monitor pueden confirmar su propia asignación o cancelarla con justificación. Administración no puede aprobar/rechazar y conserva el historial al cerrar solicitudes. El borrado de casos asignados o atendidos muestra el mensaje requerido.
+
+Se amplió la lectura de reportes para autorizar por la asignación académica y soportar registros previos que no tengan detalle extendido. El informe mensual consolida solo sesiones reportadas, incluye actividades y evidencias disponibles y ubica las sesiones consolidadas en una página final separada de la exportación.
+
+**Verificación:** typecheck de API, validador OpenAPI 3.1 y build de producción web ejecutados después de los cambios. No se ejecutó un flujo interactivo con credenciales de tutor/monitor ni se alteraron datos de MariaDB.\nLos bloques ocupados no aparecen en el selector; una segunda validación transaccional cubre asignaciones concurrentes.
+### Corrección de error de ejecución en Gestión de solicitudes
+
+Se corrigió la importación faltante de `listAdminRequests` en `api/src/server.ts`. La ruta `GET /requests` del administrador ya puede resolver el listado exportado por `api/src/admin.ts`, evitando el `ReferenceError` que se producía al cargar las solicitudes. Se documentó que `@ts-nocheck` impedía que el typecheck detectara este error de importación.
+### Corrección de facultades, agenda administrativa y herramientas del tutor
+
+Se completó el CRUD de facultades: listado visible en Programas académicos, alta, edición, activación/desactivación y eliminación protegida por referencias a programas. La bandeja de asignación de solicitudes informa cuando consulta horarios y cuando no encuentra fechas libres. El API genera fechas según el día de la semana y bloque activo configurados para la persona, omite bloques ocupados en cualquiera de sus asignaciones y horas que ya iniciaron hoy, y vuelve a validar la disponibilidad al asignar.
+
+Al cambiar la asignatura de un tutor, se conserva el horario semanal copiando los bloques a la nueva asignación académica; la asignación anterior y su historial no se reescriben. Se corrigió la validación de disponibilidad para no enviar un identificador vacío y se renombró el módulo a **Horario**. El formulario de recuperación explica cuándo no hay sesiones canceladas o no asistidas elegibles. Los reportes se guardan solo para sesiones ya realizadas/finalizadas o recuperaciones realizadas; el informe mensual precarga sus secciones narrativas con datos de reportes individuales y ofrece descarga Word, sin imprimir la interfaz del sistema.
+
+**Verificación prevista:** validación OpenAPI, typecheck de API y build web. La integración con una cuenta real de tutor, datos de agenda en MariaDB y apertura del DOCX institucional debe confirmarse en el entorno local del equipo; no se cambian registros de producción como parte de esta corrección.
+
+### Corrección adicional de horarios y reportes individuales
+
+La disponibilidad normaliza el identificador de asignación vacío y lo puede resolver únicamente cuando el tutor tiene una asignación activa única; si hay varias, solicita elegir. Se mantuvo la validación de pertenencia y se limita el control de cruces a asignaciones activas. La fecha de la sesión y de una recuperación se obtiene con `DATE_FORMAT` para impedir errores de comparación por conversión del driver SQL. La pantalla informa los permisos por estado: Enviado/Aprobado/Entregado se consulta como historial; Borrador/Devuelto se edita; Borrador se elimina.
+
+La consulta de solo lectura encontró en MariaDB el periodo `2026-1` Activo con cierre el 20/06/2026. El API ahora responde `PERIOD_EXPIRED` en vez de presentar una lista vacía como si no hubiera horario. La base tiene bloques activos de monitores en ese periodo, y el tutor de muestra tiene asignación activa pero ningún bloque activo. También se encontró una sola sesión finalizada del tutor, con informe Aprobado; no hay una sesión pendiente para crear otro informe en esos datos. No se cambiaron registros de MariaDB.
+
+**Verificación realizada:** typecheck API, validación OpenAPI 3.1, build de producción web y `git diff --check` correctos. Se consultó el estado real mediante lecturas SQL/API; no se insertaron ni actualizaron datos. Para operar solicitudes, el administrador debe registrar/activar el periodo institucional vigente con fechas correctas y completar el horario activo del tutor.
+
+### Corrección definitiva del flujo de creación de disponibilidad
+
+La causa exacta del `Too small: expected number to be >0` era que el formulario de alta mantiene `editing` como objeto con `id: 0`; la condición anterior evaluaba el objeto como verdadero y enviaba un PATCH al recurso `/tutor/availability/0`. El servidor rechazaba el ID de ruta antes de procesar el bloque. Se cambió el criterio a `editing && editing.id > 0`; un alta llama POST y solo una fila existente llama PATCH.
+
+**Prueba funcional:** ejecuté el flujo real de autenticación, consulta de asignación, guardado del servicio de disponibilidad y recarga de horario sin mockear MariaDB. Se creó y se volvió a leer el bloque semanal provisional `Lunes 08:00–09:00 · Presencial · Matemáticas básicas`, ID `19`, para asignación `10`. La cuenta tenía cero bloques antes y uno después. El registro permanece activo en la base local para que se vea en Horario; puede eliminarse desde ese módulo cuando termine la demostración.
+
+**Verificación de código:** build web de producción y typecheck de API correctos. La validación OpenAPI permanece sincronizada; no hubo cambios de rutas en esta corrección. El periodo `2026-1` sigue vencido y no se modificó; por tanto, la creación de solicitudes nuevas seguirá requiriendo registrar las fechas institucionales del periodo vigente.
+
+### Auditoría de autenticación: revocación de logout
+
+Se detectó que el endpoint de cierre respondía `204` sin invalidar el JWT, que permanecía utilizable hasta expirar. Se agregó `SesionIngreso` y la migración idempotente `004_sesiones_ingreso.sql`; cada token lleva un `jti` y la API comprueba su sesión activa antes de autorizar rutas. `POST /auth/logout` registra la revocación, y la interfaz espera la respuesta antes de borrar el estado local. Si la API no responde, la interfaz igualmente permite salir y elimina el token local; el token remoto expira conforme a su TTL.
+
+**Verificación funcional secuencial:** login real contra el servicio de autenticación, aceptación de token, revocación y rechazo del mismo token (`401 SESSION_REVOKED`). También pasaron `api: npm run typecheck`, `web: npm run build` y `git diff --check`. La prueba no expuso secretos ni modificó información académica.
+
+### Revocación de sesiones al cambiar/restablecer credenciales
+
+Se corrigió la persistencia de sesiones previas tras cambiar una contraseña. El cambio personal revoca los demás JWT y mantiene el actual; restablecer la clave de otra cuenta o generar claves temporales en lote revoca todos sus JWT y pretokens pendientes. El cambio de contraseña y la revocación se ejecutan en una transacción.
+
+**Comprobación:** las reglas SQL se ejecutaron contra MariaDB con filas de sesión temporales: se verificó que la sesión actual permaneciera activa, las otras se revocaran y el restablecimiento revocara todas. La transacción se revirtió, sin dejar registros de prueba. Las tablas de preautenticación también se limpian dentro de esas transacciones.
+
+### Metadatos de inicio de sesión
+
+Se detectó que `ultimo_acceso` nunca se escribía al autenticar y que la respuesta no exponía el tiempo real de expiración pese a estar descrito en OpenAPI. El login correcto ahora actualiza la marca temporal (incluida la migración de claves heredadas a bcrypt) y `expiresIn` se calcula con `exp - iat` del JWT firmado.
+
+**Comprobación:** login real exitoso, `ultimo_acceso` cambió y la respuesta devolvió `28800` segundos, coincidentes con el TTL configurado en el entorno. El token de comprobación se revocó inmediatamente. Typecheck API y validación OpenAPI (54 rutas, 74 operaciones) correctos.
+
+### Almacenamiento de tokens en el navegador
+
+Los tokens de ingreso estaban en `localStorage`, persistiendo tras cerrar el navegador. Se migraron acceso y rol preliminar a `sessionStorage`, limpiando las claves JWT históricas de `localStorage`; el correo recordado no se cambia.
+
+**Comprobación:** build de producción TypeScript/Vite exitoso y búsqueda del código confirma que las operaciones de lectura/escritura de ambos JWT usan `sessionStorage`; `localStorage` solo se usa para quitar copias antiguas. Al cerrar la pestaña se pierde el almacenamiento de sesión.
+
+### Selección y cambio de rol vinculados a la sesión
+
+Se eliminó la emisión de pretokens de ocho horas después de elegir rol. El pretoken de selección inicial ahora se registra en `SesionPreAutenticacion`, vence según `PRE_AUTH_TOKEN_TTL` y se consume de forma atómica una sola vez. Si el usuario cancela el selector, se revoca. Para cambiar de rol dentro del portal se agregó `POST /auth/change-role`, que exige el JWT actual, verifica que el rol siga asignado, emite el token nuevo y revoca el anterior.
+
+**Comprobación funcional contra MariaDB:** una cuenta con varios roles inició, seleccionó rol, no pudo reutilizar el pretoken, cambió de rol y perdió el acceso con el token anterior. El token nuevo funcionó y se revocó al salir. También se verificó que cancelar el selector revoca su pretoken. Las migraciones se aplicaron idempotentemente. Typecheck API, build web y OpenAPI válido (56 rutas, 76 operaciones) correctos.
+
+La misma secuencia se comprobó luego por HTTP contra Express: selección `200`, replay del pretoken `401`, cambio de rol `200`, token previo `401`, token nuevo `200`, logout `204` y token revocado `401`; cancelar el pretoken devuelve `204` y luego no se puede reutilizar (`401`).
+
+### Límite de intentos de autenticación
+
+Se añadió limitación de intentos al endpoint de login: cinco errores por combinación de IP/correo en una ventana de 15 minutos activan bloqueo temporal y respuesta `429 AUTH_RATE_LIMITED` con `Retry-After`. El contador guarda únicamente un hash de IP y correo, nunca contraseñas.
+
+**Comprobación por HTTP real:** cinco credenciales incorrectas respondieron `401`; el sexto intento devolvió `429` y `Retry-After: 900`. El límite se mantiene en memoria del proceso API; una instalación con varias réplicas necesitará un almacén compartido.

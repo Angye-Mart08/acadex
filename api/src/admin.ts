@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { pool } from './db.js'
 import { DataError } from './data.js'
+import { publishRequestNotifications, publishRoleNotification } from './notifications.js'
 
 const roleNames = ['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as const
 const roleSchema = z.enum(roleNames)
@@ -23,10 +24,11 @@ const institutionalEmailSchema = z.string().trim().email().max(120).refine(
   'Usa un correo institucional @unitropico.edu.co.',
 ).transform((value) => value.toLowerCase())
 const personNameSchema = z.string().trim().min(5).max(160).refine(
-  (value) => value.split(/\s+/).length >= 2,
-  'Escribe al menos un nombre y un apellido.',
+  (value) => /^[\p{L}\p{M}]+(?:[ '\u2019-][\p{L}\p{M}]+)+$/u.test(value),
+  'Escribe un nombre y apellido usando solo letras, espacios, apóstrofes o guiones.',
 )
 const identityDocumentSchema = z.string().trim().regex(/^\d{5,20}$/, 'El documento debe contener entre 5 y 20 dígitos.')
+const integerInput = (schema: z.ZodType) => z.preprocess((value) => typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value, schema)
 const contactPhoneSchema = z.string().trim().max(20).refine(
   (value) => value === '' || (/^\+?[0-9\s().-]+$/.test(value) && (value.match(/\d/g)?.length ?? 0) >= 7),
   'Ingresa un número de contacto válido (mínimo 7 dígitos).',
@@ -148,16 +150,16 @@ async function restoreProfileRoleMemberships(connection: any, userId: number) {
 }
 
 const assignmentSchema = z.object({
-  subjectIds: z.array(z.coerce.number().int().positive()).min(1, 'Selecciona una asignatura.').max(1, 'Tutor y monitor solo pueden tener una asignatura asignada.'),
-  periodId: z.preprocess((val) => (val && Number(val) > 0 ? Number(val) : undefined), z.number().int().positive().optional()),
-  weeklyHours: z.preprocess((val) => (val && Number(val) > 0 ? Number(val) : undefined), z.number().int().positive().max(60).optional()),
+  subjectIds: z.array(integerInput(z.number().int().positive())).min(1, 'Selecciona una asignatura.').max(1, 'Tutor y monitor solo pueden tener una asignatura asignada.'),
+  periodId: integerInput(z.number().int().positive().optional()),
+  weeklyHours: integerInput(z.number().int().positive().max(60).optional()),
 }).strict()
 
 const studentProfileSchema = z.object({
   studentCode: z.string().trim().min(2).max(30),
-  semester: z.preprocess((val) => (val !== undefined && val !== null ? Number(val) : undefined), z.number().int().min(1).max(12).optional()),
-  semestre: z.preprocess((val) => (val !== undefined && val !== null ? Number(val) : undefined), z.number().int().min(1).max(12).optional()),
-  programId: z.coerce.number().int().positive(),
+  semester: integerInput(z.number().int().min(1).max(12).optional()),
+  semestre: integerInput(z.number().int().min(1).max(12).optional()),
+  programId: integerInput(z.number().int().positive()),
 }).strict().transform((val) => {
   const sem = val.semester ?? val.semestre ?? 1
   return {
@@ -180,7 +182,7 @@ const profileSchema = z.object({
     teachingCategory: z.string().trim().min(2).max(80),
     employmentType: z.string().trim().min(2).max(80),
     currentPeriod: z.string().trim().min(1).max(20),
-    weeklyHours: z.coerce.number().int().positive().max(60),
+    weeklyHours: integerInput(z.number().int().positive().max(60)),
     observations: z.string().max(300).optional().default(''),
     assignments: assignmentSchema.default({}),
   }).strict().optional(),
@@ -188,7 +190,7 @@ const profileSchema = z.object({
     monitorType: z.string().trim().min(2).max(80).default('Monitor académico'),
     resolution: z.string().max(80).optional().default(''),
     currentPeriod: z.string().trim().min(1).max(20),
-    weeklyHours: z.coerce.number().int().positive().max(60),
+    weeklyHours: integerInput(z.number().int().positive().max(60)),
     observations: z.string().max(300).optional().default(''),
     assignments: assignmentSchema.default({}),
   }).strict().optional(),
@@ -218,11 +220,29 @@ async function upsertAssignments(connection: any, id: number, role: string, assi
   const periodId = assignment.periodId ?? (await connection.query("SELECT id_periodo FROM PeriodoAcademico WHERE estado='Activo' ORDER BY fecha_inicio DESC LIMIT 1"))[0][0]?.id_periodo
   if (!periodId) throw new DataError(422, 'PERIOD_REQUIRED', `No existe un periodo activo para ${role}.`)
   const hours = assignment.weeklyHours ?? 1
+  const subjectIds = assignment.subjectIds ?? []
+  const [previousAssignments] = await connection.query("SELECT id_asignacion AS id,id_asignatura AS subjectId,id_periodo AS periodId FROM AsignacionAcademica WHERE id_usuario=? AND id_rol=? AND estado='Activa'", [id, roleId])
   await connection.execute("UPDATE AsignacionAcademica SET estado='Cancelada' WHERE id_usuario=? AND id_rol=?", [id, roleId])
-  for (const subjectId of assignment.subjectIds ?? []) {
+  for (const subjectId of subjectIds) {
     const [existing] = await connection.query('SELECT id_asignacion FROM AsignacionAcademica WHERE id_usuario=? AND id_rol=? AND id_asignatura=? AND id_periodo=? LIMIT 1', [id, roleId, subjectId, periodId])
-    if (existing.length) await connection.execute("UPDATE AsignacionAcademica SET horas_semanales=?, estado='Activa' WHERE id_asignacion=?", [hours, existing[0].id_asignacion])
-    else await connection.execute("INSERT INTO AsignacionAcademica (id_usuario,id_rol,id_asignatura,id_periodo,horas_semanales,fecha_inicio,estado) VALUES (?,?,?,?,?,CURDATE(),'Activa')", [id, roleId, subjectId, periodId, hours])
+    if (existing.length) {
+      await connection.execute("UPDATE AsignacionAcademica SET horas_semanales=?, estado='Activa' WHERE id_asignacion=?", [hours, existing[0].id_asignacion])
+      const previous = previousAssignments.find((item: any) => Number(item.periodId) === Number(periodId) && Number(item.id) !== Number(existing[0].id_asignacion))
+      if (role === 'Tutor' && previous) await copyTutorAvailability(connection,previous.id,existing[0].id_asignacion)
+    }
+    else {
+      const [created] = await connection.execute("INSERT INTO AsignacionAcademica (id_usuario,id_rol,id_asignatura,id_periodo,horas_semanales,fecha_inicio,estado) VALUES (?,?,?,?,?,CURDATE(),'Activa')", [id, roleId, subjectId, periodId, hours])
+      const previous = previousAssignments.find((item: any) => Number(item.periodId) === Number(periodId))
+      if (role === 'Tutor' && previous) await copyTutorAvailability(connection,previous.id,created.insertId)
+    }
+  }
+}
+
+async function copyTutorAvailability(connection:any,sourceAssignmentId:number,targetAssignmentId:number) {
+  const [blocks] = await connection.query("SELECT dia_semana,hora_inicio,hora_fin,modalidad,estado FROM Disponibilidad WHERE id_asignacion=?", [sourceAssignmentId])
+  for (const block of blocks) {
+    const [duplicate] = await connection.query("SELECT id_disponibilidad FROM Disponibilidad WHERE id_asignacion=? AND dia_semana=? AND hora_inicio=? AND hora_fin=? LIMIT 1", [targetAssignmentId,block.dia_semana,block.hora_inicio,block.hora_fin])
+    if (!duplicate.length) await connection.execute("INSERT INTO Disponibilidad(id_asignacion,dia_semana,hora_inicio,hora_fin,modalidad,estado) VALUES(?,?,?,?,?,?)", [targetAssignmentId,block.dia_semana,block.hora_inicio,block.hora_fin,block.modalidad,block.estado])
   }
 }
 
@@ -380,10 +400,10 @@ function normalizeSpace(row: any) {
 const optionalText = (maxLength: number) => z.string().trim().max(maxLength).optional().default('')
 const spaceFieldsSchema = z.object({
   code: z.string().trim().min(2).max(20).regex(/^[A-Za-z0-9-]+$/, 'El código solo puede contener letras, números y guiones.'),
-  name: z.string().trim().min(2).max(120),
+  name: z.string().trim().min(2).max(120).refine((value) => /[\p{L}\p{N}]/u.test(value) && !/[\u0000-\u001f]/.test(value), 'Ingresa un nombre de espacio válido.'),
   building: optionalText(80), block: optionalText(20), room: optionalText(20), floor: optionalText(10),
   location: optionalText(200), description: optionalText(300), resources: optionalText(500), observations: optionalText(300),
-  capacity: z.coerce.number().int().min(1).max(1000),
+  capacity: integerInput(z.number().int().min(1).max(1000)),
   type: z.enum(['Aula','Laboratorio','Sala','Sala de informática','Biblioteca','Salón de reuniones','Otro','Virtual']),
   status: z.enum(['Activo','Inactivo']).optional(),
 }).strict()
@@ -476,8 +496,8 @@ export async function deleteAdminSpace(id: number) {
   }
 }
 
-function normalizeAdminRequest(row:any){return {id:Number(row.id),studentId:Number(row.studentId),student:row.student,programId:Number(row.programId),program:row.program,subjectId:Number(row.subjectId),subject:row.subject,type:row.type,priority:row.priority,status:row.status,date:row.date,motive:row.motivo??'',description:row.descripcion??'',period:row.period,periodId:Number(row.periodId)}}
-const requestSelect=`SELECT s.id_solicitud AS id,e.id_usuario AS studentId,CONCAT(u.nombres,' ',u.apellidos) AS student,p.id_programa AS programId,p.nombre AS program,a.id_asignatura AS subjectId,a.nombre AS subject,ts.nombre AS type,s.prioridad AS priority,s.estado AS status,DATE_FORMAT(s.fecha_solicitud,'%Y-%m-%d') AS date,s.motivo,s.descripcion,pa.nombre AS period,s.id_periodo AS periodId FROM Solicitud s JOIN Estudiante e ON e.id_estudiante=s.id_estudiante JOIN Usuario u ON u.id_usuario=e.id_usuario JOIN Programa p ON p.id_programa=s.id_programa JOIN Asignatura a ON a.id_asignatura=s.id_asignatura JOIN TipoSolicitud ts ON ts.id_tipo_solicitud=s.id_tipo_solicitud JOIN PeriodoAcademico pa ON pa.id_periodo=s.id_periodo`;
+function normalizeAdminRequest(row:any){return {id:Number(row.id),studentId:Number(row.studentId),student:row.student,programId:Number(row.programId),program:row.program,subjectId:Number(row.subjectId),subject:row.subject,type:row.type,priority:row.priority,status:row.status,date:row.date,motive:row.motivo??'',description:row.descripcion??'',period:row.period,periodId:Number(row.periodId),sessionStatus:row.sessionStatus??null,cancellationReason:row.cancellationReason??null}}
+const requestSelect=`SELECT s.id_solicitud AS id,e.id_usuario AS studentId,CONCAT(u.nombres,' ',u.apellidos) AS student,p.id_programa AS programId,p.nombre AS program,a.id_asignatura AS subjectId,a.nombre AS subject,ts.nombre AS type,s.prioridad AS priority,s.estado AS status,DATE_FORMAT(s.fecha_solicitud,'%Y-%m-%d') AS date,s.motivo,s.descripcion,pa.nombre AS period,s.id_periodo AS periodId,(SELECT ss.estado FROM Sesion ss WHERE ss.id_solicitud=s.id_solicitud ORDER BY ss.id_sesion DESC LIMIT 1) AS sessionStatus,(SELECT cm.motivo FROM CancelacionMonitoria cm JOIN Sesion cs ON cs.id_sesion=cm.id_sesion WHERE cs.id_solicitud=s.id_solicitud AND cm.estado='Activo' ORDER BY cm.fecha_cancelacion DESC LIMIT 1) AS cancellationReason FROM Solicitud s JOIN Estudiante e ON e.id_estudiante=s.id_estudiante JOIN Usuario u ON u.id_usuario=e.id_usuario JOIN Programa p ON p.id_programa=s.id_programa JOIN Asignatura a ON a.id_asignatura=s.id_asignatura JOIN TipoSolicitud ts ON ts.id_tipo_solicitud=s.id_tipo_solicitud JOIN PeriodoAcademico pa ON pa.id_periodo=s.id_periodo`;
 export async function listAdminRequests(query: any = {}) {
   const where = ['1=1']
   const params: any[] = []
@@ -514,7 +534,7 @@ export async function listAdminRequests(query: any = {}) {
     pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
   }
 }
-const adminRequestSchema=z.object({studentId:z.coerce.number().int().positive(),programId:z.coerce.number().int().positive(),subjectId:z.coerce.number().int().positive(),type:z.enum(['Monitoría','Tutoría','Acompañamiento']),priority:z.enum(['Alta','Media','Baja']),motive:z.string().trim().min(3).max(500),description:z.string().trim().min(3).max(500),periodId:z.coerce.number().int().positive().optional()}).strict()
+const adminRequestSchema=z.object({studentId:integerInput(z.number().int().positive()),programId:integerInput(z.number().int().positive()),subjectId:integerInput(z.number().int().positive()),type:z.enum(['Monitoría','Tutoría','Acompañamiento']),priority:z.enum(['Alta','Media','Baja']),motive:z.string().trim().min(3).max(500),description:z.string().trim().min(3).max(500),periodId:integerInput(z.number().int().positive().optional())}).strict()
 export async function createAdminRequest(payload:unknown){
   const input=adminRequestSchema.parse(payload)
   const [students]=await pool.query("SELECT e.id_estudiante AS studentId,ep.id_programa AS programId FROM Estudiante e LEFT JOIN EstudiantePrograma ep ON ep.id_estudiante=e.id_estudiante AND ep.principal=1 AND ep.estado='Activo' WHERE e.id_usuario=? AND e.estado='Activo'",[input.studentId])
@@ -532,11 +552,12 @@ export async function createAdminRequest(payload:unknown){
   if(!periods.length)throw new DataError(422,'PERIOD_NOT_AVAILABLE','El periodo no está disponible para nuevas solicitudes.')
   const [result]=await pool.execute("INSERT INTO Solicitud (id_estudiante,id_programa,id_asignatura,id_tipo_solicitud,id_periodo,fecha_solicitud,motivo,descripcion,prioridad,estado) VALUES (?,?,?,?,?,NOW(),?,?,?,'Pendiente')",[students[0].studentId,input.programId,input.subjectId,types[0].id_tipo_solicitud,periodId,input.motive,input.description,input.priority])
   const [rows]=await pool.query(`${requestSelect} WHERE s.id_solicitud=?`,[result.insertId])
+  await publishRequestNotifications(Number(result.insertId), { title: 'Solicitud de acompañamiento', message: 'Administración registró una solicitud inicial para ti. Consulta los detalles en Mis solicitudes.', category: 'Solicitud' })
   return normalizeAdminRequest(rows[0])
 }
 
 const requestAssignmentSchema = z.object({
-  userId: z.coerce.number().int().positive(),
+  userId: integerInput(z.number().int().positive()),
   role: z.enum(['Tutor', 'Monitor']),
   date: z.string().refine(isoDateIsValid, 'La fecha debe ser válida y usar el formato AAAA-MM-DD.').refine((value) => {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -552,9 +573,10 @@ export async function assignAdminRequest(id: number, payload: unknown) {
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
-    const [requestRows] = await connection.query("SELECT s.id_asignatura,s.id_periodo,s.estado,DATE_FORMAT(p.fecha_inicio,'%Y-%m-%d') AS periodStart,DATE_FORMAT(p.fecha_fin,'%Y-%m-%d') AS periodEnd FROM Solicitud s JOIN PeriodoAcademico p ON p.id_periodo=s.id_periodo WHERE s.id_solicitud=? FOR UPDATE", [id])
+    const [requestRows] = await connection.query("SELECT s.id_asignatura,s.id_periodo,s.estado,ts.nombre AS requestType,DATE_FORMAT(p.fecha_inicio,'%Y-%m-%d') AS periodStart,DATE_FORMAT(p.fecha_fin,'%Y-%m-%d') AS periodEnd FROM Solicitud s JOIN PeriodoAcademico p ON p.id_periodo=s.id_periodo JOIN TipoSolicitud ts ON ts.id_tipo_solicitud=s.id_tipo_solicitud WHERE s.id_solicitud=? FOR UPDATE", [id])
     if (!requestRows.length) throw new DataError(404, 'REQUEST_NOT_FOUND', 'La solicitud no existe.')
     if (!['Pendiente', 'Aprobada'].includes(requestRows[0].estado)) throw new DataError(409, 'REQUEST_NOT_ASSIGNABLE', 'Solo se pueden asignar solicitudes pendientes o aprobadas.')
+    if ((requestRows[0].requestType === 'Tutoría' && assignment.role !== 'Tutor') || (requestRows[0].requestType === 'Monitoría' && assignment.role !== 'Monitor')) throw new DataError(422,'ASSIGNMENT_ROLE_MISMATCH','El rol asignado debe corresponder al tipo de acompañamiento solicitado.')
     const sessionDate = assignment.date
     const periodStart = requestRows[0].periodStart
     const periodEnd = requestRows[0].periodEnd
@@ -571,6 +593,18 @@ export async function assignAdminRequest(id: number, payload: unknown) {
       [assignment.userId, assignment.role, requestRows[0].id_asignatura, requestRows[0].id_periodo],
     )
     if (!assignmentRows.length) throw new DataError(422, 'STAFF_SUBJECT_MISMATCH', 'La persona seleccionada no tiene una asignación activa para esta asignatura y periodo.')
+    const dayNames = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado']
+    const weekday = dayNames[new Date(`${assignment.date}T00:00:00.000Z`).getUTCDay()]
+    const scheduleSql = assignment.role === 'Tutor'
+      ? `SELECT id_disponibilidad AS id FROM Disponibilidad WHERE id_asignacion=? AND dia_semana=? AND hora_inicio=? AND hora_fin=? AND estado='Activo'`
+      : `SELECT hm.id_horario_monitor AS id FROM HorarioMonitor hm WHERE hm.id_usuario=? AND hm.id_periodo=? AND hm.dia_semana=? AND hm.hora_inicio=? AND hm.hora_fin=? AND hm.estado='Activo'`
+    const scheduleParams = assignment.role === 'Tutor'
+      ? [assignmentRows[0].id,weekday,assignment.startTime,assignment.endTime]
+      : [assignment.userId,requestRows[0].id_periodo,weekday,assignment.startTime,assignment.endTime]
+    const [scheduleRows] = await connection.query(scheduleSql, scheduleParams)
+    if (!scheduleRows.length) throw new DataError(422, 'SCHEDULE_SLOT_NOT_FOUND', 'El horario seleccionado ya no está disponible en el horario preestablecido del responsable.')
+    const [conflicts] = await connection.query("SELECT s.id_sesion FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre=? AND s.fecha=? AND s.estado NOT IN ('Cancelada','No Asistida') AND s.hora_inicio < ? AND s.hora_fin > ? LIMIT 1", [assignment.userId,assignment.role,assignment.date,assignment.endTime,assignment.startTime])
+    if (conflicts.length) throw new DataError(409, 'SCHEDULE_SLOT_TAKEN', 'El responsable ya tiene una sesión asignada en ese horario.')
     const [sessionExists] = await connection.query("SELECT id_sesion FROM Sesion WHERE id_solicitud=? AND estado NOT IN ('Cancelada','No Asistida') LIMIT 1", [id])
     if (sessionExists.length) throw new DataError(409, 'REQUEST_ALREADY_ASSIGNED', 'La solicitud ya cuenta con una sesión activa.')
     await connection.execute(
@@ -586,38 +620,72 @@ export async function assignAdminRequest(id: number, payload: unknown) {
     connection.release()
   }
   const [rows] = await pool.query(`${requestSelect} WHERE s.id_solicitud=?`, [id])
+  await publishRequestNotifications(id, { title: 'Acompañamiento asignado', message: 'Tu solicitud tiene una sesión programada. Revisa la fecha y el horario en Mis sesiones.', includeStaff: true })
   return normalizeAdminRequest(rows[0])
 }
 
 export async function updateAssignedRequestStatus(session: any, id: number, payload: unknown) {
   const input = z.object({ status: z.enum(['Atendida']) }).strict().parse(payload)
   const [assigned] = await pool.query(
-    `SELECT s.id_sesion
+    `SELECT s.id_sesion,s.estado AS sessionStatus
        FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion
        JOIN Rol r ON r.id_rol=aa.id_rol
       WHERE s.id_solicitud=? AND aa.id_usuario=? AND r.nombre=? AND s.estado NOT IN ('Cancelada','No Asistida')`,
     [id, session.user.id, session.activeRole],
   )
   if (!assigned.length) throw new DataError(404, 'ASSIGNED_REQUEST_NOT_FOUND', 'La solicitud no está asignada a tu cuenta y rol.')
+  if (assigned.some((row:any)=>['Programada','Reprogramada'].includes(row.sessionStatus))) throw new DataError(409,'SESSION_CONFIRMATION_REQUIRED','Confirma la sesión asignada antes de marcar la solicitud como atendida.')
   const [rows] = await pool.query('SELECT estado FROM Solicitud WHERE id_solicitud=?', [id])
   if (!rows.length) throw new DataError(404, 'REQUEST_NOT_FOUND', 'La solicitud no existe.')
   if (rows[0].estado !== 'Asignada') throw new DataError(409, 'INVALID_STATUS_TRANSITION', 'Solo se pueden marcar como atendidas las solicitudes asignadas.')
   await pool.execute("UPDATE Solicitud SET estado='Atendida' WHERE id_solicitud=?", [id])
   await pool.execute("UPDATE Sesion SET estado='Realizada' WHERE id_solicitud=? AND estado IN ('Programada','Confirmada','En Proceso')", [id])
+  await publishRequestNotifications(id, { title: 'Acompañamiento marcado como realizado', message: `La solicitud fue marcada como atendida por ${session.activeRole}.`, category: 'Sesion', includeStaff: true })
   const [result] = await pool.query(`${requestSelect} WHERE s.id_solicitud=?`, [id])
   return normalizeAdminRequest(result[0])
 }
+
+export async function decideTutorRequest(session: any, requestId: number, payload: unknown) {
+  if (!['Tutor','Monitor'].includes(session.activeRole)) throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para el tutor o monitor asignado.')
+  const input = z.object({ action: z.enum(['accept','cancel']), reason: z.string().trim().min(5).max(1000).optional() }).strict().superRefine((value, ctx) => {
+    if (value.action === 'cancel' && !value.reason) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'Justifica la cancelación.' })
+  }).parse(payload)
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [rows] = await connection.query(`SELECT s.id_sesion,s.fecha,s.estado AS sessionStatus,so.estado AS requestStatus FROM Sesion s JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE s.id_solicitud=? AND aa.id_usuario=? AND r.nombre=? FOR UPDATE`, [requestId,session.user.id,session.activeRole])
+    if (!rows.length) throw new DataError(404, 'ASSIGNED_REQUEST_NOT_FOUND', 'La solicitud no está asignada a tu cuenta y rol activo.')
+    const selected = rows.find((row: any) => !['Cancelada','No Asistida','Finalizada','Realizada'].includes(row.sessionStatus))
+    if (!selected || selected.requestStatus !== 'Asignada') throw new DataError(409, 'INVALID_REQUEST_STATE', 'Esta solicitud ya no admite aceptación o cancelación.')
+    if (input.action === 'accept') {
+      await connection.execute("UPDATE Sesion SET estado='Confirmada' WHERE id_sesion=?", [selected.id_sesion])
+    } else {
+      const daysUntil = Math.max(0, Math.floor((new Date(`${String(selected.fecha).slice(0,10)}T00:00:00Z`).getTime() - new Date(`${new Date().toISOString().slice(0,10)}T00:00:00Z`).getTime()) / 86400000))
+      await connection.execute("INSERT INTO CancelacionMonitoria (id_sesion,id_usuario,dias_anticipacion,motivo,estado) VALUES (?, ?, ?, ?, 'Activo')", [selected.id_sesion,session.user.id,daysUntil,input.reason])
+      await connection.execute("UPDATE Sesion SET estado='Cancelada',observaciones=? WHERE id_sesion=?", [`Cancelación del tutor: ${input.reason}`.slice(0,500),selected.id_sesion])
+      await connection.execute("UPDATE Solicitud SET estado='Cancelada' WHERE id_solicitud=?", [requestId])
+    }
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally { connection.release() }
+  const [result] = await pool.query(`${requestSelect} WHERE s.id_solicitud=?`, [requestId])
+  const serviceName=session.activeRole==='Tutor'?'tutoría':'monitoría'
+  await publishRequestNotifications(requestId, { title: input.action === 'accept' ? `${serviceName} confirmada` : `${serviceName} cancelada por el responsable`, message: input.action === 'accept' ? `El ${session.activeRole.toLowerCase()} confirmó la sesión asignada.` : `El ${session.activeRole.toLowerCase()} canceló la sesión. Justificación: ${input.reason}`, category: 'Solicitud', includeStaff: true })
+  if (input.action === 'cancel') await publishRoleNotification('Administrador', { category: 'Solicitud', title: `${serviceName} cancelada por el responsable`, message: `La solicitud #${requestId} fue cancelada. Justificación: ${input.reason}`, entityType: 'solicitud', entityId: requestId })
+  return normalizeAdminRequest(result[0])
+}
 export async function updateAdminRequest(id:number,payload:any){
-  const input=z.object({status:z.enum(['Pendiente','Aprobada','Rechazada','Asignada','Atendida','Cancelada','Finalizada'])}).strict().parse(payload)
+  const input=z.object({status:z.enum(['Cancelada','Finalizada'])}).strict().parse(payload)
   const [currentRows]=await pool.query('SELECT estado FROM Solicitud WHERE id_solicitud=?',[id])
   if(!currentRows.length)throw new DataError(404,'REQUEST_NOT_FOUND','La solicitud no existe.')
   const currentStatus=currentRows[0].estado
-  if(input.status==='Asignada'&&currentStatus!=='Asignada')throw new DataError(422,'ASSIGNMENT_REQUIRED','Usa la operación de asignación para vincular un tutor o monitor y programar la sesión.')
   const transitions:Record<string,string[]>={
-    Pendiente:['Aprobada','Rechazada','Cancelada'],
-    Aprobada:['Asignada','Cancelada'],
-    Asignada:['Atendida','Cancelada'],
-    Atendida:['Finalizada','Cancelada'],
+    Pendiente:['Cancelada'],
+    Aprobada:['Cancelada'],
+    Asignada:[],
+    Atendida:['Finalizada'],
     Rechazada:[],Cancelada:[],Finalizada:[],
   }
   if(currentStatus!==input.status&&!transitions[currentStatus]?.includes(input.status)){
@@ -625,6 +693,7 @@ export async function updateAdminRequest(id:number,payload:any){
   }
   if(currentStatus!==input.status)await pool.execute('UPDATE Solicitud SET estado=? WHERE id_solicitud=?',[input.status,id])
   const [rows]=await pool.query(`${requestSelect} WHERE s.id_solicitud=?`,[id])
+  if(currentStatus!==input.status) await publishRequestNotifications(id,{title:'Actualización de solicitud',message:`Administración actualizó el estado de tu solicitud a ${input.status}.`,includeStaff:true})
   return normalizeAdminRequest(rows[0])
 }
 
@@ -737,12 +806,155 @@ export async function deleteAdminPeriod(id:number){
 
 export async function adminCatalogs(){
   const [programs]=await pool.query("SELECT p.id_programa AS id,p.codigo,p.nombre,p.id_facultad AS facultyId,f.nombre AS facultyName FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad WHERE p.estado='Activo' ORDER BY p.nombre")
+  const [faculties]=await pool.query("SELECT id_facultad AS id,nombre AS nombre FROM Facultad WHERE estado='Activo' ORDER BY nombre")
   const [subjects]=await pool.query("SELECT id_asignatura AS id,codigo,nombre FROM Asignatura WHERE estado='Activo' ORDER BY nombre")
   const [periods]=await pool.query('SELECT id_periodo AS id,nombre,estado FROM PeriodoAcademico ORDER BY fecha_inicio DESC')
   const [students]=await pool.query("SELECT u.id_usuario AS id,CONCAT(u.nombres,' ',u.apellidos) AS name,e.codigo_estudiantil AS studentCode,ep.id_programa AS programId,p.nombre AS programName FROM Estudiante e JOIN Usuario u ON u.id_usuario=e.id_usuario LEFT JOIN EstudiantePrograma ep ON ep.id_estudiante=e.id_estudiante AND ep.principal=1 AND ep.estado='Activo' LEFT JOIN Programa p ON p.id_programa=ep.id_programa WHERE e.estado='Activo' AND u.estado='Activo' ORDER BY u.nombres,u.apellidos")
   const [types]=await pool.query("SELECT id_tipo_solicitud AS id,nombre FROM TipoSolicitud WHERE estado='Activo' ORDER BY nombre")
   const [staffAssignments]=await pool.query("SELECT aa.id_usuario AS userId,CONCAT(u.nombres,' ',u.apellidos) AS name,r.nombre AS role,aa.id_asignatura AS subjectId,aa.id_periodo AS periodId,aa.horas_semanales AS weeklyHours FROM AsignacionAcademica aa JOIN Rol r ON r.id_rol=aa.id_rol JOIN Usuario u ON u.id_usuario=aa.id_usuario JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.id_rol=r.id_rol WHERE r.nombre IN ('Tutor','Monitor') AND aa.estado='Activa' AND u.estado='Activo' AND ur.estado='Activo' ORDER BY u.apellidos,u.nombres")
-  return {programs,subjects,periods,students,requestTypes:types,staffAssignments}
+  return {programs,subjects,faculties,periods,students,requestTypes:types,staffAssignments}
+}
+
+const catalogName = z.string().trim().min(2).max(150).refine((value) => /[\p{L}]/u.test(value), 'El nombre debe contener letras.')
+const catalogCode = z.string().trim().min(2).max(20).regex(/^[A-Za-z0-9][A-Za-z0-9-]*$/, 'El código solo admite letras, números y guiones.')
+const subjectInput = z.object({ code: catalogCode, name: catalogName, credits: integerInput(z.number().int().min(1).max(30).nullable().optional()), description: z.string().trim().max(300).optional().default(''), status: z.enum(['Activo','Inactivo']).optional().default('Activo') }).strict()
+const programInput = z.object({ code: catalogCode, name: catalogName.max(120), snies: z.string().trim().max(30).optional().default(''), facultyId: integerInput(z.number().int().positive()), status: z.enum(['Activo','Inactivo']).optional().default('Activo') }).strict()
+
+export async function listAdminSubjects() {
+  const [rows] = await pool.query('SELECT id_asignatura AS id,codigo AS code,nombre AS name,creditos AS credits,descripcion AS description,estado AS status FROM Asignatura ORDER BY nombre')
+  return rows
+}
+export async function createAdminSubject(payload: unknown) {
+  const input = subjectInput.parse(payload)
+  try {
+    const [result] = await pool.execute('INSERT INTO Asignatura (codigo,nombre,creditos,descripcion,estado) VALUES (?,?,?,?,?)', [input.code,input.name,input.credits ?? null,input.description || null,input.status])
+    return (await pool.query('SELECT id_asignatura AS id,codigo AS code,nombre AS name,creditos AS credits,descripcion AS description,estado AS status FROM Asignatura WHERE id_asignatura=?', [result.insertId]))[0][0]
+  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_SUBJECT','El código de asignatura ya existe.'); throw error }
+}
+export async function updateAdminSubject(id: number, payload: unknown) {
+  const input = subjectInput.partial().strict().refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo para actualizar.').parse(payload)
+  const [existing] = await pool.query('SELECT id_asignatura FROM Asignatura WHERE id_asignatura=?', [id])
+  if (!existing.length) throw new DataError(404,'SUBJECT_NOT_FOUND','La asignatura no existe.')
+  try {
+    const columns: Record<string,string> = { code:'codigo',name:'nombre',credits:'creditos',description:'descripcion',status:'estado' }
+    const fields = Object.entries(input).map(([key]) => `${columns[key]}=?`)
+    const values = Object.entries(input).map(([key,value]) => key === 'description' ? (value || null) : value)
+    await pool.execute(`UPDATE Asignatura SET ${fields.join(',')} WHERE id_asignatura=?`, [...values,id])
+    return (await pool.query('SELECT id_asignatura AS id,codigo AS code,nombre AS name,creditos AS credits,descripcion AS description,estado AS status FROM Asignatura WHERE id_asignatura=?', [id]))[0][0]
+  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_SUBJECT','El código de asignatura ya existe.'); throw error }
+}
+export async function deleteAdminSubject(id: number) {
+  const [rows] = await pool.query('SELECT id_asignatura FROM Asignatura WHERE id_asignatura=?', [id])
+  if (!rows.length) throw new DataError(404,'SUBJECT_NOT_FOUND','La asignatura no existe.')
+  const [usage] = await pool.query('SELECT (SELECT COUNT(*) FROM ProgramaAsignatura WHERE id_asignatura=?)+(SELECT COUNT(*) FROM AsignacionAcademica WHERE id_asignatura=?)+(SELECT COUNT(*) FROM Solicitud WHERE id_asignatura=?) AS total', [id,id,id])
+  if (Number(usage[0]?.total ?? 0)) throw new DataError(409,'SUBJECT_IN_USE','La asignatura tiene programas, asignaciones o solicitudes relacionadas; desactívala para conservar el historial.')
+  await pool.execute('DELETE FROM Asignatura WHERE id_asignatura=?', [id])
+}
+
+export async function listAdminPrograms() {
+  const [rows] = await pool.query('SELECT p.id_programa AS id,p.codigo AS code,p.nombre AS name,p.registro_snies AS snies,p.id_facultad AS facultyId,f.nombre AS facultyName,p.estado AS status FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad ORDER BY p.nombre')
+  const [faculties] = await pool.query("SELECT id_facultad AS id,nombre AS name FROM Facultad WHERE estado='Activo' ORDER BY nombre")
+  return { data: rows, faculties }
+}
+
+export async function listAdminFaculties() {
+  const [rows] = await pool.query('SELECT f.id_facultad AS id,f.nombre AS name,f.descripcion AS description,f.estado AS status,COUNT(p.id_programa) AS programCount FROM Facultad f LEFT JOIN Programa p ON p.id_facultad=f.id_facultad GROUP BY f.id_facultad ORDER BY f.nombre')
+  return rows
+}
+
+const facultyInput = z.object({ name: catalogName.max(120), description: z.string().trim().max(250).optional().default('') }).strict()
+export async function createAdminFaculty(payload: unknown) {
+  const input = facultyInput.parse(payload)
+  try {
+    const [result] = await pool.execute('INSERT INTO Facultad (nombre,descripcion,estado) VALUES (?,?,\'Activo\')', [input.name,input.description || null])
+    return (await pool.query('SELECT id_facultad AS id,nombre AS name,descripcion AS description,estado AS status FROM Facultad WHERE id_facultad=?', [result.insertId]))[0][0]
+  } catch (error: any) {
+    if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_FACULTY','Ya existe una facultad con ese nombre.')
+    throw error
+  }
+}
+
+export async function updateAdminFaculty(id: number, payload: unknown) {
+  const input = facultyInput.extend({ status: z.enum(['Activo','Inactivo']).optional() }).parse(payload)
+  const [current] = await pool.query('SELECT id_facultad FROM Facultad WHERE id_facultad=?', [id])
+  if (!current.length) throw new DataError(404,'FACULTY_NOT_FOUND','La facultad no existe.')
+  try {
+    await pool.execute('UPDATE Facultad SET nombre=?,descripcion=?,estado=COALESCE(?,estado) WHERE id_facultad=?', [input.name,input.description || null,input.status ?? null,id])
+    return (await listAdminFaculties()).find((row:any)=>Number(row.id)===id)
+  } catch (error:any) {
+    if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_FACULTY','Ya existe una facultad con ese nombre.')
+    throw error
+  }
+}
+
+export async function deleteAdminFaculty(id: number) {
+  const [rows] = await pool.query('SELECT id_facultad FROM Facultad WHERE id_facultad=?', [id])
+  if (!rows.length) throw new DataError(404,'FACULTY_NOT_FOUND','La facultad no existe.')
+  const [usage] = await pool.query('SELECT COUNT(*) AS total FROM Programa WHERE id_facultad=?', [id])
+  if (Number(usage[0]?.total ?? 0)) throw new DataError(409,'FACULTY_IN_USE','La facultad tiene programas asociados; desactívala para conservar el historial.')
+  await pool.execute('DELETE FROM Facultad WHERE id_facultad=?', [id])
+}
+
+export async function listAdminRequestSlots(query: { userId: number; role: 'Tutor'|'Monitor'; subjectId: number; periodId: number }) {
+  const [periods] = await pool.query("SELECT DATE_FORMAT(fecha_inicio,'%Y-%m-%d') AS startDate,DATE_FORMAT(fecha_fin,'%Y-%m-%d') AS endDate FROM PeriodoAcademico WHERE id_periodo=? AND estado IN ('Activo','Planeado')", [query.periodId])
+  if (!periods.length) throw new DataError(422,'PERIOD_NOT_AVAILABLE','El periodo seleccionado no tiene horarios disponibles.')
+  const today = new Intl.DateTimeFormat('en-CA',{timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
+  if(periods[0].endDate<today)throw new DataError(422,'PERIOD_EXPIRED','El periodo académico seleccionado finalizó. Registra o activa un periodo vigente antes de programar nuevas solicitudes.')
+  if(periods[0].startDate>periods[0].endDate)throw new DataError(422,'PERIOD_DATES_INVALID','El periodo académico tiene fechas inconsistentes. Corrige su fecha de inicio y fin en Gestión de periodos.')
+  const assignmentQuery = `SELECT aa.id_asignacion AS id FROM AsignacionAcademica aa JOIN Rol r ON r.id_rol=aa.id_rol JOIN Usuario u ON u.id_usuario=aa.id_usuario JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.id_rol=r.id_rol WHERE aa.id_usuario=? AND aa.id_asignatura=? AND aa.id_periodo=? AND aa.estado='Activa' AND u.estado='Activo' AND ur.estado='Activo' AND r.nombre=? LIMIT 1`
+  const [assignments] = await pool.query(assignmentQuery, [query.userId,query.subjectId,query.periodId,query.role])
+  if (!assignments.length) throw new DataError(422,'STAFF_SUBJECT_MISMATCH','La persona no tiene una asignación activa para la asignatura y periodo seleccionados.')
+  const [weekly] = query.role === 'Tutor'
+    ? await pool.query("SELECT dia_semana AS day,TIME_FORMAT(hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(hora_fin,'%H:%i') AS endTime,modalidad AS modality FROM Disponibilidad WHERE id_asignacion=? AND estado='Activo' ORDER BY FIELD(dia_semana,'Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'),hora_inicio", [assignments[0].id])
+    : await pool.query("SELECT dia_semana AS day,TIME_FORMAT(hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(hora_fin,'%H:%i') AS endTime,modalidad AS modality FROM HorarioMonitor WHERE id_usuario=? AND id_periodo=? AND estado='Activo' ORDER BY FIELD(dia_semana,'Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'),hora_inicio", [query.userId,query.periodId])
+  const dayIndex: Record<string,number> = { Domingo:0,Lunes:1,Martes:2,Miércoles:3,Jueves:4,Viernes:5,Sábado:6 }
+  const start = new Date(`${periods[0].startDate < today ? today : periods[0].startDate}T00:00:00.000Z`)
+  const end = new Date(`${periods[0].endDate}T00:00:00.000Z`)
+  const horizon = new Date(start); horizon.setUTCDate(horizon.getUTCDate()+90)
+  const limit = horizon < end ? horizon : end
+  const slots: Array<{date:string;day:string;startTime:string;endTime:string;modality:'Presencial'|'Virtual'}> = []
+  for (const cursor = new Date(start); cursor <= limit; cursor.setUTCDate(cursor.getUTCDate()+1)) {
+    const date = cursor.toISOString().slice(0,10)
+    const day = Object.keys(dayIndex).find(name => dayIndex[name] === cursor.getUTCDay())!
+    for (const block of weekly.filter((item:any) => item.day === day)) {
+      const modalities: Array<'Presencial'|'Virtual'>=block.modality==='Híbrida'?['Presencial','Virtual']:[block.modality]
+      for(const modality of modalities)slots.push({date,day,startTime:block.startTime,endTime:block.endTime,modality})
+    }
+  }
+  const [booked] = await pool.query("SELECT DATE_FORMAT(s.fecha,'%Y-%m-%d') AS date,TIME_FORMAT(s.hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(s.hora_fin,'%H:%i') AS endTime FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre=? AND s.fecha BETWEEN ? AND ? AND s.estado NOT IN ('Cancelada','No Asistida')", [query.userId,query.role,start.toISOString().slice(0,10),limit.toISOString().slice(0,10)])
+  const now=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Bogota',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())
+  return slots.filter(slot=>(slot.date!==today||slot.startTime>now)&&!booked.some((session:any)=>session.date===slot.date&&session.startTime<slot.endTime&&session.endTime>slot.startTime))
+}
+export async function createAdminProgram(payload: unknown) {
+  const input = programInput.parse(payload)
+  const [faculty] = await pool.query("SELECT id_facultad FROM Facultad WHERE id_facultad=? AND estado='Activo'", [input.facultyId])
+  if (!faculty.length) throw new DataError(422,'FACULTY_NOT_FOUND','Selecciona una facultad activa.')
+  try {
+    const [result] = await pool.execute('INSERT INTO Programa (codigo,nombre,registro_snies,estado,id_facultad) VALUES (?,?,?,?,?)', [input.code,input.name,input.snies || null,input.status,input.facultyId])
+    return (await pool.query('SELECT p.id_programa AS id,p.codigo AS code,p.nombre AS name,p.registro_snies AS snies,p.id_facultad AS facultyId,f.nombre AS facultyName,p.estado AS status FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad WHERE p.id_programa=?', [result.insertId]))[0][0]
+  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_PROGRAM','El código o nombre de programa ya existe.'); throw error }
+}
+export async function updateAdminProgram(id: number, payload: unknown) {
+  const input = programInput.partial().strict().refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo para actualizar.').parse(payload)
+  const [existing] = await pool.query('SELECT id_programa FROM Programa WHERE id_programa=?', [id])
+  if (!existing.length) throw new DataError(404,'PROGRAM_NOT_FOUND','El programa académico no existe.')
+  if (input.facultyId !== undefined) {
+    const [faculty] = await pool.query("SELECT id_facultad FROM Facultad WHERE id_facultad=? AND estado='Activo'", [input.facultyId])
+    if (!faculty.length) throw new DataError(422,'FACULTY_NOT_FOUND','Selecciona una facultad activa.')
+  }
+  try {
+    const columns: Record<string,string> = { code:'codigo',name:'nombre',snies:'registro_snies',facultyId:'id_facultad',status:'estado' }
+    const entries = Object.entries(input)
+    await pool.execute(`UPDATE Programa SET ${entries.map(([key]) => `${columns[key]}=?`).join(',')} WHERE id_programa=?`, [...entries.map(([,value]) => value || null),id])
+    return (await pool.query('SELECT p.id_programa AS id,p.codigo AS code,p.nombre AS name,p.registro_snies AS snies,p.id_facultad AS facultyId,f.nombre AS facultyName,p.estado AS status FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad WHERE p.id_programa=?', [id]))[0][0]
+  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_PROGRAM','El código o nombre de programa ya existe.'); throw error }
+}
+export async function deleteAdminProgram(id: number) {
+  const [rows] = await pool.query('SELECT id_programa FROM Programa WHERE id_programa=?', [id])
+  if (!rows.length) throw new DataError(404,'PROGRAM_NOT_FOUND','El programa académico no existe.')
+  const [usage] = await pool.query('SELECT (SELECT COUNT(*) FROM EstudiantePrograma WHERE id_programa=?)+(SELECT COUNT(*) FROM ProgramaAsignatura WHERE id_programa=?)+(SELECT COUNT(*) FROM Solicitud WHERE id_programa=?) AS total', [id,id,id])
+  if (Number(usage[0]?.total ?? 0)) throw new DataError(409,'PROGRAM_IN_USE','El programa tiene estudiantes, asignaturas o solicitudes relacionadas; desactívalo para conservar el historial.')
+  await pool.execute('DELETE FROM Programa WHERE id_programa=?', [id])
 }
 
 async function aggregateReport(filters: any = {}) {
@@ -830,6 +1042,43 @@ export async function listCredentials(role?:string){
   return rows.map((row:any)=>({...row,id:Number(row.id),roles:String(row.roles??'').split(',').filter(Boolean)}))
 }
 
+export async function listSuspendedAccounts(){
+  const [rows]=await pool.query(`
+    SELECT u.id_usuario AS id,u.correo AS email,
+           CONCAT(u.nombres,' ',u.apellidos) AS name,
+           ca.intentos_fallidos AS failedAttempts,
+           DATE_FORMAT(ca.bloqueada_hasta,'%Y-%m-%dT%H:%i:%s-05:00') AS lockedUntil,
+           ca.cambio_clave_solicitado_en IS NOT NULL AS passwordChangeRequested
+      FROM ControlAcceso ca JOIN Usuario u ON u.id_usuario=ca.id_usuario
+      JOIN Credencial c ON c.id_usuario=u.id_usuario
+     WHERE ca.tipo_bloqueo='suspension24h' AND ca.bloqueada_hasta>CURRENT_TIMESTAMP
+       AND u.estado='Activo' AND c.estado='Activo'
+     ORDER BY ca.cambio_clave_solicitado_en DESC,ca.bloqueada_hasta`)
+  return rows.map((row:any)=>({...row,id:Number(row.id),failedAttempts:Number(row.failedAttempts),passwordChangeRequested:Boolean(row.passwordChangeRequested)}))
+}
+
+export async function listPasswordChangeRequests(){
+  const [rows]=await pool.query(`
+    SELECT s.id_solicitud AS id,s.id_usuario AS userId,s.correo_solicitante AS email,
+           s.nombre_solicitante AS name,s.tipo_solicitud AS requestType,s.estado AS status,
+           DATE_FORMAT(s.solicitada_en,'%Y-%m-%dT%H:%i:%s-05:00') AS requestedAt,
+           DATE_FORMAT(s.completada_en,'%Y-%m-%dT%H:%i:%s-05:00') AS completedAt,
+           CONCAT(g.nombres,' ',g.apellidos) AS managedBy
+      FROM SolicitudCambioClave s
+      LEFT JOIN Usuario g ON g.id_usuario=s.gestionada_por
+     ORDER BY s.solicitada_en DESC,s.id_solicitud DESC`)
+  return rows.map((row:any)=>({...row,id:Number(row.id),userId:row.userId===null?null:Number(row.userId)}))
+}
+
+export async function unlockSuspendedAccount(id:number){
+  const [result]=await pool.execute(`
+    UPDATE ControlAcceso SET intentos_fallidos=0,bloqueada_hasta=NULL,
+      tipo_bloqueo=NULL,cambio_clave_solicitado_en=NULL
+     WHERE id_usuario=? AND tipo_bloqueo='suspension24h' AND bloqueada_hasta>CURRENT_TIMESTAMP`,[id])
+  if(!result.affectedRows)throw new DataError(404,'SUSPENDED_ACCOUNT_NOT_FOUND','La cuenta no tiene una suspensión de 24 horas activa.')
+  return {unlocked:true}
+}
+
 export async function resetCredential(id:number,currentUserId?:number){
   if(currentUserId&&id===Number(currentUserId))throw new DataError(400,'CANNOT_RESET_SELF','No puedes restablecer tu propia clave desde la administración. Usa el formulario de cambio de contraseña.')
   const connection=await pool.getConnection()
@@ -844,6 +1093,10 @@ export async function resetCredential(id:number,currentUserId?:number){
     const temporaryPassword=randomBytes(12).toString('base64url')
     const hash=await bcrypt.hash(temporaryPassword,12)
     await connection.execute('UPDATE Credencial SET password_hash=?,usuario=?,primer_inicio=1 WHERE id_credencial=?',[hash,rows[0].correo,rows[0].id_credencial])
+    await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
+    await connection.execute('UPDATE SesionPreAutenticacion SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
+    await connection.execute('UPDATE ControlAcceso SET intentos_fallidos=0,bloqueada_hasta=NULL,tipo_bloqueo=NULL,cambio_clave_solicitado_en=NULL WHERE id_usuario=?',[id])
+    await connection.execute(`UPDATE SolicitudCambioClave SET estado='Completada',completada_en=CURRENT_TIMESTAMP,gestionada_por=? WHERE id_usuario=? AND estado='Pendiente'`,[currentUserId??null,id])
     await connection.commit()
     return {id,temporaryPassword}
   }catch(error){await connection.rollback();throw error}finally{connection.release()}
@@ -877,6 +1130,8 @@ export async function exportTemporaryCredentials(role:string,currentUserId:numbe
       const passwordHash=await bcrypt.hash(temporaryPassword,12)
       const [update]=await connection.execute("UPDATE Credencial SET password_hash=?,usuario=?,primer_inicio=1 WHERE id_usuario=? AND estado='Activo'",[passwordHash,account.email,account.id])
       if(update.affectedRows!==1)throw new DataError(409,'CREDENTIAL_EXPORT_CONFLICT','Una credencial cambió durante la exportación. No se generó el archivo; inténtalo de nuevo.')
+      await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[account.id])
+      await connection.execute('UPDATE SesionPreAutenticacion SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[account.id])
       exported.push({id:Number(account.id),code:account.code,email:account.email,name:account.name,roles:String(account.roles??'').split(',').filter(Boolean),temporaryPassword})
     }
     await connection.commit()
@@ -884,16 +1139,27 @@ export async function exportTemporaryCredentials(role:string,currentUserId:numbe
   }catch(error){await connection.rollback();throw error}finally{connection.release()}
 }
 
-export async function changePassword(id:number,payload:any){
+export async function changePassword(id:number,payload:any,currentSessionId?:string){
   const passwordSchema=z.string().min(8,'La contraseña debe tener al menos 8 caracteres.').max(72,'La contraseña no puede superar 72 caracteres.').refine((value)=>Buffer.byteLength(value,'utf8')<=72,'La contraseña supera el límite admitido.')
   const input=z.object({currentPassword:z.string().min(1),newPassword:passwordSchema,confirmPassword:passwordSchema}).strict().refine((value)=>value.newPassword===value.confirmPassword,'Las contraseñas nuevas no coinciden.').parse(payload)
-  const [rows]=await pool.query("SELECT password_hash FROM Credencial WHERE id_usuario=? AND estado='Activo'",[id])
-  if(!rows.length)throw new DataError(404,'CREDENTIAL_NOT_FOUND','No existe una credencial activa.')
-  const stored=rows[0].password_hash
-  const valid=stored.startsWith('$2')?await bcrypt.compare(input.currentPassword,stored):process.env.NODE_ENV!=='production'&&input.currentPassword===stored
-  if(!valid)throw new DataError(401,'INVALID_CURRENT_PASSWORD','La contraseña actual no es válida.')
-  await pool.execute('UPDATE Credencial SET password_hash=?,primer_inicio=0 WHERE id_usuario=?',[await bcrypt.hash(input.newPassword,12),id])
-  return {changed:true}
+  const connection=await pool.getConnection()
+  try{
+    await connection.beginTransaction()
+    const [rows]=await connection.query("SELECT password_hash FROM Credencial WHERE id_usuario=? AND estado='Activo' FOR UPDATE",[id])
+    if(!rows.length)throw new DataError(404,'CREDENTIAL_NOT_FOUND','No existe una credencial activa.')
+    const stored=rows[0].password_hash
+    const valid=stored.startsWith('$2')?await bcrypt.compare(input.currentPassword,stored):process.env.NODE_ENV!=='production'&&input.currentPassword===stored
+    if(!valid)throw new DataError(401,'INVALID_CURRENT_PASSWORD','La contraseña actual no es válida.')
+    await connection.execute('UPDATE Credencial SET password_hash=?,primer_inicio=0 WHERE id_usuario=?',[await bcrypt.hash(input.newPassword,12),id])
+    if(currentSessionId){
+      await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND id_sesion<>? AND revocada_en IS NULL',[id,currentSessionId])
+    }else{
+      await connection.execute('UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
+    }
+    await connection.execute('UPDATE SesionPreAutenticacion SET revocada_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND revocada_en IS NULL',[id])
+    await connection.commit()
+    return {changed:true}
+  }catch(error){await connection.rollback();throw error}finally{connection.release()}
 }
 
 export async function listSettings(){

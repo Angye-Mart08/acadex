@@ -81,6 +81,26 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
 .primary-button:hover { border-color: var(--brand-green-deep); background: var(--brand-green-deep); box-shadow: 0 10px 20px rgba(0,88,80,.22); }
 .login-button { min-height: 50px; border-radius: 10px; }
 .login-note { margin-top: 20px; color: #829089; line-height: 1.5; }
+.login-lockout-notice { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid #ead6a7; border-radius: 10px; color: #594b2a; background: #fffaf0; font-size: 12px; line-height: 1.45; }
+.login-lockout-notice strong { color: #765d1d; font-size: 13px; }
+.login-lockout-notice .secondary-button { width: 100%; white-space: normal; }
+.login-lockout-notice small { color: #416b5c; }
+.login-button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow: none; }
+.credential-reset-dialog { display: grid; gap: 16px; }
+.credential-reset-notice { display: flex; align-items: flex-start; gap: 11px; padding: 14px 15px; border: 1px solid #dcebe1; border-radius: 12px; color: #315d43; background: #f4faf5; }
+.credential-reset-notice svg { flex: 0 0 auto; margin-top: 1px; color: #347653; }
+.credential-reset-notice p { margin: 0; color: #526a5a; font-size: 13px; line-height: 1.55; }
+.credential-temporary-password { display: grid; gap: 9px; padding: 16px; border: 1px solid #dce7df; border-radius: 12px; background: #f8fbf8; }
+.credential-temporary-password span { color: #718078; font-size: 10px; font-weight: 800; letter-spacing: .09em; }
+.credential-temporary-password code { overflow-wrap: anywhere; color: #1b4932; font-size: 19px; font-weight: 800; }
+.credential-reset-dialog .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.admin-reset-code-form { display: grid; gap: 10px; width: 100%; padding-top: 5px; }
+.admin-reset-code-form label { display: grid; gap: 6px; color: #4b6254; font-size: 11px; font-weight: 700; }
+.admin-reset-code-form input { width: 100%; min-height: 39px; padding: 9px 11px; border: 1px solid #d5e1d9; border-radius: 8px; background: #fff; color: #243d32; font: inherit; outline: none; }
+.admin-reset-code-form input:focus { border-color: #43846a; box-shadow: 0 0 0 3px #43846a22; }
+.admin-reset-code-form button { width: 100%; white-space: normal; }
+.admin-reset-error { color: #a3433f; line-height: 1.4; }
+@media(max-width: 520px) { .credential-reset-dialog .modal-actions { flex-direction: column-reverse; } .credential-reset-dialog .modal-actions button { width: 100%; } }
 .login-footer-quote { margin-top: 24px; padding-top: 18px; border-top: 1px solid #e9eeeb; color: #73827c; text-align: center; font-size: 12px; font-style: italic; }
 .mobile-login-brand { display: none; }
 
@@ -108,7 +128,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
 .help-card span, .help-card > svg:last-child { color: rgba(232,242,238,.62); }
 .sidebar-bottom > .nav-item { color: rgba(232,242,238,.78); }
 .main-area { min-width: 0; background: radial-gradient(ellipse at 94% 8%, rgba(181,161,96,.12), transparent 390px), linear-gradient(135deg, #eef3f0 0%, #f3f5ef 100%); }
-.topbar { height: 74px; border-bottom-color: #dfe8e3; background: #fbfcfa; }
+.topbar { position: relative; z-index: 90; height: 74px; border-bottom-color: #dfe8e3; background: #fbfcfa; }
 .period-chip { border-color: #e2e9e5; background: #fff; }
 .status-dot { background: #37a27c; box-shadow: 0 0 0 3px #e6f3ed; }
 .avatar, .mini-avatar { color: var(--brand-green); background: #e4efea; }
@@ -163,6 +183,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
 .empty-chart svg { color: #91a39a; }
 .configuration-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .8fr); align-items: start; gap: 16px; }
 .configuration-grid > * { min-width: 0; }
+.configuration-grid:has(> .table-panel:only-child) { grid-template-columns: minmax(0, 1fr); }
+.configuration-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.password-change-modal-form { gap: 16px; }
+@media (max-width: 600px) {
+  .configuration-header-actions { width: 100%; align-items: stretch; flex-direction: column; }
+  .configuration-header-actions > button { width: 100%; }
+}
 .configuration-section { display: grid; gap: 12px; margin-bottom: 22px; }
 .configuration-stack { display: grid; gap: 16px; min-width: 0; }
 .configuration-section-heading { display: grid; gap: 4px; padding: 2px 2px 4px; }
@@ -881,4 +908,94 @@ tbody tr:hover { background: #f1f6f2; }
   border: 1px solid #c2decfa0;
 }
 
+/* Motion polish: sign-in first, then workspace and feedback surfaces. */
+@keyframes acadex-rise-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes acadex-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes acadex-pop-in {
+  from { opacity: 0; transform: translateY(-7px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes credential-target-pulse {
+  0%, 100% { box-shadow: 0 8px 24px rgba(28,58,47,.055); }
+  25%, 70% { box-shadow: 0 0 0 4px rgba(181,161,96,.3), 0 14px 34px rgba(28,58,47,.12); }
+}
+
+/* Login: calm entrance and clearer interactive feedback. */
+.login-hero { animation: acadex-fade-in .65s ease-out both; }
+.hero-brand-row { animation: acadex-rise-in .55s .08s ease-out both; }
+.hero-copy { animation: acadex-rise-in .65s .16s ease-out both; }
+.hero-benefits > div { transition: transform .2s ease, background-color .2s ease; }
+.hero-benefits > div:hover { transform: translateX(5px); }
+.hero-benefits > div > span { transition: transform .2s ease, background-color .2s ease, box-shadow .2s ease; }
+.hero-benefits > div:hover > span { transform: scale(1.06); background: rgba(255,255,255,.16); box-shadow: 0 0 0 5px rgba(255,255,255,.045); }
+.login-panel-inner { animation: acadex-rise-in .65s .12s cubic-bezier(.2,.75,.25,1) both; }
+.login-heading h2 { animation: acadex-fade-in .55s .24s ease-out both; }
+.login-form > label, .login-form > .form-row, .login-form > .form-error, .login-form > .login-lockout-notice, .login-form > .login-button { animation: acadex-rise-in .42s ease-out both; }
+.login-form > label:nth-child(1) { animation-delay: .16s; }
+.login-form > label:nth-child(2) { animation-delay: .22s; }
+.login-form > .form-row { animation-delay: .27s; }
+.login-form > .form-error, .login-form > .login-lockout-notice { animation-delay: .08s; }
+.login-form > .login-button { animation-delay: .32s; }
+.login-input { transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
+.login-input:focus-within { transform: translateY(-1px); }
+.login-button { transition: transform .2s ease, box-shadow .2s ease, background-color .2s ease; }
+.login-button:not(:disabled):hover { transform: translateY(-2px); }
+.login-button:not(:disabled):active { transform: translateY(0) scale(.99); }
+.admin-reset-code-form { animation: acadex-rise-in .3s ease-out both; }
+
+/* Main workspace: reveal each screen and its dashboard cards with a short stagger. */
+.sidebar { animation: acadex-fade-in .45s ease-out both; }
+.sidebar .nav-item { transition: color .18s ease, background-color .18s ease, transform .18s ease; }
+.sidebar .nav-item:hover { transform: translateX(3px); }
+.topbar { animation: acadex-rise-in .38s ease-out both; }
+.page-content > * { animation: acadex-rise-in .42s ease-out both; }
+.page-content > *:nth-child(2) { animation-delay: .05s; }
+.page-content > *:nth-child(3) { animation-delay: .1s; }
+.page-content > *:nth-child(4) { animation-delay: .15s; }
+.metrics-grid > * { animation: acadex-rise-in .4s ease-out both; }
+.metrics-grid > *:nth-child(2) { animation-delay: .06s; }
+.metrics-grid > *:nth-child(3) { animation-delay: .12s; }
+.metrics-grid > *:nth-child(4) { animation-delay: .18s; }
+.quick-actions > button, .activity-row, .status-summary-row, .role-overview-card { transition: transform .18s ease, background-color .18s ease, box-shadow .18s ease; }
+.quick-actions > button:hover, .activity-row:hover, .role-overview-card:hover { transform: translateY(-2px); }
+.nav-item:focus-visible, .primary-button:focus-visible, .secondary-button:focus-visible { outline: 3px solid rgba(181,161,96,.48); outline-offset: 2px; }
+
+/* Notifications and dialogs: soft arrival, without changing their behavior. */
+.notification-popover { transform-origin: top right; animation: acadex-pop-in .2s ease-out both; }
+.notification-item { transition: background-color .16s ease, padding-left .16s ease; }
+.notification-item:hover { padding-left: 20px; }
+.notification-count { animation: acadex-pop-in .24s ease-out both; }
+.app-notice { animation: acadex-pop-in .24s cubic-bezier(.2,.75,.25,1) both; }
+.app-notice > button { transition: color .16s ease, background-color .16s ease, transform .16s ease; }
+.app-notice > button:hover { transform: rotate(90deg); }
+.modal-backdrop, .role-selector-backdrop { animation: acadex-fade-in .18s ease-out both; }
+.modal, .role-selector-card { animation: acadex-rise-in .24s cubic-bezier(.2,.75,.25,1) both; }
+.modal-close { transition: color .16s ease, background-color .16s ease, transform .16s ease; }
+.modal-close:hover { transform: rotate(90deg); }
+.role-card { transition: transform .18s ease, border-color .18s ease, background-color .18s ease, box-shadow .18s ease; }
+.role-card:hover { transform: translateY(-2px); }
+.credential-management-highlight { animation: credential-target-pulse 1.8s ease-out both; }
+.notification-center.is-open { z-index: 101; }
+.notification-popover { z-index: 110; }
+.password-change-requests-panel { margin-bottom: 18px; }
+.password-request-status { display: inline-flex; align-items: center; border: 1px solid transparent; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.password-request-status.pending { border-color: #ead9ad; color: #765d1d; background: #fff8e8; }
+.password-request-status.completed { border-color: #c9e5d4; color: #276847; background: #eff8f2; }
+.password-change-requests-panel .row-action { white-space: nowrap; }
+.configuration-grid > .table-panel:first-child .table-scroll .align-right .row-action { max-width: 110px; white-space: normal; line-height: 1.35; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
 

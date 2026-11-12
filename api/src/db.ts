@@ -90,15 +90,27 @@ async function createDatabaseIfNeeded() {
   }
 }
 
+async function applyProjectMigrations() {
+  const connection = await mysql.createConnection({ host: config.database.host, port: config.database.port, user: config.bootstrap.user, password: config.bootstrap.password, database: config.database.name, multipleStatements: true })
+  try {
+    for (const file of ['002_reportes_tutor.sql','003_notificaciones_informe_mensual.sql','004_sesiones_ingreso.sql','005_sesiones_preautenticacion.sql','006_bloqueo_intentos_acceso.sql','007_admin_password_reset_codes.sql','008_historial_solicitudes_cambio_clave.sql']) {
+      const migrationPath = fileURLToPath(new URL(`../../database/migrations/${file}`, import.meta.url))
+      await connection.query(await fs.readFile(migrationPath, 'utf8'))
+    }
+  } finally { await connection.end() }
+}
+
 export async function initializeDatabase() {
   try {
     await pool.query('SELECT 1 AS ok')
+    await applyProjectMigrations()
     return
   } catch {
     // La base o el usuario de aplicación pueden no existir en el primer arranque.
   }
 
   await createDatabaseIfNeeded()
+  await applyProjectMigrations()
   await checkDatabaseConnection()
 }
 

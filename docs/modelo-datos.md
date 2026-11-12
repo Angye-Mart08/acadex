@@ -29,6 +29,8 @@ copia paralela como fuente de verdad.
 - `PeriodoAcademico`.
 - `TipoSolicitud` y `TipoClasificacion`.
 
+Los catálogos `Programa` y `Asignatura` tienen CRUD administrativo. Un programa requiere una facultad existente. Los borrados se bloquean si hay filas relacionadas en `EstudiantePrograma`, `ProgramaAsignatura`, `AsignacionAcademica` o `Solicitud`; la desactivación conserva la historia y excluye el elemento de los selectores operativos. Los créditos de asignatura, cuando se informan, son enteros de 1 a 30.
+
 ### Operación de acompañamientos
 
 - `Solicitud`: petición de tutoría o monitoría realizada por un estudiante.
@@ -129,3 +131,47 @@ La auditoría de solo lectura reportó 36 tablas InnoDB, 55 claves foráneas, 26
 Quedan hallazgos que requieren revisión: 4 credenciales almacenadas en un formato que no parece bcrypt; 6 perfiles de Estudiante con código distinto al de `Usuario`; una persona con más de una asignatura activa dentro del mismo rol; y una sesión cuyo responsable se relaciona con una asignatura o periodo diferente al de su solicitud. Además, la instalación todavía carece de las nuevas restricciones `CHECK` propuestas (14 adicionales; el horario de `Disponibilidad` y `Sesion` ya contaba con checks anteriores). No se imprimieron valores personales y no se alteró ningún registro. Resolver los hallazgos relevantes y repetir `npm run db:audit` antes de usar información real; ejecutar la migración únicamente si sus propios conteos de prevalidación son cero.
 
 En una reauditoría de solo lectura posterior (15 de octubre de 2026), el conteo de códigos estudiantiles discrepantes fue 5 en lugar de 6. La prueba de edición usó y eliminó un usuario temporal y no modificó registros existentes deliberadamente; la diferencia entre cortes debe reconciliarse antes de cualquier reparación de datos. Los demás hallazgos principales se mantuvieron estables.
+
+## Datos de reportes de tutoría
+
+`Informe` conserva el encabezado y estado de revisión. `InformeTutorDetalle` relaciona cada reporte con su sesión e incluye fecha y horario reales, lugar, descripción, número de asistentes y SAT, listas JSON de estudiantes y marca/identificador de recuperación. `AdjuntoInformeTutor` registra categoría, nombre, tipo, ruta local y tamaño; el archivo físico se guarda en el directorio de cargas de la API. Las claves foráneas vinculan el detalle y los adjuntos al informe.
+
+## Notificacion
+
+Entidad persistente para avisos personales del sistema. Cada registro pertenece a un `Usuario` y almacena categoría (`Solicitud`, `Sesion`, `Informe` o `Sistema`), título, mensaje, referencia opcional a entidad, fecha y marca de lectura. Los índices por usuario/fecha y usuario/lectura soportan la bandeja y su contador. La migración `003_notificaciones_informe_mensual.sql` la crea sin modificar datos existentes.
+
+## InformeMensualTutor
+
+Entidad de borrador consolidado con relación a `Usuario`, periodo mensual `AAAA-MM`, título, contenido JSON editable, estado y marcas de creación/actualización/envío. Una restricción única garantiza un solo borrador por tutor y mes. El informe se deriva de `Informe`, `InformeTutorDetalle` y `AdjuntoInformeTutor`; estos registros fuente se conservan y no se duplican dentro del contenido mensual.
+
+## Operaciones de reportes sin cambio de esquema
+
+El CRUD reciente reutiliza `Informe`, `InformeTutorDetalle` y `AdjuntoInformeTutor`: el tutor consulta el reporte vinculado a una sesión y modifica sus campos mientras el estado sea editable. La eliminación física se limita a un borrador no enviado y retira sus filas dependientes; reportes devueltos/enviados conservan historial. La descarga de adjuntos valida la relación informe–sesión–asignación–tutor y no expone `ruta_archivo` al cliente.
+
+La lista de sesiones recuperables no agrega una entidad nueva: aplica a `Sesion` cancelada/no asistida y excluye registros de `RecuperacionMonitoria` activos (`Programada` o `Realizada`). La misma regla se revalida al insertar la recuperación.
+## Reglas adicionales del flujo de solicitudes e informes
+
+El registro de facultades reutiliza `Facultad`; no incorpora una entidad nueva. Las fechas de asignación se calculan a partir de `Disponibilidad` para tutores y `HorarioMonitor` para monitores, vinculadas con `AsignacionAcademica`, `Asignatura` y `PeriodoAcademico`. `Sesion` mantiene la relación efectiva entre solicitud y responsable y su horario debe coincidir con una opción activa no ocupada.
+
+Las decisiones del responsable se reflejan en `Sesion.estado`; el estado de `Solicitud` sigue conservando el flujo operativo e historial. La consulta de `Informe` verifica el propietario mediante la asignación asociada a la sesión. Para datos heredados, `InformeTutorDetalle` es opcional en lectura y los campos JSON existentes en `Informe.contenido` sirven como respaldo. El informe mensual se deriva de sesiones realizadas con informe individual; no duplica esos registros fuente ni requiere una migración adicional.
+## Reglas operativas añadidas
+
+`Facultad` se lista junto con el conteo de `Programa`; las referencias existentes impiden borrarla físicamente y permiten conservarla con estado Inactivo. `Disponibilidad` pertenece a una `AsignacionAcademica` de tutor. Si se cambia la asignatura, se mantienen los datos de la asignación previa y sus sesiones históricas, y se replican los bloques de horario para la asignación nueva. Las validaciones de traslape consideran solo asignaciones activas.
+
+Los informes individuales se asocian a sesiones realizadas/finalizadas; los reportes de recuperaciones requieren que `RecuperacionMonitoria` esté Realizada. El informe mensual consolida los reportes asociados y propone valores narrativos derivados de sus actividades, logros, dificultades y recomendaciones.
+
+## Reglas adicionales de agenda e informes
+
+`Sesion` se crea dentro del rango del periodo y debe coincidir con un bloque semanal activo. Un bloque de monitoría `Híbrida` se ofrece como dos modalidades compatibles: Presencial o Virtual. El API resuelve `AsignacionAcademica` solo cuando existe una asignación activa única; si hay varias, requiere su identificador explícito.
+
+Las fechas de `Sesion` y `RecuperacionMonitoria` se normalizan a `AAAA-MM-DD` para la validación del reporte. Estados Enviado/Aprobado/Entregado se conservan como historial de solo lectura; Borrador/Devuelto puede editarse.
+
+La fila provisional de verificación se guardó en `Disponibilidad` asociada a `AsignacionAcademica.id_asignacion = 10`: lunes 08:00–09:00, Presencial, estado Activo. Tiene ID `19` y se puede retirar mediante el CRUD de disponibilidad del tutor.
+
+## Sesiones de ingreso
+
+La migración `004_sesiones_ingreso.sql` agrega `SesionIngreso`, separada de `Sesion` académica. Guarda el UUID del `jti`, usuario, rol activo, fecha de creación, vencimiento y fecha opcional de revocación. La FK a `Usuario` elimina las sesiones de acceso asociadas cuando se elimina el usuario. Un token solo autentica si su fila no está revocada y todavía no venció.
+
+Al cambiar una clave, las filas de las sesiones de ingreso adicionales se marcan revocadas; al restablecer una credencial se marcan todas las sesiones activas de ese usuario. No se borran para conservar trazabilidad.
+
+La migración `005_sesiones_preautenticacion.sql` agrega `SesionPreAutenticacion` para el token breve de selección inicial de rol. Se consume una sola vez o se revoca si el usuario cancela. Los cambios de rol posteriores emiten una fila nueva en `SesionIngreso` y revocan la sesión anterior.

@@ -212,12 +212,14 @@ CREATE TABLE Estudiante(
 
     codigo_estudiantil VARCHAR(30) NOT NULL UNIQUE,
 
-    semestre TINYINT NOT NULL CONSTRAINT chk_estudiante_semestre CHECK (semestre BETWEEN 1 AND 12),
+    semestre TINYINT NOT NULL,
 
     estado ENUM(
         'Activo',
         'Inactivo'
     ) NOT NULL DEFAULT 'Activo',
+
+    CONSTRAINT chk_estudiante_semestre CHECK (semestre BETWEEN 1 AND 12),
 
     CONSTRAINT fk_estudiante_usuario
 
@@ -599,7 +601,7 @@ CREATE TABLE AsignacionAcademica(
 
     id_periodo INT NOT NULL,
 
-    horas_semanales TINYINT NOT NULL CONSTRAINT chk_asignacion_horas CHECK (horas_semanales BETWEEN 1 AND 60),
+    horas_semanales TINYINT NOT NULL,
 
     fecha_inicio DATE NOT NULL,
 
@@ -612,6 +614,8 @@ CREATE TABLE AsignacionAcademica(
         'Cancelada'
 
     ) NOT NULL DEFAULT 'Activa',
+
+    CONSTRAINT chk_asignacion_horas CHECK (horas_semanales BETWEEN 1 AND 60),
 
     CONSTRAINT fk_asignacion_usuario
 
@@ -689,7 +693,7 @@ CREATE TABLE Espacio(
 
     observaciones VARCHAR(300),
 
-    capacidad INT NOT NULL CONSTRAINT chk_espacio_capacidad CHECK (capacidad BETWEEN 1 AND 1000),
+    capacidad INT NOT NULL,
 
     tipo ENUM(
 
@@ -709,7 +713,9 @@ CREATE TABLE Espacio(
         'Activo',
         'Inactivo'
 
-    ) NOT NULL DEFAULT 'Activo'
+    ) NOT NULL DEFAULT 'Activo',
+
+    CONSTRAINT chk_espacio_capacidad CHECK (capacidad BETWEEN 1 AND 1000)
 
 ) ENGINE=InnoDB;
 
@@ -1813,10 +1819,10 @@ INSERT INTO AsignacionAcademica(id_asignacion, id_usuario, id_rol, id_asignatura
 INSERT INTO Disponibilidad(id_disponibilidad, id_asignacion, dia_semana, hora_inicio, hora_fin, modalidad, estado) VALUES
 (1, 4, 'Lunes', '08:00:00', '10:00:00', 'Presencial', 'Activo'),
 (2, 4, 'Miércoles', '10:00:00', '12:00:00', 'Presencial', 'Activo'),
-(3, 4, 'Viernes', '14:00:00', '16:00:00', 'Virtual', 'Activo'),
+(3, 4, 'Viernes', '14:00:00', '16:00:00', 'Presencial', 'Activo'),
 (4, 5, 'Martes', '09:00:00', '11:00:00', 'Presencial', 'Activo'),
 (5, 5, 'Jueves', '15:00:00', '17:00:00', 'Presencial', 'Activo'),
-(6, 6, 'Sábado', '08:00:00', '10:00:00', 'Virtual', 'Activo');
+(6, 6, 'Sábado', '08:00:00', '10:00:00', 'Presencial', 'Activo');
 
 INSERT INTO AsignacionEspacio(id_asignacion_espacio, id_disponibilidad, id_espacio, fecha_inicio, fecha_fin, estado) VALUES
 (1, 1, 13, '2026-01-20', NULL, 'Activo'),
