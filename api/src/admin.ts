@@ -925,6 +925,56 @@ export async function listAdminRequestSlots(query: { userId: number; role: 'Tuto
   const now=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Bogota',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())
   return slots.filter(slot=>(slot.date!==today||slot.startTime>now)&&!booked.some((session:any)=>session.date===slot.date&&session.startTime<slot.endTime&&session.endTime>slot.startTime))
 }
+
+export async function listAdminRequestStaff(query: { subjectId: number; periodId: number; role: 'Tutor'|'Monitor' }) {
+  const [rows] = await pool.query(
+    `SELECT DISTINCT aa.id_usuario AS userId,CONCAT(u.nombres,' ',u.apellidos) AS name,
+            r.nombre AS role,aa.horas_semanales AS weeklyHours
+       FROM AsignacionAcademica aa
+       JOIN Rol r ON r.id_rol=aa.id_rol
+       JOIN Usuario u ON u.id_usuario=aa.id_usuario
+       JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.id_rol=r.id_rol
+       JOIN PeriodoAcademico p ON p.id_periodo=aa.id_periodo
+      WHERE aa.id_asignatura=? AND aa.id_periodo=? AND r.nombre=?
+        AND r.estado='Activo' AND aa.estado='Activa'
+        AND p.estado IN ('Activo','Planeado') AND p.fecha_fin>=CURRENT_DATE
+        AND u.estado='Activo' AND ur.estado='Activo'
+      ORDER BY u.apellidos,u.nombres`,
+    [query.subjectId,query.periodId,query.role],
+  )
+  return rows.map((row: any) => ({ ...row, userId: Number(row.userId), weeklyHours: Number(row.weeklyHours) }))
+}
+
+export async function listStudentRequestStaff(session: any, query: { subjectId: number; periodId: number; role: 'Tutor'|'Monitor' }) {
+  if (session.activeRole !== 'Estudiante') throw new DataError(403,'ROLE_NOT_ALLOWED','Solo un estudiante puede consultar responsables para su solicitud.')
+  const [rows] = await pool.query(
+    `SELECT DISTINCT aa.id_usuario AS userId,CONCAT(u.nombres,' ',u.apellidos) AS name,
+            r.nombre AS role,aa.horas_semanales AS weeklyHours
+       FROM AsignacionAcademica aa JOIN Rol r ON r.id_rol=aa.id_rol
+       JOIN Usuario u ON u.id_usuario=aa.id_usuario
+       JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.id_rol=r.id_rol
+       JOIN PeriodoAcademico p ON p.id_periodo=aa.id_periodo
+      WHERE aa.id_asignatura=? AND aa.id_periodo=? AND r.nombre=? AND r.estado='Activo'
+        AND aa.estado='Activa' AND p.estado IN ('Activo','Planeado')
+        AND u.estado='Activo' AND ur.estado='Activo'
+      ORDER BY u.apellidos,u.nombres`,
+    [query.subjectId,query.periodId,query.role],
+  )
+  return rows
+}
+
+export async function assignStudentRequest(session: any, id: number, payload: unknown) {
+  if (session.activeRole !== 'Estudiante') throw new DataError(403,'ROLE_NOT_ALLOWED','Solo un estudiante puede programar su propia solicitud.')
+  const [rows] = await pool.query(
+    `SELECT s.id_solicitud FROM Solicitud s
+       JOIN Estudiante e ON e.id_estudiante=s.id_estudiante
+      WHERE s.id_solicitud=? AND e.id_usuario=? AND s.estado='Pendiente'`,
+    [id,session.user.id],
+  )
+  if (!rows.length) throw new DataError(404,'STUDENT_REQUEST_NOT_FOUND','No se encontró una solicitud pendiente asociada a tu cuenta.')
+  return assignAdminRequest(id,payload)
+}
+
 export async function createAdminProgram(payload: unknown) {
   const input = programInput.parse(payload)
   const [faculty] = await pool.query("SELECT id_facultad FROM Facultad WHERE id_facultad=? AND estado='Activo'", [input.facultyId])

@@ -109,7 +109,11 @@ export type AdminCatalogs = {
 
 export type RequestAssignmentInput = { userId: number; role: 'Tutor' | 'Monitor'; date: string; startTime: string; endTime: string; modality: 'Presencial' | 'Virtual' }
 export type AdminRequestSlot = {date:string;day:string;startTime:string;endTime:string;modality:'Presencial'|'Virtual'}
+export type StudentRequestStaff = {userId:number;name:string;role:'Tutor'|'Monitor';weeklyHours:number}
 export function listAdminRequestSlots(accessToken:string,input:{userId:number;role:'Tutor'|'Monitor';subjectId:number;periodId:number}) { const query=new URLSearchParams({userId:String(input.userId),role:input.role,subjectId:String(input.subjectId),periodId:String(input.periodId)});return request<AdminRequestSlot[]>(`/admin/request-slots?${query}`,authenticatedOptions(accessToken)) }
+export function listAdminRequestStaff(accessToken:string,input:{role:'Tutor'|'Monitor';subjectId:number;periodId:number}) { const query=new URLSearchParams({role:input.role,subjectId:String(input.subjectId),periodId:String(input.periodId)});return request<StudentRequestStaff[]>(`/admin/request-staff?${query}`,authenticatedOptions(accessToken)) }
+export function listStudentRequestStaff(accessToken:string,input:{role:'Tutor'|'Monitor';subjectId:number;periodId:number}) { const query=new URLSearchParams({role:input.role,subjectId:String(input.subjectId),periodId:String(input.periodId)});return request<StudentRequestStaff[]>(`/requests/eligible-staff?${query}`,authenticatedOptions(accessToken)) }
+export function listStudentRequestSlots(accessToken:string,input:{userId:number;role:'Tutor'|'Monitor';subjectId:number;periodId:number}) { const query=new URLSearchParams({userId:String(input.userId),role:input.role,subjectId:String(input.subjectId),periodId:String(input.periodId)});return request<AdminRequestSlot[]>(`/requests/available-slots?${query}`,authenticatedOptions(accessToken)) }
 
 export type AdminDashboard = {
   generatedAt: string
@@ -232,12 +236,28 @@ export function login(email: string, password: string) {
   return request<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
 }
 
-export function requestPasswordChange(email: string) {
-  return request<{ requested: boolean; message: string }>('/auth/request-password-change', { method: 'POST', body: JSON.stringify({ email }) })
+export function requestPasswordChange(email: string, method: 'ayuda-admin' | 'codigo') {
+  return request<{ requested: boolean; message: string }>('/auth/request-password-change', { method: 'POST', body: JSON.stringify({ email, method }) })
 }
 
-export function resetAdminPassword(input: { email: string; code: string; newPassword: string; confirmPassword: string }) {
-  return request<{ changed: boolean }>('/auth/reset-admin-password', { method: 'POST', body: JSON.stringify(input) })
+export function verifyLockoutPasswordCode(email: string, code: string) {
+  return request<{ verified: boolean }>('/auth/verify-lockout-password-code', { method: 'POST', body: JSON.stringify({ email, code }) })
+}
+
+export function changeLockedOutPassword(input: { email: string; newPassword: string; confirmPassword: string }) {
+  return request<{ changed: boolean }>('/auth/change-locked-out-password', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function requestAccountPasswordCode(accessToken: string) {
+  return request<{ sent: boolean; message: string }>('/auth/account/password-code/request', authenticatedOptions(accessToken, { method: 'POST' }))
+}
+
+export function verifyAccountPasswordCode(accessToken: string, code: string) {
+  return request<{ verified: boolean }>('/auth/account/password-code/verify', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify({ code }) }))
+}
+
+export function changeAccountPasswordWithCode(accessToken: string, input: { newPassword: string; confirmPassword: string }) {
+  return request<{ changed: boolean }>('/auth/account/password-code/change', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(input) }))
 }
 
 export function selectRole(preAuthToken: string, role: Role) {
@@ -384,7 +404,7 @@ export function createAdminRequest(accessToken: string, input: { studentId: numb
   return request<ApiRequest>('/requests', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(input) }))
 }
 
-export function createRequest(accessToken: string, input: { subject: string; type: 'Monitoría' | 'Tutoría'; priority: 'Alta' | 'Media' | 'Baja'; reason: string }) {
+export function createRequest(accessToken: string, input: { subjectId:number; type: 'Monitoría' | 'Tutoría' | 'Acompañamiento'; priority: 'Alta' | 'Media' | 'Baja'; motive:string; description:string; periodId:number }) {
   return request<ApiRequest>('/requests', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(input) }))
 }
 

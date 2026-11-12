@@ -64,5 +64,12 @@ button { cursor: pointer; }
 .table-scroll thead th{padding:16px 18px;line-height:1.35;letter-spacing:.045em}
 .table-scroll tbody td{padding:14px 18px}
 .table-scroll .actions-inline{gap:10px;justify-content:flex-end}
+.table-scroll .request-action-stack{display:grid;justify-items:stretch;gap:5px;min-width:118px}
+.table-scroll .request-compact-action{display:flex;align-items:center;justify-content:center;min-height:25px;padding:4px 8px;border:1px solid #d9e8df;border-radius:6px;background:#f5faf6;color:#176b53;font-size:10px;font-weight:700;line-height:1.2;white-space:nowrap}
+.table-scroll .request-compact-action:hover{border-color:#9bc9ad;background:#eaf5ed}
+.table-scroll .reject-action.request-compact-action{width:auto;height:auto;border-color:#f0d9d7;background:#fff7f6;color:#a9524d}
+.table-scroll .reject-action.request-compact-action:hover{border-color:#e9b9b4;background:#fff0ee}
+.period-empty-state{display:grid;gap:5px;padding:11px 13px;border:1px solid #eadfc4;border-radius:9px;background:#fffaf0;color:#68786f;font-size:11px;line-height:1.5}
+.period-empty-state strong{color:#765d24;font-size:12px}
 .table-scroll .align-right{padding-right:22px}
 @media print{.monthly-report-preview .monthly-report-consolidated{break-before:page;page-break-before:always}}

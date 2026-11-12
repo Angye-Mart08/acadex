@@ -33,10 +33,15 @@ SOURCE C:/Users/brayh/acadex/database/gestion_monitorias_tutorias.sql;
 Este script no elimina la base de datos. La API además sustituye el nombre de
 la base en memoria cuando se usa otro `DATABASE_NAME` para una prueba aislada.
 
-Las migraciones `002` a `008` se aplican automáticamente al iniciar la API. La
+Las migraciones `002` a `009` se aplican automáticamente al iniciar la API. La
 migración `008_historial_solicitudes_cambio_clave.sql` crea un historial durable
 de solicitudes, conserva las pendientes existentes y actualiza su estado a
 **Completada** cuando una contraseña se restablece.
+
+La migración `009_codigos_verificacion_clave.sql` almacena los códigos de correo
+hasheados para recuperar cuentas suspendidas y cambiar la contraseña desde la
+sesión. Cada código vence a los diez minutos, limita los intentos de verificación
+y debe validarse antes de mostrar o guardar una contraseña nueva.
 
 ## Usuario de conexión de la API
 
