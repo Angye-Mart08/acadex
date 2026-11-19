@@ -1,7 +1,7 @@
 # Guía de instalación y publicación temporal de Acadex
 
-**Proyecto:** Acadex — Sistema de Gestión de Tutorías y Monitorías Académicas  
-**Entorno de referencia:** Windows 10/11, PowerShell, Git y Docker Desktop  
+**Proyecto:** Acadex — Sistema de Gestión de Tutorías y Monitorías Académicas
+**Entorno de referencia:** Windows 10/11, PowerShell, Git y Docker Desktop
 **Publicación de demostración:** Cloudflare Quick Tunnel (URL temporal)
 
 Esta guía permite preparar Acadex en un computador distinto al de desarrollo, ejecutar el proyecto con Docker Compose y, si se necesita una demostración remota, abrir un túnel temporal. La URL temporal no es un despliegue permanente ni convierte el equipo en un servidor de producción.

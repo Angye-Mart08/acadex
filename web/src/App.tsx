@@ -682,7 +682,7 @@ function LoginPage({ onSubmit, error, lockout, onEmailChange, onRequestPasswordC
         </div>
         <div className="hero-brand-row"><AcadexBrand light /><UniversitySignature onGreen /></div>
         <div className="hero-copy">
-          <span className="eyebrow">Acompañamiento que impulsa tu futuro</span>
+          <span className="eyebrow">Acompañamiento que impulsa</span>
           <h1>Conocimiento que te acompaña.</h1>
           <p>Un espacio para conectar estudiantes, tutores y monitores, fortaleciendo el aprendizaje y el desarrollo académico en Unitrópico.</p>
           <div className="hero-benefits">
