@@ -81,12 +81,14 @@ Mantén `.env` privado. Está excluido de Git; no compartas su contenido en capt
 Desde la raíz del repositorio y con Docker Desktop ejecutándose:
 
 ```powershell
-docker compose config --quiet
-docker compose up -d --build
-docker compose ps
+docker compose -p acadex config --quiet
+docker compose -p acadex up -d --build --wait --wait-timeout 180
+docker compose -p acadex ps
 ```
 
-Compose construye frontend y API, descarga MariaDB, crea la red/volumen y arranca los servicios en el orden indicado por sus health checks. Los servicios esperados son `db`, `api` y `web`; espera a que aparezcan como `healthy`.
+El argumento `-p acadex` fija el nombre del proyecto Compose, aunque la carpeta clonada tenga otro nombre. Los contenedores se llamarán `acadex-db-1`, `acadex-api-1` y `acadex-web-1`; la red será `acadex_default` y el volumen `acadex_database_data`. Usa `-p acadex` también en los comandos siguientes para evitar crear accidentalmente una segunda pila con otra red y otro volumen.
+
+Compose construye frontend y API, descarga MariaDB, crea la red/volumen y arranca los servicios en el orden indicado por sus health checks. `--wait` espera a que los servicios estén saludables. Si Docker Compose no reconoce `--wait`, actualiza Docker Desktop/Compose v2 y vuelve a ejecutar el comando.
 
 Abre:
 
@@ -96,8 +98,8 @@ Abre:
 El health check debe responder correctamente y confirmar conexión con MariaDB. Para revisar los registros:
 
 ```powershell
-docker compose logs --tail=100 db api web
-docker compose logs -f api
+docker compose -p acadex logs --tail=100 db api web
+docker compose -p acadex logs -f api
 ```
 
 El SQL inicial se carga solo cuando se crea por primera vez el volumen `database_data`. Los cambios posteriores al archivo SQL no reemplazan la base existente; las migraciones se ejecutan por la API. No uses `docker compose down -v` para resolver errores: elimina el volumen y los datos locales.
@@ -105,7 +107,7 @@ El SQL inicial se carga solo cuando se crea por primera vez el volumen `database
 ### Revisar MariaDB
 
 ```powershell
-docker compose exec db mariadb -u root -p
+docker compose -p acadex exec db mariadb -u root -p
 ```
 
 Introduce la contraseña `DOCKER_DATABASE_ROOT_PASSWORD` configurada en tu `.env`. Ya en la consola:
@@ -124,38 +126,53 @@ Que un contenedor figure saludable no reemplaza la comprobación de tablas, rela
 
 Cloudflare Quick Tunnel crea una URL aleatoria de `trycloudflare.com`, sin comprar dominio ni abrir puertos del router. Es temporal, puede cambiar cada vez y depende de que el computador, Docker Desktop e Internet permanezcan activos.
 
-Primero confirma que `web` está saludable y encuentra la red Compose:
+Antes de abrir el túnel, usa únicamente cuentas de prueba y datos ficticios. La URL será pública mientras el túnel esté activo. No expongas datos personales, credenciales reales ni los puertos `3306` o `3000`.
+
+Si quedó un Quick Tunnel anterior con el mismo nombre, detenlo antes de crear otro. Omite este comando si no hay un contenedor anterior:
 
 ```powershell
-docker network ls --filter "label=com.docker.compose.project"
+docker stop acadex-cloudflared
 ```
 
-El nombre normalmente es `acadex_default`, pero usa el nombre que aparece en tu equipo. Reemplázalo en `{red_de_acadex}` y ejecuta el túnel en primer plano:
+Con la pila iniciada como proyecto `acadex`, la red se llama `acadex_default`. Puedes localizarla así:
 
 ```powershell
-docker run --rm --name acadex-cloudflared --network {red_de_acadex} cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://web:80
+docker network ls --filter "label=com.docker.compose.project=acadex"
 ```
 
-En la salida busca `Your quick Tunnel has been created!` y copia la dirección HTTPS `https://...trycloudflare.com`. Déjala abierta mientras dure la demostración; para cerrar el túnel, presiona `Ctrl+C` en esa terminal.
+Abre otra ventana de PowerShell, entra a la carpeta del repositorio y ejecuta el túnel en primer plano. Los servidores DNS explícitos evitan el error de resolución `dial tcp 0.0.0.0:443: connect: connection refused` observado en Docker Desktop. Si la red institucional bloquea `1.1.1.1` o `1.0.0.1`, reemplázalos por los resolvers aprobados por el administrador de esa red.
 
-Prueba la URL desde otro dispositivo y, preferiblemente, usando datos móviles. Un Quick Tunnel expone el inicio de sesión a Internet: úsalo solo para una demostración autorizada con cuentas y datos de prueba. No publiques credenciales, datos personales ni el puerto de MariaDB. No lo presentes como disponibilidad o despliegue permanente.
+```powershell
+docker run --rm --name acadex-cloudflared --network acadex_default --dns 1.1.1.1 --dns 1.0.0.1 cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://web:80
+```
 
-La aplicación usa su API en el mismo origen (`/api/v1`), así que el túnel apunta al servicio `web`; Nginx reenvía `/api/` al contenedor `api` dentro de la red Docker.
+En la salida busca `Your quick Tunnel has been created!` y copia la dirección HTTPS `https://...trycloudflare.com`. Déjala abierta mientras dure la demostración. Para cerrar el túnel, presiona `Ctrl+C` en esa terminal; también puedes usar `docker stop acadex-cloudflared` desde otra ventana. Eso cierra solo el túnel; la pila `acadex` sigue ejecutándose.
+
+Si la aplicación está en modo `production`, configura `DOCKER_CORS_ORIGIN` con el origen exacto que generó Quick Tunnel (por ejemplo, `https://nombre-aleatorio.trycloudflare.com`) en `.env` y recrea solo la API:
+
+```powershell
+code .env
+docker compose -p acadex up -d --no-deps --force-recreate api
+```
+
+En el modo local `development` recomendado por esta guía no hace falta ese cambio. La aplicación consume la API en el mismo origen (`/api/v1`), así que el túnel siempre debe apuntar a `web:80`; Nginx reenvía `/api/` al contenedor `api` dentro de la red Docker.
+
+Prueba la URL desde otro dispositivo y, preferiblemente, usando datos móviles. Quick Tunnel es temporal, no tiene garantía de disponibilidad y no sustituye un despliegue permanente con dominio propio.
 
 ## 7. Comandos de operación
 
 | Acción | Comando |
 | --- | --- |
-| Iniciar servicios detenidos | `docker compose start` |
-| Reconstruir y actualizar servicios | `docker compose up -d --build` |
-| Ver estado | `docker compose ps` |
-| Ver registros | `docker compose logs --tail=100` |
-| Ver registros en vivo | `docker compose logs -f` |
-| Reiniciar servicios | `docker compose restart` |
-| Detener servicios conservando datos | `docker compose stop` |
-| Detener y retirar contenedores conservando volúmenes | `docker compose down` |
+| Iniciar servicios detenidos | `docker compose -p acadex start` |
+| Reconstruir y actualizar servicios | `docker compose -p acadex up -d --build` |
+| Ver estado | `docker compose -p acadex ps` |
+| Ver registros | `docker compose -p acadex logs --tail=100` |
+| Ver registros en vivo | `docker compose -p acadex logs -f` |
+| Reiniciar servicios | `docker compose -p acadex restart` |
+| Detener servicios conservando datos | `docker compose -p acadex stop` |
+| Detener y retirar contenedores conservando volúmenes | `docker compose -p acadex down` |
 
-No agregues `-v` a `docker compose down` salvo que quieras borrar deliberadamente la base de datos local.
+No agregues `-v` a `docker compose -p acadex down` salvo que quieras borrar deliberadamente la base de datos local.
 
 ## 8. Problemas frecuentes
 
@@ -173,7 +190,7 @@ Revisa `docker compose logs db` y confirma que el SQL se importó al crear el vo
 
 ### Cloudflare no entrega una URL
 
-Comprueba que Docker tenga Internet, que `web` esté saludable y que `acadex-cloudflared` use la misma red Docker que `web`. Revisa la salida de la terminal donde se ejecuta el túnel.
+Comprueba que Docker tenga Internet, que `web` esté saludable y que `acadex-cloudflared` use la red `acadex_default`. Si aparece `dial tcp 0.0.0.0:443: connect: connection refused` al solicitar la URL, detén ese intento con `Ctrl+C` y ejecuta de nuevo el comando de la sección 6 con `--dns 1.1.1.1 --dns 1.0.0.1` (o con los DNS permitidos por tu red). Si el error persiste, la red puede bloquear el acceso saliente a Cloudflare; consulta al administrador de red.
 
 ## 9. Seguridad y continuidad
 
@@ -188,11 +205,11 @@ Comprueba que Docker tenga Internet, que `web` esté saludable y que `acadex-clo
 - [ ] Git instalado y rama correcta seleccionada.
 - [ ] Docker Desktop abierto; `docker info` responde.
 - [ ] `.env` local configurado y excluido de Git.
-- [ ] `docker compose config --quiet` finaliza sin errores.
+- [ ] `docker compose -p acadex config --quiet` finaliza sin errores.
 - [ ] `db`, `api` y `web` quedan saludables.
 - [ ] `http://localhost:5173/` y `/health` responden correctamente.
 - [ ] Inicio de sesión y operaciones acordadas comprobadas con cuentas de prueba.
 - [ ] Persistencia y adjuntos comprobados según el alcance.
-- [ ] Si se usa Quick Tunnel: URL probada desde una red externa y túnel detenido al acabar.
+- [ ] Si se usa Quick Tunnel: el contenedor se llama `acadex-cloudflared`, usa `acadex_default`, la URL se prueba desde una red externa y el túnel se detiene al acabar.
 
 **Repositorio de referencia:** <https://github.com/Angye-Mart08/acadex>
