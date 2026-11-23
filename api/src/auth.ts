@@ -1,6 +1,6 @@
-// @ts-nocheck
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import { config } from './config.js'
@@ -23,7 +23,7 @@ const roleSelectionSchema = z.object({
   role: z.enum(roles),
 })
 
-type AuthRow = {
+type AuthRow = RowDataPacket & {
   id: number
   code: string
   credentialId: number
@@ -39,6 +39,41 @@ type AuthRow = {
   roleStatus: string
 }
 
+type AccessControlRow = RowDataPacket & {
+  attempts: number
+  lockType: 'espera' | 'suspension24h' | null
+  secondsLeft: number | null
+}
+
+type PasswordChangeAccountRow = RowDataPacket & {
+  id: number
+  email: string
+  name: string
+  lockType: 'espera' | 'suspension24h' | null
+  lockSecondsLeft: number | null
+  requestAge: number | null
+}
+
+type VerificationCodeRow = RowDataPacket & {
+  id: string
+  codeHash: string
+  attempts: number
+}
+
+type VerificationCodeIdRow = RowDataPacket & { id: string }
+
+type EmailErrorDetails = {
+  code?: string
+  responseCode?: number
+  command?: string
+  message?: string
+}
+
+function getEmailErrorDetails(error: unknown): EmailErrorDetails {
+  if (error && typeof error === 'object') return error as EmailErrorDetails
+  return { message: String(error) }
+}
+
 type AuthenticatedUser = {
   id: number
   code: string
@@ -48,6 +83,12 @@ type AuthenticatedUser = {
   status: 'Activo' | 'Inactivo'
   initials: string
   mustChangePassword: boolean
+}
+
+export type AuthenticatedSession = {
+  user: AuthenticatedUser
+  activeRole: Role
+  sessionId: string
 }
 
 type AccessClaims = jwt.JwtPayload & {
@@ -108,13 +149,13 @@ function toUser(rows: AuthRow[]): AuthenticatedUser {
 }
 
 async function findAuthRows(email: string): Promise<AuthRow[]> {
-  const [rows] = await pool.query(authQuery, [email])
-  return rows as AuthRow[]
+  const [rows] = await pool.query<AuthRow[]>(authQuery, [email])
+  return rows
 }
 
 async function findAuthRowsByUserId(id: number): Promise<AuthRow[]> {
-  const [rows] = await pool.query(authQuery.replace('LOWER(u.correo) = LOWER(?)', 'u.id_usuario = ?'), [id])
-  return rows as AuthRow[]
+  const [rows] = await pool.query<AuthRow[]>(authQuery.replace('LOWER(u.correo) = LOWER(?)', 'u.id_usuario = ?'), [id])
+  return rows
 }
 
 async function verifyPassword(password: string, storedPassword: string) {
@@ -137,8 +178,9 @@ async function issueAccessToken(user: AuthenticatedUser, activeRole: Role) {
     activeRole,
     purpose: 'access',
     jti: sessionId,
-  }, config.jwtSecret, { expiresIn: config.accessTokenTtl })
+  }, config.jwtSecret, { expiresIn: config.accessTokenTtl as jwt.SignOptions['expiresIn'] })
   const claims = jwt.decode(token) as jwt.JwtPayload
+  if (typeof claims.exp !== 'number') throw new Error('El token de acceso no tiene vencimiento.')
   await pool.execute(
     `INSERT INTO SesionIngreso (id_sesion, id_usuario, rol_activo, expira_en)
      VALUES (?, ?, ?, FROM_UNIXTIME(?))`,
@@ -149,8 +191,9 @@ async function issueAccessToken(user: AuthenticatedUser, activeRole: Role) {
 
 async function issuePreAuthToken(user: AuthenticatedUser) {
   const sessionId = randomUUID()
-  const token = jwt.sign({ sub: String(user.id), roles: user.roles, purpose: 'role-selection', jti: sessionId }, config.jwtSecret, { expiresIn: config.preAuthTokenTtl })
+  const token = jwt.sign({ sub: String(user.id), roles: user.roles, purpose: 'role-selection', jti: sessionId }, config.jwtSecret, { expiresIn: config.preAuthTokenTtl as jwt.SignOptions['expiresIn'] })
   const claims = jwt.decode(token) as jwt.JwtPayload
+  if (typeof claims.exp !== 'number') throw new Error('El token preliminar no tiene vencimiento.')
   await pool.execute(
     'INSERT INTO SesionPreAutenticacion (id_sesion, id_usuario, expira_en) VALUES (?, ?, FROM_UNIXTIME(?))',
     [sessionId, user.id, claims.exp],
@@ -220,7 +263,7 @@ function lockedError(type: 'espera' | 'suspension24h', retryAfterSeconds: number
 }
 
 async function assertAccountCanAttemptLogin(userId: number, canResetWithCode: boolean) {
-  const [rows] = await pool.query(
+  const [rows] = await pool.query<AccessControlRow[]>(
     `SELECT intentos_fallidos AS attempts, tipo_bloqueo AS lockType,
             TIMESTAMPDIFF(SECOND,CURRENT_TIMESTAMP,bloqueada_hasta) AS secondsLeft
        FROM ControlAcceso WHERE id_usuario=?`,
@@ -229,7 +272,10 @@ async function assertAccountCanAttemptLogin(userId: number, canResetWithCode: bo
   if (!rows.length) return
   const state = rows[0]
   const secondsLeft = Number(state.secondsLeft ?? 0)
-  if (secondsLeft > 0) throw lockedError(state.lockType, secondsLeft, Number(state.attempts), canResetWithCode)
+  if (secondsLeft > 0) {
+    if (!state.lockType) throw new Error('La cuenta tiene un vencimiento de bloqueo, pero no un tipo de bloqueo.')
+    throw lockedError(state.lockType, secondsLeft, Number(state.attempts), canResetWithCode)
+  }
   if (state.lockType) {
     if (state.lockType === 'suspension24h') await clearFailedLogins(userId)
     else await pool.execute('UPDATE ControlAcceso SET bloqueada_hasta=NULL,tipo_bloqueo=NULL WHERE id_usuario=?', [userId])
@@ -241,15 +287,19 @@ async function registerFailedLogin(userId: number, canResetWithCode: boolean): P
   try {
     await connection.beginTransaction()
     await connection.execute('INSERT IGNORE INTO ControlAcceso(id_usuario) VALUES (?)', [userId])
-    const [rows] = await connection.query(
+    const [rows] = await connection.query<AccessControlRow[]>(
       `SELECT intentos_fallidos AS attempts, tipo_bloqueo AS lockType,
               TIMESTAMPDIFF(SECOND,CURRENT_TIMESTAMP,bloqueada_hasta) AS secondsLeft
          FROM ControlAcceso WHERE id_usuario=? FOR UPDATE`,
       [userId],
     )
     const state = rows[0]
+    if (!state) throw new Error('No se pudo leer el estado de intentos de acceso.')
     const secondsLeft = Number(state.secondsLeft ?? 0)
-    if (secondsLeft > 0) throw lockedError(state.lockType, secondsLeft, Number(state.attempts), canResetWithCode)
+    if (secondsLeft > 0) {
+      if (!state.lockType) throw new Error('La cuenta tiene un vencimiento de bloqueo, pero no un tipo de bloqueo.')
+      throw lockedError(state.lockType, secondsLeft, Number(state.attempts), canResetWithCode)
+    }
 
     let attempts = Number(state.attempts)
     if (state.lockType === 'suspension24h') attempts = 0
@@ -291,7 +341,7 @@ export async function requestPasswordChange(payload: unknown) {
   let codeRequest: { id: number; email: string; name: string; code: string } | null = null
   try {
     await connection.beginTransaction()
-    const [rows] = await connection.query(
+    const [rows] = await connection.query<PasswordChangeAccountRow[]>(
       `SELECT u.id_usuario AS id, u.correo AS email, CONCAT(u.nombres,' ',u.apellidos) AS name,
               ca.tipo_bloqueo AS lockType,
               TIMESTAMPDIFF(SECOND,CURRENT_TIMESTAMP,ca.bloqueada_hasta) AS lockSecondsLeft,
@@ -308,7 +358,7 @@ export async function requestPasswordChange(payload: unknown) {
       return genericResponse
     }
     if (method === 'codigo') {
-      const [lastRequestRows] = await connection.query(
+      const [lastRequestRows] = await connection.query<Array<RowDataPacket & { secondsSinceLast: number | null }>>(
         `SELECT TIMESTAMPDIFF(SECOND,MAX(creado_en),CURRENT_TIMESTAMP) AS secondsSinceLast
            FROM CodigoVerificacionClave WHERE id_usuario=? AND proposito='bloqueo'`, [account.id])
       if (lastRequestRows[0]?.secondsSinceLast !== null && Number(lastRequestRows[0]?.secondsSinceLast) < 60) {
@@ -336,7 +386,7 @@ export async function requestPasswordChange(payload: unknown) {
          VALUES (?, ?, ?, 'AyudaAdministrador')`,
         [account.id, account.email, account.name],
       )
-      const [admins] = await connection.query(
+      const [admins] = await connection.query<Array<RowDataPacket & { id: number }>>(
         `SELECT DISTINCT u.id_usuario AS id
            FROM Usuario u JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario
            JOIN Rol r ON r.id_rol=ur.id_rol
@@ -367,13 +417,9 @@ export async function requestPasswordChange(payload: unknown) {
         [codeRequest.id],
       )
       // Keep SMTP diagnostics local to the API terminal; never log the code or SMTP password.
-      console.error('[Correo de recuperación] Falló el envío SMTP:', {
-        code: error?.code,
-        responseCode: error?.responseCode,
-        command: error?.command,
-        message: error?.message,
-      })
-      throw new AuthError(503, 'RESET_EMAIL_UNAVAILABLE', error?.code === 'EMAIL_NOT_CONFIGURED'
+      const emailError = getEmailErrorDetails(error)
+      console.error('[Correo de recuperación] Falló el envío SMTP:', emailError)
+      throw new AuthError(503, 'RESET_EMAIL_UNAVAILABLE', emailError.code === 'EMAIL_NOT_CONFIGURED'
         ? 'El envío de códigos no está configurado todavía. Contacta al administrador del sistema.'
         : 'No se pudo enviar el código. Inténtalo de nuevo más tarde.')
     }
@@ -396,7 +442,7 @@ async function verifyStoredCode(userId: number, purpose: 'bloqueo' | 'cuenta', c
   let invalid = false
   try {
     await connection.beginTransaction()
-    const [codes] = await connection.query(
+    const [codes] = await connection.query<VerificationCodeRow[]>(
       `SELECT id_codigo AS id,codigo_hash AS codeHash,intentos AS attempts
          FROM CodigoVerificacionClave
         WHERE id_usuario=? AND proposito=? AND consumido_en IS NULL AND expira_en>CURRENT_TIMESTAMP
@@ -420,7 +466,7 @@ async function verifyStoredCode(userId: number, purpose: 'bloqueo' | 'cuenta', c
 
 export async function verifyLockoutPasswordCode(payload: unknown) {
   const { email, code } = emailCodeSchema.parse(payload)
-  const [rows] = await pool.query(
+  const [rows] = await pool.query<Array<RowDataPacket & { id: number }>>(
     `SELECT u.id_usuario AS id FROM Usuario u JOIN Credencial c ON c.id_usuario=u.id_usuario
       JOIN ControlAcceso ca ON ca.id_usuario=u.id_usuario
      WHERE LOWER(u.correo)=LOWER(?) AND u.estado='Activo' AND c.estado='Activo'
@@ -431,7 +477,7 @@ export async function verifyLockoutPasswordCode(payload: unknown) {
 
 export async function changeLockedOutPassword(payload: unknown) {
   const input = z.object({ email: loginSchema.shape.email, ...passwordOnlySchema.shape }).strict().parse(payload)
-  const [rows] = await pool.query(
+  const [rows] = await pool.query<Array<RowDataPacket & { id: number }>>(
     `SELECT u.id_usuario AS id FROM Usuario u JOIN Credencial c ON c.id_usuario=u.id_usuario
       JOIN ControlAcceso ca ON ca.id_usuario=u.id_usuario
      WHERE LOWER(u.correo)=LOWER(?) AND u.estado='Activo' AND c.estado='Activo'
@@ -441,7 +487,7 @@ export async function changeLockedOutPassword(payload: unknown) {
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
-    const [codes] = await connection.query(`SELECT id_codigo AS id FROM CodigoVerificacionClave WHERE id_usuario=? AND proposito='bloqueo' AND verificado_en IS NOT NULL AND consumido_en IS NULL AND expira_en>CURRENT_TIMESTAMP ORDER BY creado_en DESC LIMIT 1 FOR UPDATE`, [userId])
+    const [codes] = await connection.query<VerificationCodeIdRow[]>(`SELECT id_codigo AS id FROM CodigoVerificacionClave WHERE id_usuario=? AND proposito='bloqueo' AND verificado_en IS NOT NULL AND consumido_en IS NULL AND expira_en>CURRENT_TIMESTAMP ORDER BY creado_en DESC LIMIT 1 FOR UPDATE`, [userId])
     if (!codes.length) throw new AuthError(400, 'PASSWORD_RESET_NOT_VERIFIED', 'Primero debes verificar un código vigente.')
     await connection.execute('UPDATE Credencial SET password_hash=?,primer_inicio=0,ultimo_acceso=NULL WHERE id_usuario=? AND estado=\'Activo\'', [await bcrypt.hash(input.newPassword, 12), userId])
     await connection.execute('UPDATE CodigoVerificacionClave SET consumido_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND proposito=\'bloqueo\' AND consumido_en IS NULL', [userId])
@@ -456,9 +502,9 @@ export async function changeLockedOutPassword(payload: unknown) {
 }
 
 export async function requestAccountPasswordCode(userId: number) {
-  const [rows] = await pool.query(`SELECT u.correo AS email,CONCAT(u.nombres,' ',u.apellidos) AS name FROM Usuario u JOIN Credencial c ON c.id_usuario=u.id_usuario WHERE u.id_usuario=? AND u.estado='Activo' AND c.estado='Activo'`, [userId])
+  const [rows] = await pool.query<Array<RowDataPacket & { email: string; name: string }>>(`SELECT u.correo AS email,CONCAT(u.nombres,' ',u.apellidos) AS name FROM Usuario u JOIN Credencial c ON c.id_usuario=u.id_usuario WHERE u.id_usuario=? AND u.estado='Activo' AND c.estado='Activo'`, [userId])
   if (!rows.length) throw new AuthError(404, 'USER_NOT_AVAILABLE', 'No se encontró una cuenta activa.')
-  const [last] = await pool.query(`SELECT TIMESTAMPDIFF(SECOND,MAX(creado_en),CURRENT_TIMESTAMP) AS age FROM CodigoVerificacionClave WHERE id_usuario=? AND proposito='cuenta'`, [userId])
+  const [last] = await pool.query<Array<RowDataPacket & { age: number | null }>>(`SELECT TIMESTAMPDIFF(SECOND,MAX(creado_en),CURRENT_TIMESTAMP) AS age FROM CodigoVerificacionClave WHERE id_usuario=? AND proposito='cuenta'`, [userId])
   if (last[0]?.age !== null && Number(last[0]?.age) < 60) throw new AuthError(429, 'CODE_RATE_LIMIT', 'Espera un minuto antes de solicitar otro código.')
   const code = String(randomInt(100000, 1000000))
   const codeHash = createHmac('sha256', config.jwtSecret).update(`${userId}:${code}`).digest('hex')
@@ -467,8 +513,9 @@ export async function requestAccountPasswordCode(userId: number) {
   try { await sendPasswordVerificationCode(rows[0].email, rows[0].name, code, 'cuenta') }
   catch (error) {
     await pool.execute(`UPDATE CodigoVerificacionClave SET consumido_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND proposito='cuenta' AND consumido_en IS NULL`, [userId])
-    console.error('[Correo de verificación] Falló el envío SMTP:', { code: error?.code, responseCode: error?.responseCode, command: error?.command, message: error?.message })
-    throw new AuthError(503, 'RESET_EMAIL_UNAVAILABLE', error?.code === 'EMAIL_NOT_CONFIGURED' ? 'El envío de códigos no está configurado todavía. Contacta al administrador del sistema.' : 'No se pudo enviar el código. Inténtalo de nuevo más tarde.')
+    const emailError = getEmailErrorDetails(error)
+    console.error('[Correo de verificación] Falló el envío SMTP:', emailError)
+    throw new AuthError(503, 'RESET_EMAIL_UNAVAILABLE', emailError.code === 'EMAIL_NOT_CONFIGURED' ? 'El envío de códigos no está configurado todavía. Contacta al administrador del sistema.' : 'No se pudo enviar el código. Inténtalo de nuevo más tarde.')
   }
   return { sent: true, message: `Enviamos un código a ${rows[0].email}.` }
 }
@@ -483,7 +530,7 @@ export async function changeAccountPasswordWithCode(userId: number, payload: unk
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
-    const [codes] = await connection.query(`SELECT id_codigo AS id FROM CodigoVerificacionClave WHERE id_usuario=? AND proposito='cuenta' AND verificado_en IS NOT NULL AND consumido_en IS NULL AND expira_en>CURRENT_TIMESTAMP ORDER BY creado_en DESC LIMIT 1 FOR UPDATE`, [userId])
+    const [codes] = await connection.query<VerificationCodeIdRow[]>(`SELECT id_codigo AS id FROM CodigoVerificacionClave WHERE id_usuario=? AND proposito='cuenta' AND verificado_en IS NOT NULL AND consumido_en IS NULL AND expira_en>CURRENT_TIMESTAMP ORDER BY creado_en DESC LIMIT 1 FOR UPDATE`, [userId])
     if (!codes.length) throw new AuthError(400, 'PASSWORD_RESET_NOT_VERIFIED', 'Primero debes verificar un código vigente.')
     await connection.execute('UPDATE Credencial SET password_hash=?,primer_inicio=0 WHERE id_usuario=? AND estado=\'Activo\'', [await bcrypt.hash(input.newPassword, 12), userId])
     await connection.execute(`UPDATE CodigoVerificacionClave SET consumido_en=CURRENT_TIMESTAMP WHERE id_usuario=? AND proposito='cuenta' AND consumido_en IS NULL`, [userId])
@@ -514,7 +561,7 @@ export async function selectRole(payload: unknown) {
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
-    const [preAuthRows] = await connection.query(
+    const [preAuthRows] = await connection.query<Array<RowDataPacket & { id_sesion: string }>>(
       'SELECT id_sesion FROM SesionPreAutenticacion WHERE id_sesion=? AND id_usuario=? AND revocada_en IS NULL AND expira_en>CURRENT_TIMESTAMP FOR UPDATE',
       [claims.jti, user.id],
     )
@@ -548,7 +595,7 @@ export async function changeActiveRole(session: { user: AuthenticatedUser; sessi
   const input = z.object({ role: z.enum(roles) }).strict().parse(payload)
   if (!session.user.roles.includes(input.role)) throw new AuthError(403, 'ROLE_NOT_ALLOWED', 'El rol seleccionado no está asignado a este usuario.')
   const access = await issueAccessToken(session.user, input.role)
-  const [revoked] = await pool.execute(
+  const [revoked] = await pool.execute<ResultSetHeader>(
     'UPDATE SesionIngreso SET revocada_en=CURRENT_TIMESTAMP WHERE id_sesion=? AND id_usuario=? AND revocada_en IS NULL',
     [session.sessionId, session.user.id],
   )
@@ -567,7 +614,7 @@ export async function changeActiveRole(session: { user: AuthenticatedUser; sessi
   }
 }
 
-export async function currentUserFromToken(token: string) {
+export async function currentUserFromToken(token: string): Promise<AuthenticatedSession> {
   let claims: AccessClaims
   try {
     claims = jwt.verify(token, config.jwtSecret) as AccessClaims
@@ -577,7 +624,7 @@ export async function currentUserFromToken(token: string) {
   if (claims.purpose !== 'access' || !claims.sub || !claims.activeRole || !claims.jti) {
     throw new AuthError(401, 'INVALID_TOKEN', 'El token de acceso no es válido.')
   }
-  const [activeSessions] = await pool.query(
+  const [activeSessions] = await pool.query<Array<RowDataPacket & { id_sesion: string }>>(
     `SELECT id_sesion FROM SesionIngreso
       WHERE id_sesion = ? AND id_usuario = ? AND revocada_en IS NULL AND expira_en > CURRENT_TIMESTAMP`,
     [claims.jti, Number(claims.sub)],

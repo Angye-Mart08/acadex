@@ -1,5 +1,5 @@
-// @ts-nocheck
 import bcrypt from 'bcryptjs'
+import type { ExecuteValues } from 'mysql2/promise'
 import { z } from 'zod'
 import { access, mkdir, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
@@ -19,6 +19,15 @@ export class DataError extends Error {
     this.status = status
     this.code = code
   }
+}
+
+function mysqlErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('code' in error)) return undefined
+  return typeof error.code === 'string' ? error.code : undefined
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function initials(name: string) {
@@ -166,7 +175,7 @@ export async function createUser(payload: unknown) {
     return findUser(id)
   } catch (error) {
     await connection.rollback()
-    if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409, 'DUPLICATE_USER', 'El código, documento o correo ya está registrado.')
+    if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409, 'DUPLICATE_USER', 'El código, documento o correo ya está registrado.')
     throw error
   } finally {
     connection.release()
@@ -212,7 +221,7 @@ export async function updateUser(id: number, payload: unknown) {
     return findUser(id)
   } catch (error) {
     await connection.rollback()
-    if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409, 'DUPLICATE_USER', 'El correo ya está registrado.')
+    if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409, 'DUPLICATE_USER', 'El correo ya está registrado.')
     throw error
   } finally {
     connection.release()
@@ -233,7 +242,7 @@ function normalizeSpace(row: any) {
   }
 }
 
-const integerInput = (schema: z.ZodType) => z.preprocess((value) => typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value, schema)
+const integerInput = <T>(schema: z.ZodType<T>) => z.preprocess((value) => typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value, schema)
 const spaceSchema = z.object({
   code: z.string().trim().min(2).max(20), name: z.string().trim().min(2).max(120),
   type: z.enum(['Aula', 'Laboratorio', 'Sala', 'Biblioteca', 'Virtual', 'Otro']),
@@ -257,14 +266,15 @@ export async function listSpaces({ search = '', status = '' } = {}) {
 export async function createSpace(payload: unknown) {
   const input = spaceSchema.parse(payload)
   try {
+    const values: ExecuteValues[] = [input.code, input.name, input.location, input.capacity as ExecuteValues, input.type]
     const [result] = await pool.execute(
       `INSERT INTO Espacio (codigo, nombre, ubicacion, capacidad, tipo, estado) VALUES (?, ?, ?, ?, ?, 'Activo')`,
-      [input.code, input.name, input.location, input.capacity, input.type],
+      values,
     )
     const [rows] = await pool.query('SELECT id_espacio AS id, codigo AS code, nombre AS name, tipo AS type, ubicacion AS location, capacidad AS capacity, estado AS status FROM Espacio WHERE id_espacio = ?', [result.insertId])
     return normalizeSpace(rows[0])
   } catch (error) {
-    if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409, 'DUPLICATE_SPACE', 'El código del espacio ya está registrado.')
+    if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409, 'DUPLICATE_SPACE', 'El código del espacio ya está registrado.')
     throw error
   }
 }
@@ -272,12 +282,13 @@ export async function createSpace(payload: unknown) {
 export async function updateSpace(id: number, payload: unknown) {
   const input = spaceSchema.partial().extend({ status: z.enum(['Activo', 'Inactivo']).optional() }).refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo.') .parse(payload)
   const fields: string[] = []
-  const values: any[] = []
-  for (const field of ['name', 'type', 'location', 'capacity', 'status']) {
-    if (input[field] !== undefined) {
+  const values: ExecuteValues[] = []
+  for (const field of ['name', 'type', 'location', 'capacity', 'status'] as const) {
+    const value = input[field]
+    if (value !== undefined) {
       const column = field === 'name' ? 'nombre' : field === 'location' ? 'ubicacion' : field === 'capacity' ? 'capacidad' : field === 'status' ? 'estado' : field
       fields.push(`${column} = ?`)
-      values.push(input[field])
+      values.push(value as ExecuteValues)
     }
   }
   values.push(id)
@@ -582,7 +593,7 @@ export async function completeTutorRecovery(session:any,id:number) {
 const reportAttachmentSchema=z.object({category:z.enum(['Asistencia','Actividades','EvidenciaInicio','EvidenciaFin']),name:z.string().trim().min(1).max(150),mime:z.string().trim().min(3).max(100),dataBase64:z.string().min(1)})
 const tutorReportSchema=z.object({sessionId:z.coerce.number().int().positive(),recoveryId:z.coerce.number().int().positive().optional(),title:z.string().trim().min(3).max(200),date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),startTime:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),endTime:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),place:z.string().trim().min(2).max(255),description:z.string().trim().min(5).max(5000),attendanceCount:z.coerce.number().int().min(0).max(500),satCount:z.coerce.number().int().min(0).max(500),attendees:z.array(z.coerce.number().int().positive()).max(500),satDetails:z.array(z.object({studentId:z.coerce.number().int().positive(),description:z.string().trim().min(5).max(1000)})).max(500),activities:z.string().trim().max(2000).default(''),achievements:z.string().trim().max(1000).default(''),difficulties:z.string().trim().max(1000).default(''),recommendations:z.string().trim().max(1000).default(''),recovered:z.boolean().default(false),attachments:z.array(reportAttachmentSchema).max(4).default([])}).strict().refine(x=>x.endTime>x.startTime,{path:['endTime'],message:'La hora final debe ser posterior a la inicial.'}).refine(x=>x.satCount===x.satDetails.length,{path:['satDetails'],message:'Registra la descripción individual de cada estudiante SAT.'}).refine(x=>x.attendanceCount===x.attendees.length,{path:['attendees'],message:'La cantidad de asistentes debe coincidir con los estudiantes seleccionados.'})
 
-async function removeTutorReportFiles(paths:string[]){const root=path.resolve(fileURLToPath(new URL('../../api/uploads/tutor-reports/',import.meta.url)));for(const value of paths){const filename=path.basename(String(value));const target=path.resolve(root,filename);if(!target.startsWith(`${root}${path.sep}`))continue;try{await unlink(target)}catch(error){if(error?.code!=='ENOENT')console.error('No se pudo retirar un adjunto reemplazado:',error?.message??error)}}}
+async function removeTutorReportFiles(paths:string[]){const root=path.resolve(fileURLToPath(new URL('../../api/uploads/tutor-reports/',import.meta.url)));for(const value of paths){const filename=path.basename(String(value));const target=path.resolve(root,filename);if(!target.startsWith(`${root}${path.sep}`))continue;try{await unlink(target)}catch(error){if(mysqlErrorCode(error)!=='ENOENT')console.error('No se pudo retirar un adjunto reemplazado:',errorMessage(error))}}}
 
 export async function listTutorReportableSessions(session:any) {
   if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores.')

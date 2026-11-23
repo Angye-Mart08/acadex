@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: API contract and types
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Install API dependencies
+        run: npm ci --prefix api
+      - name: Audit production API dependencies
+        run: npm --prefix api audit --omit=dev
+      - name: Validate OpenAPI contract
+        run: npm --prefix api run validate
+      - name: Check API types
+        run: npm --prefix api run typecheck
+
+  web:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefix web
+      - name: Audit production frontend dependencies
+        run: npm --prefix web audit --omit=dev
+      - name: Build frontend
+        run: npm --prefix web run build
+
+  compose-smoke:
+    name: Docker Compose startup and health
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Credenciales desechables de esta ejecución de CI; nunca se usan en una instancia real.
+      DOCKER_DATABASE_PASSWORD: acadex-ci-db-only
+      DOCKER_DATABASE_ROOT_PASSWORD: acadex-ci-root-only
+      JWT_SECRET: acadex-ci-only-secret-not-for-real-use-00000000
+      DOCKER_WEB_PORT: "5173"
+      DOCKER_NODE_ENV: production
+      DOCKER_CORS_ORIGIN: http://localhost:5173
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: docker compose -p acadex-ci config --quiet
+      - name: Build and start services until healthy
+        run: docker compose -p acadex-ci up -d --build --wait --wait-timeout 180
+      - name: Verify frontend health endpoint
+        run: curl --fail --show-error --retry 10 --retry-connrefused --retry-delay 2 http://localhost:5173/health
+      - name: Show service status
+        if: always()
+        run: docker compose -p acadex-ci ps
+      - name: Stop Compose services
+        if: always()
+        run: docker compose -p acadex-ci down

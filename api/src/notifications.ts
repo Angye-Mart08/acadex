@@ -1,7 +1,10 @@
-// @ts-nocheck
 import { z } from 'zod'
 import { pool } from './db.js'
 import { DataError } from './data.js'
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
 
 export async function publishNotifications(userIds:number[],input:{category:'Solicitud'|'Sesion'|'Informe'|'Sistema';title:string;message:string;entityType?:string;entityId?:number}){
   const ids=[...new Set(userIds.map(Number).filter(id=>Number.isInteger(id)&&id>0))]
@@ -10,18 +13,18 @@ export async function publishNotifications(userIds:number[],input:{category:'Sol
     const placeholders=ids.map(()=>'(?,?,?,?,?,?,FALSE)').join(',')
     const values=ids.flatMap(id=>[id,input.category,input.title,input.message,input.entityType??null,input.entityId??null])
     await pool.execute(`INSERT INTO Notificacion(id_usuario,categoria,titulo,mensaje,entidad_tipo,entidad_id,leida) VALUES ${placeholders}`,values)
-  }catch(error){console.error('No se pudo registrar notificación:',error?.message??error)}
+  }catch(error){console.error('No se pudo registrar notificación:',errorMessage(error))}
 }
 
 export async function publishRoleNotification(role:string,input:{category:'Solicitud'|'Sesion'|'Informe'|'Sistema';title:string;message:string;entityType?:string;entityId?:number}){
-  try{const [rows]=await pool.query("SELECT DISTINCT u.id_usuario AS id FROM Usuario u JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario JOIN Rol r ON r.id_rol=ur.id_rol WHERE r.nombre=? AND r.estado='Activo' AND ur.estado='Activo' AND u.estado='Activo'",[role]);await publishNotifications(rows.map(row=>row.id),input)}catch(error){console.error('No se pudo resolver destinatarios de notificación:',error?.message??error)}
+  try{const [rows]=await pool.query("SELECT DISTINCT u.id_usuario AS id FROM Usuario u JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario JOIN Rol r ON r.id_rol=ur.id_rol WHERE r.nombre=? AND r.estado='Activo' AND ur.estado='Activo' AND u.estado='Activo'",[role]);await publishNotifications(rows.map(row=>row.id),input)}catch(error){console.error('No se pudo resolver destinatarios de notificación:',errorMessage(error))}
 }
 
 export async function publishRequestNotifications(requestId:number,input:{title:string;message:string;category?:'Solicitud'|'Sesion';includeStaff?:boolean}){
   try{const [rows]=await pool.query(`SELECT e.id_usuario AS studentId${input.includeStaff?',aa.id_usuario AS staffId':''}
     FROM Solicitud s JOIN Estudiante e ON e.id_estudiante=s.id_estudiante${input.includeStaff?' LEFT JOIN Sesion se ON se.id_solicitud=s.id_solicitud LEFT JOIN AsignacionAcademica aa ON aa.id_asignacion=se.id_asignacion':''}
     WHERE s.id_solicitud=?`,[requestId])
-  await publishNotifications(rows.flatMap(row=>[row.studentId,row.staffId].filter(Boolean)),{category:input.category??'Solicitud',title:input.title,message:input.message,entityType:'solicitud',entityId:requestId})}catch(error){console.error('No se pudo crear notificación asociada a solicitud:',error?.message??error)}
+  await publishNotifications(rows.flatMap(row=>[row.studentId,row.staffId].filter(Boolean)),{category:input.category??'Solicitud',title:input.title,message:input.message,entityType:'solicitud',entityId:requestId})}catch(error){console.error('No se pudo crear notificación asociada a solicitud:',errorMessage(error))}
 }
 
 export async function listNotifications(session:any){

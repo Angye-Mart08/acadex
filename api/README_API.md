@@ -2,6 +2,10 @@
 
 El contrato de las rutas implementadas se encuentra en [openapi.yaml](./openapi.yaml) y utiliza OpenAPI 3.1.
 
+Para ejecutar o validar la API directamente en el computador, instala **Node.js 24** y npm. La versión mínima se declara en [`.nvmrc`](../.nvmrc) y en `engines` de `api/package.json`; el entorno local se describe en [Desarrollo local](../docs/desarrollo-local.md). Al usar Docker no se requiere Node.js instalado en el host.
+
+La validación del contrato OpenAPI y el chequeo de tipos se ejecutan en la [integración continua](../docs/integracion-continua.md). También pueden correr localmente con `npm --prefix api run validate` y `npm --prefix api run typecheck`.
+
 ## Alcance
 
 El contrato está alineado con el primer avance del frontend:
@@ -60,6 +64,29 @@ no forman parte de la API ejecutable ni del contrato actual.
 Administración. Los filtros `search`, `status` y `page`/`pageSize` se aplican
 en el servidor para mantener la respuesta coherente con el contrato y el
 cliente web.
+
+### Rutas inexistentes
+
+Las rutas o métodos no reconocidos dentro del prefijo de API responden `404`
+con JSON en el mismo formato de error que el resto del servicio:
+
+```json
+{
+  "status": 404,
+  "code": "ROUTE_NOT_FOUND",
+  "message": "La ruta solicitada no existe.",
+  "path": "/api/v1/ruta-inexistente",
+  "timestamp": "<fecha ISO 8601>",
+  "requestId": "<identificador de solicitud>"
+}
+```
+
+El `requestId` permite relacionar la respuesta con los registros del servidor.
+Con la API ejecutándose localmente, se puede comprobar con:
+
+```powershell
+curl.exe -i http://localhost:3000/api/v1/ruta-inexistente
+```
 
 Las respuestas de usuarios, espacios y solicitudes que consume el frontend se
 generan mediante consultas a MariaDB; ya no dependen de los arreglos de datos

@@ -4,7 +4,7 @@
 **Entorno de referencia:** Windows 10/11, PowerShell, Git y Docker Desktop
 **Publicación de demostración:** Cloudflare Quick Tunnel (URL temporal)
 
-Esta guía permite preparar Acadex en un computador distinto al de desarrollo, ejecutar el proyecto con Docker Compose y, si se necesita una demostración remota, abrir un túnel temporal. La URL temporal no es un despliegue permanente ni convierte el equipo en un servidor de producción.
+Esta guía permite preparar Acadex en un computador distinto al de desarrollo, ejecutar el proyecto con Docker Compose y, si se necesita una demostración remota, abrir un túnel temporal. La URL temporal no es un despliegue permanente ni convierte el equipo en un servidor de producción. El flujo de [integración continua](./integracion-continua.md) construye Compose y comprueba su salud antes de la demostración; no ejecuta ni mantiene el túnel.
 
 ## 1. Requisitos del equipo
 
@@ -39,10 +39,10 @@ Set-Location .\acadex
 git branch --all
 ```
 
-Usa la rama que el equipo acordó para la entrega. Si la versión acordada está en `nicolas`, cámbiate a ella con:
+La rama predeterminada `main` es la referencia para una demostración, salvo que el equipo docente haya indicado otra rama o una versión concreta. Antes de levantarla, comprueba en GitHub Actions que el último cambio integrado tenga los trabajos de CI aprobados. Actualiza `main` con:
 
 ```powershell
-git switch nicolas
+git switch main
 git pull --ff-only
 ```
 
@@ -198,7 +198,7 @@ Comprueba que Docker tenga Internet, que `web` esté saludable y que `acadex-clo
 - No publiques directamente los puertos `3306` de MariaDB ni `3000` de la API.
 - Cambia las cuentas demo antes de exponer una instancia a usuarios externos y usa datos ficticios para aceptación.
 - Guarda respaldos cifrados de MariaDB y de los adjuntos en `api/uploads/tutor-reports/`.
-- La configuración de producción con VPS y Caddy está en la sección [Despliegue público](../README.md#despliegue-público-vps--docker-compose--caddy) del README principal; requiere dominio/DNS, secretos independientes y SMTP configurado.
+- Esta guía cubre el entorno local y la publicación temporal con Quick Tunnel. No presenta un procedimiento de VPS ni una URL pública permanente; acuerda con el líder técnico un entorno permanente antes de publicar datos reales.
 
 ## 10. Lista de comprobación del equipo espejo
 

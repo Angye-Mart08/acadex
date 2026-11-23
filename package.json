@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "description": "Acadex - Sistema de Gestión de Monitorías y Tutorías Académicas",
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "node scripts/start-dev.mjs",
     "dev:api": "npm --prefix api run dev",
