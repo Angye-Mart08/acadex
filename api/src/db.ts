@@ -1,7 +1,29 @@
-import mysql from 'mysql2/promise'
+import mysql, {
+  type ExecuteValues,
+  type FieldPacket,
+  type Pool as MysqlPool,
+  type PoolConnection as MysqlPoolConnection,
+  type QueryOptions,
+  type QueryResult,
+  type QueryValues,
+  type ResultSetHeader,
+  type RowDataPacket,
+} from 'mysql2/promise'
 import fs from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { config } from './config.js'
+
+type TypedQueries = {
+  query<T extends QueryResult = RowDataPacket[]>(sql: string, values?: QueryValues): Promise<[T, FieldPacket[]]>
+  query<T extends QueryResult = RowDataPacket[]>(options: QueryOptions, values?: QueryValues): Promise<[T, FieldPacket[]]>
+  execute<T extends QueryResult = ResultSetHeader>(sql: string, values?: ExecuteValues): Promise<[T, FieldPacket[]]>
+  execute<T extends QueryResult = ResultSetHeader>(options: QueryOptions, values?: ExecuteValues): Promise<[T, FieldPacket[]]>
+}
+
+type TypedPoolConnection = Omit<MysqlPoolConnection, 'query' | 'execute'> & TypedQueries
+type TypedPool = Omit<MysqlPool, 'query' | 'execute' | 'getConnection'> & TypedQueries & {
+  getConnection(): Promise<TypedPoolConnection>
+}
 
 export const pool = mysql.createPool({
   host: config.database.host,
@@ -13,7 +35,7 @@ export const pool = mysql.createPool({
   connectionLimit: config.database.connectionLimit,
   charset: 'utf8mb4',
   decimalNumbers: true,
-})
+}) as unknown as TypedPool
 
 const databaseNamePattern = /^[A-Za-z0-9_]+$/
 const databaseUserPattern = /^[A-Za-z0-9_]+$/

@@ -1,13 +1,10 @@
-// @ts-nocheck
 import nodemailer from 'nodemailer'
 import { config } from './config.js'
 
 export async function sendPasswordVerificationCode(to: string, name: string, code: string, purpose: 'bloqueo' | 'cuenta') {
   const mail = config.mail
   if (!mail.host || !mail.port || !mail.user || !mail.password || !mail.from) {
-    const error = new Error('El envío de correo no está configurado.')
-    error.code = 'EMAIL_NOT_CONFIGURED'
-    throw error
+    throw Object.assign(new Error('El envío de correo no está configurado.'), { code: 'EMAIL_NOT_CONFIGURED' })
   }
 
   const transporter = nodemailer.createTransport({

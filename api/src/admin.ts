@@ -1,6 +1,6 @@
-// @ts-nocheck
 import bcrypt from 'bcryptjs'
 import { randomBytes } from 'node:crypto'
+import type { ExecuteValues, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { z } from 'zod'
 import { pool } from './db.js'
 import { DataError } from './data.js'
@@ -8,6 +8,14 @@ import { publishRequestNotifications, publishRoleNotification } from './notifica
 
 const roleNames = ['Administrador', 'Tutor', 'Monitor', 'Estudiante'] as const
 const roleSchema = z.enum(roleNames)
+function isRoleName(role: string | undefined): role is typeof roleNames[number] {
+  return roleNames.some((validRole) => validRole === role)
+}
+
+function mysqlErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('code' in error)) return undefined
+  return typeof error.code === 'string' ? error.code : undefined
+}
 function isValidRoleCombination(roles: string[]) {
   if (!roles.length || roles.length > 2) return false
   if (roles.includes('Administrador') || roles.includes('Tutor')) return roles.length === 1
@@ -28,7 +36,7 @@ const personNameSchema = z.string().trim().min(5).max(160).refine(
   'Escribe un nombre y apellido usando solo letras, espacios, apóstrofes o guiones.',
 )
 const identityDocumentSchema = z.string().trim().regex(/^\d{5,20}$/, 'El documento debe contener entre 5 y 20 dígitos.')
-const integerInput = (schema: z.ZodType) => z.preprocess((value) => typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value, schema)
+const integerInput = <T>(schema: z.ZodType<T>) => z.preprocess((value) => typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value, schema)
 const contactPhoneSchema = z.string().trim().max(20).refine(
   (value) => value === '' || (/^\+?[0-9\s().-]+$/.test(value) && (value.match(/\d/g)?.length ?? 0) >= 7),
   'Ingresa un número de contacto válido (mínimo 7 dígitos).',
@@ -40,7 +48,7 @@ function initials(name: string) {
 
 function splitName(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean)
-  return { names: parts.slice(0, -1).join(' ') || parts[0] || '', surnames: parts.length > 1 ? parts.at(-1) : '' }
+  return { names: parts.slice(0, -1).join(' ') || parts[0] || '', surnames: parts.length > 1 ? parts.at(-1) ?? '' : '' }
 }
 
 function userName(row: any) { return `${row.names} ${row.surnames}`.trim() }
@@ -82,21 +90,41 @@ function filters(query: any = {}) {
 }
 
 async function profilesFor(ids: number[]) {
-  if (!ids.length) return new Map()
+  type ProfileWithAssignments = Record<string, unknown> & { assignments: RowDataPacket[] }
+  type UserProfile = {
+    administrador?: Record<string, unknown>
+    estudiante?: Record<string, unknown>
+    tutor?: ProfileWithAssignments
+    monitor?: ProfileWithAssignments
+  }
+  if (!ids.length) return new Map<number, UserProfile>()
   const placeholders = ids.map(() => '?').join(',')
-  const profiles = new Map(ids.map((id) => [id, {}]))
+  const profiles = new Map<number, UserProfile>(ids.map((id) => [id, {}]))
   const [administrators] = await pool.query(`SELECT id_usuario AS id, cargo, dependencia, correo_institucional AS institutionalEmail, observaciones FROM Administrador WHERE id_usuario IN (${placeholders})`, ids)
   const [students] = await pool.query(`SELECT e.id_usuario AS id, e.codigo_estudiantil AS studentCode, e.semestre, ep.id_programa AS programId, p.nombre AS programName, f.nombre AS facultyName FROM Estudiante e LEFT JOIN EstudiantePrograma ep ON ep.id_estudiante = e.id_estudiante AND ep.principal = 1 AND ep.estado = 'Activo' LEFT JOIN Programa p ON p.id_programa = ep.id_programa LEFT JOIN Facultad f ON f.id_facultad = p.id_facultad WHERE e.id_usuario IN (${placeholders})`, ids)
   const [tutors] = await pool.query(`SELECT id_usuario AS id, categoria_docente AS teachingCategory, tipo_vinculacion AS employmentType, periodo_actual AS currentPeriod, horas_semanales AS weeklyHours, observaciones FROM Tutor WHERE id_usuario IN (${placeholders})`, ids)
   const [monitors] = await pool.query(`SELECT id_usuario AS id, tipo_monitor AS monitorType, resolucion AS resolution, periodo_actual AS currentPeriod, horas_semanales AS weeklyHours, observaciones FROM Monitor WHERE id_usuario IN (${placeholders})`, ids)
   const [assignments] = await pool.query(`SELECT aa.id_usuario AS id, aa.id_rol AS roleId, r.nombre AS role, aa.id_asignatura AS subjectId, a.codigo AS subjectCode, a.nombre AS subjectName, aa.id_periodo AS periodId, p.nombre AS periodName, aa.horas_semanales AS weeklyHours, aa.estado AS status FROM AsignacionAcademica aa JOIN Rol r ON r.id_rol = aa.id_rol JOIN Asignatura a ON a.id_asignatura = aa.id_asignatura JOIN PeriodoAcademico p ON p.id_periodo = aa.id_periodo WHERE aa.id_usuario IN (${placeholders}) ORDER BY a.nombre`, ids)
-  for (const row of administrators) Object.assign(profiles.get(row.id), { administrador: row })
-  for (const row of students) Object.assign(profiles.get(row.id), { estudiante: row })
-  for (const row of tutors) Object.assign(profiles.get(row.id), { tutor: { ...row, assignments: [] } })
-  for (const row of monitors) Object.assign(profiles.get(row.id), { monitor: { ...row, assignments: [] } })
+  for (const row of administrators) {
+    const profile = profiles.get(row.id)
+    if (profile) profile.administrador = row
+  }
+  for (const row of students) {
+    const profile = profiles.get(row.id)
+    if (profile) profile.estudiante = row
+  }
+  for (const row of tutors) {
+    const profile = profiles.get(row.id)
+    if (profile) profile.tutor = { ...row, assignments: [] }
+  }
+  for (const row of monitors) {
+    const profile = profiles.get(row.id)
+    if (profile) profile.monitor = { ...row, assignments: [] }
+  }
   for (const row of assignments) {
-    const profileKey = row.role === 'Tutor' ? 'tutor' : row.role === 'Monitor' ? 'monitor' : null
-    if (profileKey && profiles.get(row.id)?.[profileKey]) profiles.get(row.id)[profileKey].assignments.push(row)
+    const profile = profiles.get(row.id)
+    if (row.role === 'Tutor' && profile?.tutor) profile.tutor.assignments.push(row)
+    if (row.role === 'Monitor' && profile?.monitor) profile.monitor.assignments.push(row)
   }
   return profiles
 }
@@ -126,7 +154,7 @@ async function findAdminUser(id: number, connection = pool) {
 
 async function roleIds(connection: any, selectedRoles: string[]) {
   const unique = [...new Set(selectedRoles)]
-  if (!unique.length || unique.some((role) => !roleNames.includes(role))) throw new DataError(422, 'INVALID_ROLES', 'Debe seleccionar uno o varios roles válidos.')
+  if (!unique.length || unique.some((role) => !isRoleName(role))) throw new DataError(422, 'INVALID_ROLES', 'Debe seleccionar uno o varios roles válidos.')
   const [rows] = await connection.query(`SELECT id_rol AS id, nombre FROM Rol WHERE estado='Activo' AND nombre IN (${unique.map(() => '?').join(',')})`, unique)
   if (rows.length !== unique.length) throw new DataError(422, 'INVALID_ROLES', 'Uno de los roles seleccionados no está activo.')
   return rows
@@ -184,7 +212,7 @@ const profileSchema = z.object({
     currentPeriod: z.string().trim().min(1).max(20),
     weeklyHours: integerInput(z.number().int().positive().max(60)),
     observations: z.string().max(300).optional().default(''),
-    assignments: assignmentSchema.default({}),
+    assignments: assignmentSchema.optional(),
   }).strict().optional(),
   monitor: z.object({
     monitorType: z.string().trim().min(2).max(80).default('Monitor académico'),
@@ -192,7 +220,7 @@ const profileSchema = z.object({
     currentPeriod: z.string().trim().min(1).max(20),
     weeklyHours: integerInput(z.number().int().positive().max(60)),
     observations: z.string().max(300).optional().default(''),
-    assignments: assignmentSchema.default({}),
+    assignments: assignmentSchema.optional(),
   }).strict().optional(),
 }).strict().default({})
 
@@ -283,12 +311,13 @@ export async function createAdminUser(payload: unknown) {
   const { names, surnames } = splitName(input.name); const connection = await pool.getConnection()
   try {
     await connection.beginTransaction(); const roleRows = await roleIds(connection, input.roles)
-    const [result] = await connection.execute('INSERT INTO Usuario (codigo,documento,nombres,apellidos,correo,telefono,estado) VALUES (?,?,?,?,?,?,\'Activo\')', [input.code, input.document, names, surnames, input.email, input.phone ?? null])
+    const userInsertValues: ExecuteValues[] = [input.code, input.document, names, surnames, input.email, input.phone ?? null]
+    const [result] = await connection.execute<ResultSetHeader>('INSERT INTO Usuario (codigo,documento,nombres,apellidos,correo,telefono,estado) VALUES (?,?,?,?,?,?,\'Activo\')', userInsertValues)
     const id = result.insertId; const hash = await bcrypt.hash(input.document, 12)
     await connection.execute("INSERT INTO Credencial (usuario,password_hash,ultimo_acceso,primer_inicio,estado,id_usuario) VALUES (?,?,NULL,1,'Activo',?)", [input.email, hash, id])
     for (const role of roleRows) await connection.execute("INSERT INTO UsuarioRol (id_usuario,id_rol,estado) VALUES (?,?, 'Activo')", [id, role.id])
     await upsertProfiles(connection, id, input.roles, input.profiles); await connection.commit(); return findAdminUser(id)
-  } catch (error) { await connection.rollback(); if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409, 'DUPLICATE_USER', 'El código, documento, correo o perfil ya está registrado.'); throw error } finally { connection.release() }
+  } catch (error) { await connection.rollback(); if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409, 'DUPLICATE_USER', 'El código, documento, correo o perfil ya está registrado.'); throw error } finally { connection.release() }
 }
 
 export async function updateAdminUser(id: number, payload: unknown) {
@@ -308,7 +337,7 @@ export async function updateAdminUser(id: number, payload: unknown) {
     if (input.roles) { const roleRows = await roleIds(connection,input.roles); await connection.execute("UPDATE UsuarioRol SET estado='Inactivo' WHERE id_usuario=?",[id]); for (const role of roleRows) await connection.execute("INSERT INTO UsuarioRol (id_usuario,id_rol,estado) VALUES (?,?, 'Activo') ON DUPLICATE KEY UPDATE estado='Activo'",[id,role.id]) }
     if (profilesProvided || input.roles !== undefined) await upsertProfiles(connection,id,selectedRoles,input.profiles ?? current.profiles)
     await connection.commit(); return findAdminUser(id)
-  } catch (error) { await connection.rollback(); if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_USER','El código, documento, correo o perfil ya está registrado.'); throw error } finally { connection.release() }
+  } catch (error) { await connection.rollback(); if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_USER','El código, documento, correo o perfil ya está registrado.'); throw error } finally { connection.release() }
 }
 
 export async function deleteAdminUser(id: number, currentUserId?: number) {
@@ -364,7 +393,7 @@ export async function deleteAdminUser(id: number, currentUserId?: number) {
     await connection.commit()
   } catch (error) {
     await connection.rollback()
-    if (error?.code === 'ER_ROW_IS_REFERENCED_2') throw new DataError(409, 'USER_HAS_DEPENDENCIES', 'No se puede eliminar el usuario porque existen registros asociados. Desactiva la cuenta para conservarlos.')
+    if (mysqlErrorCode(error) === 'ER_ROW_IS_REFERENCED_2') throw new DataError(409, 'USER_HAS_DEPENDENCIES', 'No se puede eliminar el usuario porque existen registros asociados. Desactiva la cuenta para conservarlos.')
     throw error
   } finally {
     connection.release()
@@ -412,6 +441,7 @@ const spaceSchema = spaceFieldsSchema.superRefine((space, context) => {
     context.addIssue({ code: 'custom', path: ['location'], message: 'Indica al menos el edificio, bloque, salón o una referencia de ubicación.' })
   }
 })
+type SpaceFieldName = keyof z.infer<typeof spaceFieldsSchema>
 
 export async function listAdminSpaces(query:any={}) { const where=['1=1'];const params:any[]=[]; if(query.search){where.push('(codigo LIKE ? OR nombre LIKE ? OR ubicacion LIKE ? OR edificio LIKE ?)');const v=`%${query.search}%`;params.push(v,v,v,v)} if(query.status==='Activo'||query.status==='Inactivo'){where.push('estado=?');params.push(query.status)} if(query.type){where.push('tipo=?');params.push(query.type)} if(query.building){where.push('edificio=?');params.push(query.building)} if(query.minCapacity){where.push('capacidad>=?');params.push(Number(query.minCapacity))} const [rows]=await pool.query(`SELECT id_espacio AS id,codigo AS code,nombre AS name,edificio AS building,bloque AS block,salon AS room,piso AS floor,ubicacion AS location,descripcion AS description,recursos AS resources,observaciones AS observations,capacidad AS capacity,tipo AS type,estado AS status FROM Espacio WHERE ${where.join(' AND ')} ORDER BY id_espacio`,params);return rows.map(normalizeSpace) }
 
@@ -435,8 +465,8 @@ export async function createAdminSpace(payload:any) {
     return normalizeSpace(rows[0])
   } catch(error:any) {
     await connection.rollback()
-    if(error?.code==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_SPACE','El código del espacio ya está registrado.')
-    if(error?.code==='ER_DATA_TOO_LONG'||error?.code==='ER_TRUNCATED_WRONG_VALUE')throw new DataError(422,'INVALID_SPACE_DATA','Uno de los datos supera el formato permitido por la base de datos.')
+    if(mysqlErrorCode(error)==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_SPACE','El código del espacio ya está registrado.')
+    if(mysqlErrorCode(error)==='ER_DATA_TOO_LONG'||mysqlErrorCode(error)==='ER_TRUNCATED_WRONG_VALUE')throw new DataError(422,'INVALID_SPACE_DATA','Uno de los datos supera el formato permitido por la base de datos.')
     throw error
   } finally {
     connection.release()
@@ -451,19 +481,22 @@ export async function updateAdminSpace(id:number,payload:any){
     if(!rows.length)throw new DataError(404,'SPACE_NOT_FOUND','El espacio no existe.')
     const current={code:rows[0].codigo,name:rows[0].nombre,building:rows[0].edificio??'',block:rows[0].bloque??'',room:rows[0].salon??'',floor:rows[0].piso??'',location:rows[0].ubicacion??'',description:rows[0].descripcion??'',resources:rows[0].recursos??'',observations:rows[0].observaciones??'',capacity:rows[0].capacidad,type:rows[0].tipo,status:rows[0].estado}
     const merged=spaceFieldsSchema.parse({...current,...input})
-    const locationFields=['type','building','block','room','location']
+    const locationFields: SpaceFieldName[]=['type','building','block','room','location']
     if(locationFields.some((field)=>input[field]!==undefined)&&merged.type!=='Virtual'&&![merged.building,merged.block,merged.room,merged.location].some((value)=>value?.trim())){
       throw new DataError(422,'SPACE_LOCATION_REQUIRED','Indica al menos el edificio, bloque, salón o una referencia de ubicación para un espacio presencial.')
     }
-    const map:any={code:'codigo',name:'nombre',building:'edificio',block:'bloque',room:'salon',floor:'piso',location:'ubicacion',description:'descripcion',resources:'recursos',observations:'observaciones',capacity:'capacidad',type:'tipo',status:'estado'}
-    const fields:string[]=[];const values:any[]=[]
-    for(const key of Object.keys(map))if(input[key]!==undefined){fields.push(`${map[key]}=?`);values.push(input[key])}
+    const columns: Record<SpaceFieldName, string>={code:'codigo',name:'nombre',building:'edificio',block:'bloque',room:'salon',floor:'piso',location:'ubicacion',description:'descripcion',resources:'recursos',observations:'observaciones',capacity:'capacidad',type:'tipo',status:'estado'}
+    const fields:string[]=[];const values:ExecuteValues[]=[]
+    for(const key of Object.keys(columns) as SpaceFieldName[]) {
+      const value=input[key]
+      if(value!==undefined){fields.push(`${columns[key]}=?`);values.push(value as ExecuteValues)}
+    }
     values.push(id)
     await connection.execute(`UPDATE Espacio SET ${fields.join(',')} WHERE id_espacio=?`,values)
     await connection.commit()
   }catch(error:any){
     await connection.rollback()
-    if(error?.code==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_SPACE','El código del espacio ya está registrado.')
+    if(mysqlErrorCode(error)==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_SPACE','El código del espacio ya está registrado.')
     throw error
   }finally{connection.release()}
   return (await listAdminSpaces()).find((row)=>row.id===id)
@@ -489,7 +522,7 @@ export async function deleteAdminSpace(id: number) {
     await connection.commit()
   } catch (error) {
     await connection.rollback()
-    if (error?.code === 'ER_ROW_IS_REFERENCED_2') throw new DataError(409, 'SPACE_IN_USE', 'No se puede eliminar un espacio con registros asociados. Desactívalo para conservar el historial.')
+    if (mysqlErrorCode(error) === 'ER_ROW_IS_REFERENCED_2') throw new DataError(409, 'SPACE_IN_USE', 'No se puede eliminar un espacio con registros asociados. Desactívalo para conservar el historial.')
     throw error
   } finally {
     connection.release()
@@ -719,7 +752,7 @@ export async function deleteAdminRequest(id: number) {
     await connection.commit()
   } catch (error) {
     await connection.rollback()
-    if (error?.code === 'ER_ROW_IS_REFERENCED_2') throw new DataError(409, 'REQUEST_HAS_DEPENDENCIES', 'No se puede eliminar la solicitud porque existen registros académicos asociados. Cambia su estado para conservarlos.')
+    if (mysqlErrorCode(error) === 'ER_ROW_IS_REFERENCED_2') throw new DataError(409, 'REQUEST_HAS_DEPENDENCIES', 'No se puede eliminar la solicitud porque existen registros académicos asociados. Cambia su estado para conservarlos.')
     throw error
   } finally {
     connection.release()
@@ -741,9 +774,10 @@ const academicPeriodSchema=academicPeriodFieldsSchema.refine((value)=>value.star
 const academicPeriodUpdateSchema=academicPeriodFieldsSchema.partial().strict().refine((value)=>Object.keys(value).length>0,'Debe enviar al menos un campo para actualizar.')
 
 async function findAdminPeriod(id:number){
-  const [rows]=await pool.query("SELECT id_periodo AS id,nombre,DATE_FORMAT(fecha_inicio,'%Y-%m-%d') AS startDate,DATE_FORMAT(fecha_fin,'%Y-%m-%d') AS endDate,estado FROM PeriodoAcademico WHERE id_periodo=?",[id])
+  const [rows]=await pool.query<Array<RowDataPacket & {id:number;nombre:string;startDate:string;endDate:string;estado:string}>>("SELECT id_periodo AS id,nombre,DATE_FORMAT(fecha_inicio,'%Y-%m-%d') AS startDate,DATE_FORMAT(fecha_fin,'%Y-%m-%d') AS endDate,estado FROM PeriodoAcademico WHERE id_periodo=?",[id])
   if(!rows.length)throw new DataError(404,'PERIOD_NOT_FOUND','El periodo académico no existe.')
-  return {...rows[0],id:Number(rows[0].id)}
+  const row=rows[0]
+  return {id:Number(row.id),nombre:row.nombre,startDate:row.startDate,endDate:row.endDate,estado:row.estado}
 }
 
 export async function listAdminPeriods(){
@@ -766,7 +800,7 @@ export async function createAdminPeriod(payload:unknown){
     const [result]=await pool.execute('INSERT INTO PeriodoAcademico (nombre,fecha_inicio,fecha_fin,estado) VALUES (?,?,?,?)',[input.name,input.startDate,input.endDate,input.status])
     return findAdminPeriod(result.insertId)
   }catch(error:any){
-    if(error?.code==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_PERIOD','Ya existe un periodo con ese nombre.')
+    if(mysqlErrorCode(error)==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_PERIOD','Ya existe un periodo con ese nombre.')
     throw error
   }
 }
@@ -781,7 +815,7 @@ export async function updateAdminPeriod(id:number,payload:unknown){
     await pool.execute('UPDATE PeriodoAcademico SET nombre=?,fecha_inicio=?,fecha_fin=?,estado=? WHERE id_periodo=?',[input.name,input.startDate,input.endDate,input.status,id])
     return findAdminPeriod(id)
   }catch(error:any){
-    if(error?.code==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_PERIOD','Ya existe un periodo con ese nombre.')
+    if(mysqlErrorCode(error)==='ER_DUP_ENTRY')throw new DataError(409,'DUPLICATE_PERIOD','Ya existe un periodo con ese nombre.')
     throw error
   }
 }
@@ -799,7 +833,7 @@ export async function deleteAdminPeriod(id:number){
     await connection.commit()
   }catch(error:any){
     await connection.rollback()
-    if(error?.code==='ER_ROW_IS_REFERENCED_2')throw new DataError(409,'PERIOD_IN_USE','No se puede eliminar un periodo que tiene registros asociados.')
+    if(mysqlErrorCode(error)==='ER_ROW_IS_REFERENCED_2')throw new DataError(409,'PERIOD_IN_USE','No se puede eliminar un periodo que tiene registros asociados.')
     throw error
   }finally{connection.release()}
 }
@@ -819,6 +853,8 @@ const catalogName = z.string().trim().min(2).max(150).refine((value) => /[\p{L}]
 const catalogCode = z.string().trim().min(2).max(20).regex(/^[A-Za-z0-9][A-Za-z0-9-]*$/, 'El código solo admite letras, números y guiones.')
 const subjectInput = z.object({ code: catalogCode, name: catalogName, credits: integerInput(z.number().int().min(1).max(30).nullable().optional()), description: z.string().trim().max(300).optional().default(''), status: z.enum(['Activo','Inactivo']).optional().default('Activo') }).strict()
 const programInput = z.object({ code: catalogCode, name: catalogName.max(120), snies: z.string().trim().max(30).optional().default(''), facultyId: integerInput(z.number().int().positive()), status: z.enum(['Activo','Inactivo']).optional().default('Activo') }).strict()
+type SubjectInput = z.infer<typeof subjectInput>
+type ProgramInput = z.infer<typeof programInput>
 
 export async function listAdminSubjects() {
   const [rows] = await pool.query('SELECT id_asignatura AS id,codigo AS code,nombre AS name,creditos AS credits,descripcion AS description,estado AS status FROM Asignatura ORDER BY nombre')
@@ -829,19 +865,20 @@ export async function createAdminSubject(payload: unknown) {
   try {
     const [result] = await pool.execute('INSERT INTO Asignatura (codigo,nombre,creditos,descripcion,estado) VALUES (?,?,?,?,?)', [input.code,input.name,input.credits ?? null,input.description || null,input.status])
     return (await pool.query('SELECT id_asignatura AS id,codigo AS code,nombre AS name,creditos AS credits,descripcion AS description,estado AS status FROM Asignatura WHERE id_asignatura=?', [result.insertId]))[0][0]
-  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_SUBJECT','El código de asignatura ya existe.'); throw error }
+  } catch (error) { if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_SUBJECT','El código de asignatura ya existe.'); throw error }
 }
 export async function updateAdminSubject(id: number, payload: unknown) {
   const input = subjectInput.partial().strict().refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo para actualizar.').parse(payload)
   const [existing] = await pool.query('SELECT id_asignatura FROM Asignatura WHERE id_asignatura=?', [id])
   if (!existing.length) throw new DataError(404,'SUBJECT_NOT_FOUND','La asignatura no existe.')
   try {
-    const columns: Record<string,string> = { code:'codigo',name:'nombre',credits:'creditos',description:'descripcion',status:'estado' }
-    const fields = Object.entries(input).map(([key]) => `${columns[key]}=?`)
-    const values = Object.entries(input).map(([key,value]) => key === 'description' ? (value || null) : value)
+    const columns: Record<keyof SubjectInput,string> = { code:'codigo',name:'nombre',credits:'creditos',description:'descripcion',status:'estado' }
+    const entries = Object.entries(input) as Array<[keyof SubjectInput, SubjectInput[keyof SubjectInput]]>
+    const fields = entries.map(([key]) => `${columns[key]}=?`)
+    const values: ExecuteValues[] = entries.map(([key,value]) => (key === 'description' ? (value || null) : value) as ExecuteValues)
     await pool.execute(`UPDATE Asignatura SET ${fields.join(',')} WHERE id_asignatura=?`, [...values,id])
     return (await pool.query('SELECT id_asignatura AS id,codigo AS code,nombre AS name,creditos AS credits,descripcion AS description,estado AS status FROM Asignatura WHERE id_asignatura=?', [id]))[0][0]
-  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_SUBJECT','El código de asignatura ya existe.'); throw error }
+  } catch (error) { if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_SUBJECT','El código de asignatura ya existe.'); throw error }
 }
 export async function deleteAdminSubject(id: number) {
   const [rows] = await pool.query('SELECT id_asignatura FROM Asignatura WHERE id_asignatura=?', [id])
@@ -868,8 +905,8 @@ export async function createAdminFaculty(payload: unknown) {
   try {
     const [result] = await pool.execute('INSERT INTO Facultad (nombre,descripcion,estado) VALUES (?,?,\'Activo\')', [input.name,input.description || null])
     return (await pool.query('SELECT id_facultad AS id,nombre AS name,descripcion AS description,estado AS status FROM Facultad WHERE id_facultad=?', [result.insertId]))[0][0]
-  } catch (error: any) {
-    if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_FACULTY','Ya existe una facultad con ese nombre.')
+  } catch (error) {
+    if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_FACULTY','Ya existe una facultad con ese nombre.')
     throw error
   }
 }
@@ -881,8 +918,8 @@ export async function updateAdminFaculty(id: number, payload: unknown) {
   try {
     await pool.execute('UPDATE Facultad SET nombre=?,descripcion=?,estado=COALESCE(?,estado) WHERE id_facultad=?', [input.name,input.description || null,input.status ?? null,id])
     return (await listAdminFaculties()).find((row:any)=>Number(row.id)===id)
-  } catch (error:any) {
-    if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_FACULTY','Ya existe una facultad con ese nombre.')
+  } catch (error) {
+    if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_FACULTY','Ya existe una facultad con ese nombre.')
     throw error
   }
 }
@@ -982,7 +1019,7 @@ export async function createAdminProgram(payload: unknown) {
   try {
     const [result] = await pool.execute('INSERT INTO Programa (codigo,nombre,registro_snies,estado,id_facultad) VALUES (?,?,?,?,?)', [input.code,input.name,input.snies || null,input.status,input.facultyId])
     return (await pool.query('SELECT p.id_programa AS id,p.codigo AS code,p.nombre AS name,p.registro_snies AS snies,p.id_facultad AS facultyId,f.nombre AS facultyName,p.estado AS status FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad WHERE p.id_programa=?', [result.insertId]))[0][0]
-  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_PROGRAM','El código o nombre de programa ya existe.'); throw error }
+  } catch (error) { if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_PROGRAM','El código o nombre de programa ya existe.'); throw error }
 }
 export async function updateAdminProgram(id: number, payload: unknown) {
   const input = programInput.partial().strict().refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo para actualizar.').parse(payload)
@@ -993,11 +1030,11 @@ export async function updateAdminProgram(id: number, payload: unknown) {
     if (!faculty.length) throw new DataError(422,'FACULTY_NOT_FOUND','Selecciona una facultad activa.')
   }
   try {
-    const columns: Record<string,string> = { code:'codigo',name:'nombre',snies:'registro_snies',facultyId:'id_facultad',status:'estado' }
-    const entries = Object.entries(input)
+    const columns: Record<keyof ProgramInput,string> = { code:'codigo',name:'nombre',snies:'registro_snies',facultyId:'id_facultad',status:'estado' }
+    const entries = Object.entries(input) as Array<[keyof ProgramInput, ProgramInput[keyof ProgramInput]]>
     await pool.execute(`UPDATE Programa SET ${entries.map(([key]) => `${columns[key]}=?`).join(',')} WHERE id_programa=?`, [...entries.map(([,value]) => value || null),id])
     return (await pool.query('SELECT p.id_programa AS id,p.codigo AS code,p.nombre AS name,p.registro_snies AS snies,p.id_facultad AS facultyId,f.nombre AS facultyName,p.estado AS status FROM Programa p JOIN Facultad f ON f.id_facultad=p.id_facultad WHERE p.id_programa=?', [id]))[0][0]
-  } catch (error: any) { if (error?.code === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_PROGRAM','El código o nombre de programa ya existe.'); throw error }
+  } catch (error) { if (mysqlErrorCode(error) === 'ER_DUP_ENTRY') throw new DataError(409,'DUPLICATE_PROGRAM','El código o nombre de programa ya existe.'); throw error }
 }
 export async function deleteAdminProgram(id: number) {
   const [rows] = await pool.query('SELECT id_programa FROM Programa WHERE id_programa=?', [id])
@@ -1086,8 +1123,9 @@ export async function adminDashboard(){const report=await aggregateReport();cons
 export async function adminReport(query:any={}){return {generatedAt:new Date().toISOString(),filters:{subjectId:query.subjectId??null,from:query.from??null,to:query.to??null},...(await aggregateReport(query))}}
 
 export async function listCredentials(role?:string){
-  const condition=roleNames.includes(role)?`AND EXISTS (SELECT 1 FROM UsuarioRol ur_filter JOIN Rol r_filter ON r_filter.id_rol=ur_filter.id_rol WHERE ur_filter.id_usuario=u.id_usuario AND ur_filter.estado='Activo' AND r_filter.estado='Activo' AND r_filter.nombre=?)`:''
-  const params:any[]=roleNames.includes(role)?[role]:[]
+  const hasRole=isRoleName(role)
+  const condition=hasRole?`AND EXISTS (SELECT 1 FROM UsuarioRol ur_filter JOIN Rol r_filter ON r_filter.id_rol=ur_filter.id_rol WHERE ur_filter.id_usuario=u.id_usuario AND ur_filter.estado='Activo' AND r_filter.estado='Activo' AND r_filter.nombre=?)`:''
+  const params:any[]=hasRole?[role]:[]
   const [rows]=await pool.query(`SELECT u.id_usuario AS id,u.codigo AS code,u.correo AS email,CONCAT(u.nombres,' ',u.apellidos) AS name,u.estado AS status,GROUP_CONCAT(DISTINCT r.nombre ORDER BY r.id_rol SEPARATOR ',') AS roles FROM Usuario u JOIN Credencial c ON c.id_usuario=u.id_usuario LEFT JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.estado='Activo' LEFT JOIN Rol r ON r.id_rol=ur.id_rol AND r.estado='Activo' WHERE 1=1 ${condition} GROUP BY u.id_usuario ORDER BY u.id_usuario`,params)
   return rows.map((row:any)=>({...row,id:Number(row.id),roles:String(row.roles??'').split(',').filter(Boolean)}))
 }

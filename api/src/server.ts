@@ -1,6 +1,5 @@
-// @ts-nocheck
 import cors from 'cors'
-import express, { type NextFunction, type Request, type Response } from 'express'
+import express, { type NextFunction, type Request, type RequestHandler, type Response } from 'express'
 import { randomUUID } from 'node:crypto'
 import { z, ZodError } from 'zod'
 import { AuthError, cancelRoleSelection, changeAccountPasswordWithCode, changeActiveRole, changeLockedOutPassword, currentUserFromToken, login, requestAccountPasswordCode, requestPasswordChange, revokeSession, selectRole, verifyAccountPasswordCode, verifyLockoutPasswordCode } from './auth.js'
@@ -21,13 +20,21 @@ function isAllowedOrigin(origin: string) {
 }
 
 app.use(cors({ origin: (origin, callback) => callback(null, !origin || isAllowedOrigin(origin)) }))
+app.use((req, _res, next) => {
+  req.requestId = randomUUID()
+  next()
+})
 app.use(express.json({ limit: '14mb' }))
 
-function apiError(res: Response, req: Request, status: number, code: string, message: string, details?: unknown[]) {
-  return res.status(status).json({ status, code, message, path: req.path, timestamp: new Date().toISOString(), requestId: req.requestId, ...(details ? { details } : {}) })
+function requestPath(req: Request) {
+  return req.originalUrl.split('?')[0] || req.path
 }
 
-async function requireSession(req, res, next) {
+function apiError(res: Response, req: Request, status: number, code: string, message: string, details?: unknown[]) {
+  return res.status(status).json({ status, code, message, path: requestPath(req), timestamp: new Date().toISOString(), requestId: req.requestId, ...(details ? { details } : {}) })
+}
+
+async function requireSession(req: Request, res: Response, next: NextFunction) {
   try {
     const header = req.header('authorization')
     if (!header?.startsWith('Bearer ')) return apiError(res, req, 401, 'MISSING_TOKEN', 'Se requiere un token Bearer.')
@@ -42,8 +49,8 @@ async function requireSession(req, res, next) {
   }
 }
 
-function requireRole(...allowedRoles: string[]) {
-  return (req, res, next) => {
+function requireRole(...allowedRoles: string[]): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
     if (!allowedRoles.includes(req.session?.activeRole)) return apiError(res, req, 403, 'FORBIDDEN', 'El rol activo no tiene permisos para esta operación.')
     next()
   }
@@ -56,11 +63,6 @@ const spaceQuerySchema = z.object({ search: z.string().trim().max(120).optional(
 const requestSlotQuerySchema = z.object({ userId: z.coerce.number().int().positive(), role: z.enum(['Tutor','Monitor']), subjectId: z.coerce.number().int().positive(), periodId: z.coerce.number().int().positive() }).strict()
 const isoDateQuerySchema = z.string().refine((value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`)) && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value, 'La fecha debe tener formato AAAA-MM-DD y ser válida.')
 const reportQuerySchema = z.object({ subjectId: z.coerce.number().int().positive().optional(), from: isoDateQuerySchema.optional(), to: isoDateQuerySchema.optional() }).strict().refine((value) => !value.from || !value.to || value.from <= value.to, { path: ['to'], message: 'La fecha hasta debe ser igual o posterior a la fecha desde.' })
-
-app.use((req, _res, next) => {
-  req.requestId = randomUUID()
-  next()
-})
 
 app.get('/health', async (_req, res, next) => {
   try {
@@ -169,7 +171,9 @@ router.get('/auth/me', async (req, res, next) => {
 
 router.post('/auth/logout', requireSession, async (req, res, next) => {
   try {
-    await revokeSession(req.header('authorization').slice(7).trim())
+    const header = req.header('authorization')
+    if (!header?.startsWith('Bearer ')) return apiError(res, req, 401, 'MISSING_TOKEN', 'Se requiere un token Bearer.')
+    await revokeSession(header.slice(7).trim())
     res.status(204).send()
   } catch (error) {
     next(error)
@@ -388,8 +392,8 @@ router.get('/requests/eligible-staff', requireSession, requireRole('Estudiante')
 router.get('/requests/available-slots', requireSession, requireRole('Estudiante'), async (req, res, next) => {
   try {
     const query = z.object({ userId: z.coerce.number().int().positive(), subjectId: z.coerce.number().int().positive(), periodId: z.coerce.number().int().positive(), role: z.enum(['Tutor','Monitor']) }).strict().parse(req.query)
-    const eligible = await listStudentRequestStaff(req.session, { subjectId: query.subjectId, periodId: query.periodId, role: query.role })
-    if (!eligible.some((item: any) => Number(item.userId) === query.userId)) throw new DataError(403,'STAFF_NOT_ELIGIBLE','El responsable no tiene una asignación activa para esta asignatura y periodo.')
+    const eligible = await listStudentRequestStaff(req.session, { subjectId: query.subjectId, periodId: query.periodId, role: query.role }) as Array<{ userId: number }>
+    if (!eligible.some((item) => Number(item.userId) === query.userId)) throw new DataError(403,'STAFF_NOT_ELIGIBLE','El responsable no tiene una asignación activa para esta asignatura y periodo.')
     res.json(await listAdminRequestSlots(query))
   } catch (error) { next(error) }
 })
@@ -446,6 +450,10 @@ router.delete('/requests/:id', requireSession, requireRole('Administrador'), asy
   try { await deleteAdminRequest(idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
 })
 
+router.use((req, res) => {
+  return apiError(res, req, 404, 'ROUTE_NOT_FOUND', 'La ruta solicitada no existe.')
+})
+
 app.use(config.apiPrefix, router)
 
 app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
@@ -458,7 +466,7 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof AuthError) {
     const retryAfterSeconds = Number(error.metadata?.retryAfterSeconds)
     if (retryAfterSeconds > 0) res.setHeader('Retry-After', String(retryAfterSeconds))
-    return res.status(error.status).json({ status: error.status, code: error.code, message: error.message, path: req.path, timestamp: new Date().toISOString(), requestId: req.requestId, ...(error.metadata ?? {}) })
+    return res.status(error.status).json({ status: error.status, code: error.code, message: error.message, path: requestPath(req), timestamp: new Date().toISOString(), requestId: req.requestId, ...(error.metadata ?? {}) })
   }
   if (error instanceof DataError) return apiError(res, req, error.status, error.code, error.message)
   console.error(error)
