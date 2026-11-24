@@ -77,6 +77,9 @@ jobs:
       - name: Show service status
         if: always()
         run: docker compose -p acadex-ci ps
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose -p acadex-ci logs --no-color --tail=100
       - name: Stop Compose services
         if: always()
         run: docker compose -p acadex-ci down

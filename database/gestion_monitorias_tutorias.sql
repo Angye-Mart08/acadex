@@ -1863,6 +1863,7 @@ INSERT INTO TipoClasificacion(id_tipo_clasificacion, nombre, descripcion, estado
 (3, 'Conductual', 'Clasificación conductual', 'Activo');
 
 INSERT INTO Solicitud(id_solicitud, id_estudiante, id_programa, id_asignatura, id_tipo_solicitud, id_periodo, fecha_solicitud, motivo, descripcion, prioridad, estado) VALUES
+(1, 1, 1, 1, 1, 1, '2026-08-01 08:00:00', 'Practicar consultas SQL básicas', 'Solicitud de monitoría para reforzar consultas SQL', 'Media', 'Finalizada'),
 (2, 2, 2, 4, 2, 1, '2026-08-01 09:10:00', 'Quiero apoyo en contabilidad general', 'Solicitud de tutoría para contabilidad', 'Media', 'Asignada'),
 (3, 1, 1, 1, 1, 1, '2026-08-02 10:15:00', 'Debo preparar un taller de programación', 'Solicitud para monitoría en programación', 'Media', 'Cancelada'),
 (4, 2, 2, 5, 2, 1, '2026-08-02 11:20:00', 'Necesito repasar legislación comercial', 'Solicitud de tutoría en legislación', 'Baja', 'Finalizada');
