@@ -30,13 +30,11 @@ export const config = {
   preAuthTokenTtl: process.env.PRE_AUTH_TOKEN_TTL ?? '5m',
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   mail: {
-    // Cuenta Gmail de prueba del proyecto. La contraseña de aplicación
-    // siempre debe suministrarse mediante SMTP_PASSWORD en el .env local.
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: Number(process.env.SMTP_PORT ?? 587),
     secure: process.env.SMTP_SECURE === 'true',
-    user: process.env.SMTP_USER || 'acadexmytsistemas@gmail.com',
+    user: process.env.SMTP_USER ?? '',
     password: process.env.SMTP_PASSWORD ?? '',
-    from: process.env.SMTP_FROM || process.env.SMTP_USER || 'acadexmytsistemas@gmail.com',
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
   },
 }

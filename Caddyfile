@@ -1,5 +1,6 @@
 {$ACADEX_DOMAIN} {
 	tls {$ACADEX_TLS_EMAIL}
+	header Strict-Transport-Security "max-age=31536000"
 	encode zstd gzip
 	reverse_proxy web:80
 }
