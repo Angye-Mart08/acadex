@@ -70,9 +70,16 @@ jobs:
         run: docker compose -p acadex-ci up -d --build --wait --wait-timeout 180
       - name: Verify frontend health endpoint
         run: curl --fail --show-error --retry 10 --retry-connrefused --retry-delay 2 http://localhost:5173/health
+      - name: Verify HTTP security and API responses
+        run: node api/scripts/check-http.mjs http://localhost:5173
+      - name: Verify authenticated student requests and role permissions
+        run: docker compose -p acadex-ci exec -T -e ACADEX_EPHEMERAL_CI=1 api node --input-type=module < api/scripts/check-authenticated-http.mjs
       - name: Show service status
         if: always()
         run: docker compose -p acadex-ci ps
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose -p acadex-ci logs --no-color --tail=100
       - name: Stop Compose services
         if: always()
         run: docker compose -p acadex-ci down

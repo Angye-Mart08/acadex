@@ -1683,15 +1683,15 @@ INSERT INTO Usuario(id_usuario, codigo, documento, nombres, apellidos, correo, t
 (9, 'ADM002', '1000000011', 'Administrador', 'Sistema', 'admin@unitropico.edu.co', '3000000000', 'Activo');
 
 INSERT INTO Credencial(id_credencial, usuario, password_hash, ultimo_acceso, primer_inicio, estado, id_usuario) VALUES
-(1, 'jaysonquintero@unitropico.edu.co', '1000000010', NULL, TRUE, 'Activo', 1),
-(2, 'brayhamlindarte.es@unitropico.edu.co', '1093432540', NULL, TRUE, 'Activo', 2),
-(3, 'karengaitan.es@unitropico.edu.co', '1029800072', NULL, TRUE, 'Activo', 3),
-(4, 'shirleytumay.es@unitropico.edu.co', '1007418844', NULL, TRUE, 'Activo', 4),
-(5, 'tutormatematica@unitropico.edu.co', '1007418843', NULL, TRUE, 'Activo', 5),
-(6, 'mariaamezquita.es@unitropico.edu.co', '1029663952', NULL, TRUE, 'Activo', 6),
-(7, 'sofiacardenas.es@unitropico.edu.co', '1029660011', NULL, TRUE, 'Activo', 7),
-(8, 'mariamontanez.es@unitropico.edu.co', '1028944310', NULL, TRUE, 'Activo', 8),
-(9, 'admin@unitropico.edu.co', '1000000011', NULL, TRUE, 'Activo', 9);
+(1, 'jaysonquintero@unitropico.edu.co', 'PENDIENTE_APROVISIONAMIENTO', NULL, TRUE, 'Activo', 1),
+(2, 'brayhamlindarte.es@unitropico.edu.co', 'PENDIENTE_APROVISIONAMIENTO', NULL, TRUE, 'Activo', 2),
+(3, 'karengaitan.es@unitropico.edu.co', 'PENDIENTE_APROVISIONAMIENTO', NULL, TRUE, 'Activo', 3),
+(4, 'shirleytumay.es@unitropico.edu.co', 'PENDIENTE_APROVISIONAMIENTO', NULL, TRUE, 'Activo', 4),
+(5, 'tutormatematica@unitropico.edu.co', 'PENDIENTE_APROVISIONAMIENTO', NULL, TRUE, 'Activo', 5),
+(6, 'mariaamezquita.es@unitropico.edu.co', 'PENDIENTE_APROVISIONAMIENTO', NULL, TRUE, 'Activo', 6),
+(7, 'sofiacardenas.es@unitropico.edu.co', 'PENDIENTE_APROVISIONAMIENTO', NULL, TRUE, 'Activo', 7),
+(8, 'mariamontanez.es@unitropico.edu.co', 'PENDIENTE_APROVISIONAMIENTO', NULL, TRUE, 'Activo', 8),
+(9, 'admin@unitropico.edu.co', 'PENDIENTE_APROVISIONAMIENTO', NULL, TRUE, 'Activo', 9);
 
 INSERT INTO UsuarioRol(id_usuario_rol, id_usuario, id_rol, estado) VALUES
 (1, 1, 1, 'Activo'),
@@ -1863,6 +1863,7 @@ INSERT INTO TipoClasificacion(id_tipo_clasificacion, nombre, descripcion, estado
 (3, 'Conductual', 'Clasificación conductual', 'Activo');
 
 INSERT INTO Solicitud(id_solicitud, id_estudiante, id_programa, id_asignatura, id_tipo_solicitud, id_periodo, fecha_solicitud, motivo, descripcion, prioridad, estado) VALUES
+(1, 1, 1, 1, 1, 1, '2026-08-01 08:00:00', 'Practicar consultas SQL básicas', 'Solicitud de monitoría para reforzar consultas SQL', 'Media', 'Finalizada'),
 (2, 2, 2, 4, 2, 1, '2026-08-01 09:10:00', 'Quiero apoyo en contabilidad general', 'Solicitud de tutoría para contabilidad', 'Media', 'Asignada'),
 (3, 1, 1, 1, 1, 1, '2026-08-02 10:15:00', 'Debo preparar un taller de programación', 'Solicitud para monitoría en programación', 'Media', 'Cancelada'),
 (4, 2, 2, 5, 2, 1, '2026-08-02 11:20:00', 'Necesito repasar legislación comercial', 'Solicitud de tutoría en legislación', 'Baja', 'Finalizada');

@@ -159,14 +159,8 @@ async function findAuthRowsByUserId(id: number): Promise<AuthRow[]> {
 }
 
 async function verifyPassword(password: string, storedPassword: string) {
-  if (storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2y$')) {
-    return { valid: await bcrypt.compare(password, storedPassword), needsUpgrade: false }
-  }
-
-  // Solo la base local puede migrar las claves históricas del SQL de desarrollo.
-  // En producción una contraseña que no sea un hash bcrypt nunca es válida.
-  if (process.env.NODE_ENV === 'production') return { valid: false, needsUpgrade: false }
-  return { valid: password === storedPassword, needsUpgrade: password === storedPassword }
+  if (!/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(storedPassword)) return false
+  return bcrypt.compare(password, storedPassword)
 }
 
 async function issueAccessToken(user: AuthenticatedUser, activeRole: Role) {
@@ -220,8 +214,7 @@ export async function login(payload: unknown) {
     throw new AuthError(401, 'INVALID_CREDENTIALS', 'Las credenciales no son válidas.')
   }
   await assertAccountCanAttemptLogin(rows[0].id, true)
-  const passwordCheck = await verifyPassword(input.password, rows[0].passwordHash)
-  if (!passwordCheck.valid) {
+  if (!(await verifyPassword(input.password, rows[0].passwordHash))) {
     const failure = await registerFailedLogin(rows[0].id, true)
     if (failure.lockout) {
       const isSuspended = failure.lockout.type === 'suspension24h'
@@ -237,14 +230,8 @@ export async function login(payload: unknown) {
     throw new AuthError(401, 'INVALID_CREDENTIALS', 'Las credenciales no son válidas.')
   }
   await clearFailedLogins(rows[0].id)
-  if (passwordCheck.needsUpgrade) {
-    const passwordHash = await bcrypt.hash(input.password, 12)
-    await pool.execute('UPDATE Credencial SET password_hash = ?, primer_inicio = 1, ultimo_acceso = CURRENT_TIMESTAMP WHERE id_credencial = ?', [passwordHash, rows[0].credentialId])
-  } else {
-    await pool.execute('UPDATE Credencial SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id_credencial = ?', [rows[0].credentialId])
-  }
+  await pool.execute('UPDATE Credencial SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id_credencial = ?', [rows[0].credentialId])
   const user = toUser(rows)
-  user.mustChangePassword = user.mustChangePassword || passwordCheck.needsUpgrade
   return publicLoginResponse(user, user.roles.length === 1 ? user.roles[0] : undefined)
 }
 

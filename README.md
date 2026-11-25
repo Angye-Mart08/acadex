@@ -73,7 +73,7 @@ Si aún no tienes Git o Docker Desktop, sigue la [sección 2 de la guía del equ
    docker compose -p acadex up -d --build --wait --wait-timeout 180
    ```
 
-6. Revisa el estado y abre la aplicación:
+6. Si vas a iniciar sesión, [aprovisiona las cuentas](./docs/credenciales.md). Revisa el estado y abre la aplicación:
 
    ```powershell
    docker compose -p acadex ps

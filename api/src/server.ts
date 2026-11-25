@@ -11,15 +11,13 @@ import { getMonthlyTutorReport, listNotifications, markAllNotificationsRead, mar
 
 const app = express()
 app.disable('x-powered-by')
-const allowedOrigins = new Set(config.corsOrigin.split(',').map((origin) => origin.trim()))
-function isAllowedOrigin(origin: string) {
-  if (!origin) return true
-  // En desarrollo permitir cualquier origen (localhost, 127.0.0.1, diferentes puertos de Vite, etc.)
-  if (process.env.NODE_ENV !== 'production') return true
-  return allowedOrigins.has(origin)
-}
+const allowedOrigins = new Set(config.corsOrigin.split(',').map((origin) => origin.trim()).filter(Boolean))
 
-app.use(cors({ origin: (origin, callback) => callback(null, !origin || isAllowedOrigin(origin)) }))
+app.use((_req, res, next) => {
+  res.vary('Origin')
+  next()
+})
+app.use(cors({ origin: (origin, callback) => callback(null, origin !== undefined && allowedOrigins.has(origin)) }))
 app.use((req, _res, next) => {
   req.requestId = randomUUID()
   next()

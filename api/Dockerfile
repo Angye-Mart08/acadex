@@ -8,6 +8,7 @@ WORKDIR /app/api
 COPY --from=dependencies /app/api/node_modules ./node_modules
 COPY api/package.json ./
 COPY api/src ./src
+COPY api/scripts/provision-password.mjs ./scripts/provision-password.mjs
 COPY database/gestion_monitorias_tutorias.sql /app/database/gestion_monitorias_tutorias.sql
 COPY database/migrations /app/database/migrations
 USER node
