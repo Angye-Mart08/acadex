@@ -8,6 +8,7 @@ import { config } from './config.js'
 import { DataError, cancelTutorRecovery, completeTutorRecovery, createRequest, createTutorAvailability, createTutorRecovery, dashboard, deleteTutorAvailability, deleteTutorReport, getTutorReport, getTutorReportAttachment, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects, listTutorAssignments, listTutorRecoverableSessions, listTutorRecoveries, listTutorReportableSessions, saveTutorReport, submitTutorReport, tutorDashboard, updateTutorAvailability, updateTutorReport } from './data.js'
 import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, assignStudentRequest, changePassword, createAdminFaculty, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, decideTutorRequest, deleteAdminFaculty, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminFaculties, listAdminPeriods, listAdminPrograms, listAdminRequestSlots, listAdminRequestStaff, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listPasswordChangeRequests, listSettings, listStudentRequestStaff, listSuspendedAccounts, resetCredential, unlockSuspendedAccount, updateAdminFaculty, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
 import { getMonthlyTutorReport, listNotifications, markAllNotificationsRead, markNotificationRead, saveMonthlyTutorDraft } from './notifications.js'
+import { createActivity, getActivityFile, listActivities, listActivitySessions, listActivityStudents, submitActivity } from './activities.js'
 
 const app = express()
 app.disable('x-powered-by')
@@ -72,6 +73,34 @@ app.get('/health', async (_req, res, next) => {
 })
 
 const router = express.Router()
+
+router.get('/tutor/activity-sessions', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await listActivitySessions(req.session.user.id)) } catch (error) { next(error) }
+})
+router.get('/tutor/activity-sessions/:id/attendees', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await listActivityStudents(req.session.user.id, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+})
+router.get('/activities', requireSession, requireRole('Tutor', 'Estudiante'), async (req, res, next) => {
+  try { res.json(await listActivities(req.session)) } catch (error) { next(error) }
+})
+router.post('/activities', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.status(201).json(await createActivity(req.session.user.id, req.body)) } catch (error) { next(error) }
+})
+router.post('/activities/:id/submission', requireSession, requireRole('Estudiante'), async (req, res, next) => {
+  try {
+    await submitActivity(req.session.user.id, idParamSchema.parse(req.params.id), req.body)
+    res.status(204).send()
+  } catch (error) { next(error) }
+})
+router.get('/activities/:id/files/:kind', requireSession, requireRole('Tutor', 'Estudiante'), async (req, res, next) => {
+  try {
+    const kind = z.enum(['adjunto', 'entrega']).parse(req.params.kind)
+    const file = await getActivityFile(req.session, idParamSchema.parse(req.params.id), kind)
+    res.set('Cache-Control', 'private, no-store')
+    res.set('X-Content-Type-Options', 'nosniff')
+    res.attachment(file.name).type('application/octet-stream').send(file.data)
+  } catch (error) { next(error) }
+})
 
 router.get('/notifications', requireSession, async (req, res, next) => {
   try { res.json(await listNotifications(req.session)) } catch (error) { next(error) }

@@ -85,6 +85,52 @@ export type PortalAvailability = {
 }
 
 export type TutorAssignment = { id: number; subjectId: number; codigo: string; subject: string; periodId: number; period: string }
+export type ActivityStudent = { id: number; name: string; code: string }
+export type ActivitySession = { id: number; subject: string; date: string; startTime: string }
+export type Activity = {
+  id: number
+  title: string
+  description: string
+  dueAt: number
+  submittedAt: number | null
+  sessionId: number | null
+  sessionSubject: string | null
+  sessionDate: string | null
+  sessionStartTime: string | null
+  attachmentName: string
+  submissionName: string | null
+  submissionComment: string | null
+  student: string
+  tutor: string
+  status: 'Pendiente' | 'Entregada' | 'Vencida'
+}
+type ActivityFile = { name: string; base64: string }
+
+export function listActivitySessions(accessToken: string) {
+  return request<ActivitySession[]>('/tutor/activity-sessions', authenticatedOptions(accessToken))
+}
+
+export function listActivityStudents(accessToken: string, sessionId: number) {
+  return request<ActivityStudent[]>(`/tutor/activity-sessions/${sessionId}/attendees`, authenticatedOptions(accessToken))
+}
+
+export function listActivities(accessToken: string) {
+  return request<Activity[]>('/activities', authenticatedOptions(accessToken))
+}
+
+export function createActivity(accessToken: string, input: {
+  sessionId: number; studentIds: number[]; title: string; description: string; dueAt: string; file: ActivityFile
+}) {
+  return request<{ id: number; ids: number[] }>('/activities', authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(input) }))
+}
+
+export function submitActivity(accessToken: string, id: number, submission: ActivityFile & { comment?: string }) {
+  return request<void>(`/activities/${id}/submission`, authenticatedOptions(accessToken, { method: 'POST', body: JSON.stringify(submission) }))
+}
+
+export function downloadActivityFile(accessToken: string, id: number, kind: 'adjunto' | 'entrega') {
+  return requestFile(`/activities/${id}/files/${kind}`, accessToken)
+}
 export type TutorDashboardData = { metrics: { upcoming: number; completed: number; openRequests: number; pendingReports: number }; upcoming: Array<{ id: number; subject: string; date: string; startTime: string; endTime: string; status: string; place: string }> }
 export type TutorRecovery = { id: number; originalSessionId: number; date: string; startTime: string; endTime: string; description: string; status: 'Programada'|'Realizada'|'Cancelada'; subject: string }
 export type TutorRecoverableSession = { id:number;requestId:number;subject:string;date:string;startTime:string;endTime:string;status:'Cancelada'|'No Asistida';cancellationReason:string }

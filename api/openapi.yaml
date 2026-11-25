@@ -25,6 +25,139 @@ tags:
   - name: Espacios
   - name: Solicitudes
 paths:
+  /tutor/activity-sessions:
+    get:
+      tags: [Portal personal]
+      summary: Lista las sesiones de tutoría realizadas del usuario autenticado
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Sesiones que pueden vincularse a una actividad
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, subject, date, startTime]
+                  properties:
+                    id: { type: integer }
+                    subject: { type: string }
+                    date: { type: string, format: date }
+                    startTime: { type: string, example: '14:00' }
+        '403': { description: Requiere el rol Tutor }
+  /tutor/activity-sessions/{id}/attendees:
+    get:
+      tags: [Portal personal]
+      summary: Lista los estudiantes activos con asistencia registrada en una sesión del tutor
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: Estudiantes disponibles para asignar una actividad
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, name, code]
+                  properties:
+                    id: { type: integer }
+                    name: { type: string }
+                    code: { type: string }
+        '403': { description: Requiere el rol Tutor }
+  /activities:
+    get:
+      tags: [Portal personal]
+      summary: Lista las actividades asignadas por el tutor o recibidas por el estudiante
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Actividades del usuario autenticado
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TutorActivity' }
+        '403': { description: Requiere el rol Tutor o Estudiante }
+    post:
+      tags: [Portal personal]
+      summary: Asigna una actividad a uno o varios asistentes de una sesión del tutor
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, studentIds, title, description, dueAt, file]
+              properties:
+                sessionId: { type: integer, minimum: 1 }
+                studentIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { type: integer, minimum: 1 }
+                title: { type: string, minLength: 1, maxLength: 150 }
+                description: { type: string, minLength: 1, maxLength: 2000 }
+                dueAt: { type: string, format: date-time, description: Fecha y hora límite futura con zona horaria }
+                file: { $ref: '#/components/schemas/TutorActivityFile' }
+      responses:
+        '201':
+          description: Actividad asignada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, ids]
+                properties:
+                  id: { type: integer }
+                  ids:
+                    type: array
+                    items: { type: integer }
+        '403': { description: Requiere el rol Tutor }
+        '422': { description: Actividad inválida, sesión ajena o estudiante sin asistencia registrada }
+  /activities/{id}/submission:
+    post:
+      tags: [Portal personal]
+      summary: Registra la entrega del estudiante destinatario antes del vencimiento
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/TutorActivityFile' }
+                - type: object
+                  properties:
+                    comment: { type: string, maxLength: 4000, description: Comentario libre y opcional de la entrega }
+      responses:
+        '204': { description: Entrega registrada }
+        '403': { description: Requiere el rol Estudiante }
+        '404': { description: Actividad inexistente para el usuario autenticado }
+        '409': { description: Actividad vencida o ya entregada }
+        '422': { description: Archivo inválido }
+  /activities/{id}/files/{kind}:
+    get:
+      tags: [Portal personal]
+      summary: Descarga el material o la entrega de una actividad propia
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [adjunto, entrega] } }
+      responses:
+        '200':
+          description: Archivo descargable
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '403': { description: Requiere el rol Tutor o Estudiante }
+        '404': { description: Archivo inexistente para el usuario autenticado }
   /auth/login:
     post:
       tags: [Autenticación]
@@ -1742,6 +1875,31 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
   schemas:
+    TutorActivity:
+      type: object
+      required: [id, title, description, dueAt, submittedAt, sessionId, sessionSubject, sessionDate, sessionStartTime, attachmentName, submissionName, submissionComment, student, tutor, status]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        description: { type: string }
+        dueAt: { type: integer, description: Instante límite en segundos Unix }
+        submittedAt: { type: [integer, 'null'], description: Instante de entrega en segundos Unix }
+        sessionId: { type: [integer, 'null'] }
+        sessionSubject: { type: [string, 'null'] }
+        sessionDate: { type: [string, 'null'], format: date }
+        sessionStartTime: { type: [string, 'null'] }
+        attachmentName: { type: string }
+        submissionName: { type: [string, 'null'] }
+        submissionComment: { type: [string, 'null'], maxLength: 4000 }
+        student: { type: string }
+        tutor: { type: string }
+        status: { type: string, enum: [Pendiente, Entregada, Vencida] }
+    TutorActivityFile:
+      type: object
+      required: [name, base64]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 180 }
+        base64: { type: string, contentEncoding: base64, description: Archivo de hasta 4 MB antes de codificar }
     TutorReportInput:
       type: object
       additionalProperties: false

@@ -1,0 +1,119 @@
+.activities-view {
+  display: grid;
+  gap: 18px;
+}
+
+.activity-session-group {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.activity-session-group > h3 {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--brand-green-soft);
+  color: var(--brand-green-deep);
+  font-size: 1rem;
+}
+
+.activity-task {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: clamp(14px, 3cqi, 20px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
+.activity-task:focus {
+  outline: 2px solid var(--brand-green);
+  outline-offset: 2px;
+}
+
+.activity-task-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.activity-task h4,
+.activity-task p,
+.activity-task dd {
+  margin: 0;
+}
+
+.activity-task-header p,
+.activity-task-files small {
+  font-size: .75rem;
+}
+
+.activity-task-description {
+  white-space: pre-wrap;
+}
+
+.activity-task-dates,
+.activity-task-files {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.activity-task-dates > div,
+.activity-task-comment {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f5f8f6;
+}
+
+.activity-task-dates dt,
+.activity-task-comment strong {
+  margin-bottom: 4px;
+  font-weight: 700;
+}
+
+.activity-task-dates,
+.activity-task-comment {
+  font-size: .875rem;
+}
+
+.activity-attendees {
+  min-width: 0;
+  border: 1px solid var(--line, #dfe6ef);
+  border-radius: 9px;
+  padding: 12px;
+}
+
+.activity-attendees label {
+  padding: 5px 0;
+}
+
+.activities-view input[type="file"] {
+  max-width: 100%;
+}
+
+.activity-task-files button {
+  min-width: 0;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: left;
+}
+
+.activity-task-files button span,
+.activity-task-files small {
+  min-width: 0;
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.activity-task-form {
+  margin-top: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
