@@ -1,4 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react'
+import { ActivitiesView } from './ActivitiesView'
 import {
   AcademicPeriod,
   AdminProgram,
@@ -176,7 +177,7 @@ function NoticeHost() {
   const [notices, setNotices] = useState<Notice[]>([])
   useEffect(() => {
     const emit = (message: string) => {
-      const kind: Notice['kind'] = /correctamente|fue eliminado|se descargó/i.test(message) ? 'success' : /^(Nueva solicitud estudiantil|Solicitud de acompañamiento|Acompañamiento asignado|Acompañamiento marcado|Tutoría confirmada|Tutoría cancelada|Actualización de solicitud|Nuevo reporte de tutoría):/i.test(message) ? 'info' : 'error'
+      const kind: Notice['kind'] = /^(Nueva solicitud estudiantil|Solicitud de acompañamiento|Acompañamiento asignado|Acompañamiento marcado|Tutoría confirmada|Tutoría cancelada|Actualización de solicitud|Nuevo reporte de tutoría|Nueva actividad asignada|Actividad entregada):/i.test(message) ? 'info' : /correctamente|fue eliminado|se descargó/i.test(message) ? 'success' : 'error'
       const id = Date.now() + Math.random()
       setNotices((items) => [...items.slice(-3), { id, message, kind }])
       window.setTimeout(() => setNotices((items) => items.filter((item) => item.id !== id)), kind === 'success' ? 5000 : 8000)
@@ -227,7 +228,7 @@ function isValidUserRoleSet(roles: Role[]) {
 }
 type PortalRole = Exclude<Role, 'Administrador'>
 type View = 'dashboard' | 'usuarios' | 'asignaturas' | 'programas' | 'espacios' | 'solicitudes' | 'reportes' | 'configuracion'
-type PortalView = 'inicio' | 'disponibilidad' | 'horarios' | 'solicitudes' | 'sesiones' | 'informes' | 'informe-mensual' | 'solicitar' | 'mis-solicitudes' | 'mis-sesiones' | 'configuracion'
+type PortalView = 'inicio' | 'disponibilidad' | 'horarios' | 'solicitudes' | 'sesiones' | 'informes' | 'informe-mensual' | 'solicitar' | 'mis-solicitudes' | 'mis-sesiones' | 'actividades' | 'configuracion'
 type Status = 'Activo' | 'Inactivo'
 
 type User = {
@@ -832,6 +833,8 @@ function ProfileMenu({ user, activeRole, onLogout }: { user: User; activeRole: R
 
 function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, onLogout, onChangeRole, accessToken, requests, subjects, sessions, availability, onSessionsChange, dataError, dataLoading, onRequestsChange }: { user: User; activeRole: PortalRole; periodName: string; periods: AcademicPeriod[]; view: PortalView; onNavigate: (view: PortalView) => void; onLogout: () => void; onChangeRole: () => void; accessToken: string; requests: Request[]; subjects: Array<{ id: number; codigo: string; nombre: string }>; sessions: PortalSession[]; availability: PortalAvailability[]; onSessionsChange: (sessions: PortalSession[]) => void; dataError: string; dataLoading: boolean; onRequestsChange: (requests: Request[]) => void }) {
   const [mobileNav, setMobileNav] = useState(false)
+  const [activityTarget, setActivityTarget] = useState<{ activityId: number } | null>(null)
+  const [activitySessionId, setActivitySessionId] = useState<number | null>(null)
   const [periodModalOpen, setPeriodModalOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('acadex:sidebar-collapsed') === 'true')
   const toggleSidebar = () => setSidebarCollapsed((collapsed) => { const next = !collapsed; window.localStorage.setItem('acadex:sidebar-collapsed', String(next)); return next })
@@ -841,6 +844,7 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
       { id: 'disponibilidad', label: 'Horario', icon: <CalendarClock size={19} /> },
       { id: 'solicitudes', label: 'Solicitudes', icon: <ClipboardIcon /> },
       { id: 'sesiones', label: 'Mis sesiones', icon: <CalendarDays size={19} /> },
+      { id: 'actividades', label: 'Actividades', icon: <ClipboardIcon /> },
       { id: 'informes', label: 'Reportes', icon: <FileText size={19} /> },
       { id: 'informe-mensual', label: 'Informe mensual', icon: <CalendarDays size={19} /> },
       { id: 'configuracion', label: 'Configuración', icon: <Settings2 size={19} /> },
@@ -857,12 +861,18 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
       { id: 'solicitar', label: 'Solicitar acompañamiento', icon: <Send size={19} /> },
       { id: 'mis-solicitudes', label: 'Mis solicitudes', icon: <ClipboardIcon /> },
       { id: 'mis-sesiones', label: 'Mis sesiones', icon: <CalendarDays size={19} /> },
+      { id: 'actividades', label: 'Mis actividades', icon: <ClipboardIcon /> },
       { id: 'configuracion', label: 'Configuración', icon: <Settings2 size={19} /> },
     ],
   }
   const portalRole = activeRole
   const navItems = navByRole[portalRole]
-  const go = (nextView: PortalView) => { onNavigate(nextView); setMobileNav(false) }
+  const go = (nextView: PortalView) => { setActivityTarget(null); setActivitySessionId(null); onNavigate(nextView); setMobileNav(false) }
+  const openActivity = (activityId: number) => {
+    setActivityTarget({ activityId })
+    onNavigate('actividades')
+    setMobileNav(false)
+  }
 
   return <div className="app-shell">
     <aside className={`sidebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileNav ? 'mobile-open' : ''}`} onKeyDown={event => { if (mobileNav && event.key === 'Escape') setMobileNav(false) }}>
@@ -889,7 +899,7 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
             <span className="status-dot active" />
             <span>Periodo {periodName}</span>
           </button>
-          <NotificationCenter accessToken={accessToken} activeRole={activeRole} onNavigate={onNavigate} />
+          <NotificationCenter accessToken={accessToken} activeRole={activeRole} onNavigate={go} onActivityNavigate={activeRole === 'Monitor' ? undefined : openActivity} />
           {user.roles.length > 1 && <button className="role-switcher" onClick={onChangeRole}><UsersRound size={15} /> Cambiar rol</button>}
           <button className="mobile-logout-button" type="button" aria-label="Cerrar sesión" title="Cerrar sesión" onClick={onLogout}><LogOut size={17} /><span>Cerrar sesión</span></button>
           <ProfileMenu user={user} activeRole={activeRole} onLogout={onLogout} />
@@ -902,9 +912,17 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
         {view === 'inicio' && (activeRole === 'Tutor' ? <TutorHome user={user} periodName={periodName} accessToken={accessToken} /> : <PortalHome user={user} activeRole={activeRole} periodName={periodName} requests={requests} onNavigate={go} />)}
         {view === 'disponibilidad' && <AvailabilityView periodName={periodName} availability={availability} accessToken={accessToken} />}
         {view === 'horarios' && <ScheduleView user={user} periodName={periodName} availability={availability} />}
-        {(view === 'sesiones' || view === 'mis-sesiones') && <PortalSessions sessions={sessions} activeRole={activeRole} periodName={periodName} accessToken={accessToken} onChange={onSessionsChange} />}
+        {(view === 'sesiones' || view === 'mis-sesiones') && <PortalSessions sessions={sessions} activeRole={activeRole} periodName={periodName} accessToken={accessToken} onChange={onSessionsChange} onAssignActivity={(sessionId) => {
+          setActivitySessionId(sessionId)
+          setActivityTarget(null)
+          onNavigate('actividades')
+        }} />}
         {view === 'solicitar' && <StudentRequestForm accessToken={accessToken} subjects={subjects} periods={periods} user={user} requests={requests} onChange={onRequestsChange} />}
         {view === 'mis-solicitudes' && <MyRequests requests={requests} />}
+        {view === 'actividades' && activeRole !== 'Monitor' && <>
+          <PageHeader eyebrow="Mi espacio / Actividades" title={activeRole === 'Tutor' ? 'Actividades' : 'Mis actividades'} description={activeRole === 'Tutor' ? 'Asigna tareas a tus estudiantes y revisa sus entregas.' : 'Consulta las tareas de tus tutores y envía tus entregas.'} />
+          <ActivitiesView key={activeRole} accessToken={accessToken} isTutor={activeRole === 'Tutor'} notificationTarget={activityTarget} initialSessionId={activitySessionId} />
+        </>}
         {view === 'solicitudes' && <AssignedRequests accessToken={accessToken} activeRole={activeRole} requests={requests} onChange={onRequestsChange} />}
         {view === 'informes' && activeRole === 'Tutor' && <TutorReports accessToken={accessToken} sessions={sessions} />}
         {view === 'informe-mensual' && activeRole === 'Tutor' && <MonthlyTutorReportView accessToken={accessToken} />}
@@ -916,7 +934,7 @@ function RoleShell({ user, activeRole, periodName, periods, view, onNavigate, on
   </div>
 }
 
-function NotificationCenter({accessToken,activeRole,onNavigate}:{accessToken:string;activeRole:Role;onNavigate:(view:any,target?:'credentials')=>void}) {
+function NotificationCenter({accessToken,activeRole,onNavigate,onActivityNavigate}:{accessToken:string;activeRole:Role;onNavigate:(view:any,target?:'credentials')=>void;onActivityNavigate?:(activityId:number)=>void}) {
   const [items,setItems]=useState<NotificationItem[]>([]);const [unread,setUnread]=useState(0);const [open,setOpen]=useState(false)
   const centerRef=useRef<HTMLDivElement|null>(null)
   useEffect(()=>{let active=true;let initialized=false;let known=new Set<number>();const refresh=async()=>{try{const response=await getNotifications(accessToken);if(!active)return;const incoming=response.items;if(initialized){incoming.filter(item=>!known.has(item.id)&&!item.read).slice(0,3).forEach(item=>window.dispatchEvent(new CustomEvent('acadex:notice',{detail:`${item.title}: ${item.message}`})))}known=new Set(incoming.map(item=>item.id));initialized=true;setItems(incoming);setUnread(response.unread)}catch{/* La bandeja volverá a consultar en el siguiente intervalo. */}};void refresh();const timer=window.setInterval(()=>void refresh(),30000);return()=>{active=false;window.clearInterval(timer)}},[accessToken])
@@ -924,6 +942,10 @@ function NotificationCenter({accessToken,activeRole,onNavigate}:{accessToken:str
   const openItem=async(item:NotificationItem)=>{
     setOpen(false)
     try{if(!item.read){await markNotificationRead(accessToken,item.id);setItems(current=>current.map(row=>row.id===item.id?{...row,read:true}:row));setUnread(value=>Math.max(0,value-1))}}catch{/* El refresco periódico sincroniza el estado. */}
+    if(item.entityType==='actividad'){
+      if(item.entityId!==null)onActivityNavigate?.(item.entityId)
+      return
+    }
     if(activeRole==='Administrador'){if(item.entityType==='credencial'){onNavigate('configuracion','credentials');return}onNavigate(item.category==='Informe'?'reportes':'solicitudes')}
     else if(activeRole==='Tutor')onNavigate(item.category==='Informe'?'informes':item.category==='Sesion'?'sesiones':'solicitudes')
     else if(activeRole==='Estudiante')onNavigate(item.category==='Sesion'?'mis-sesiones':'mis-solicitudes')
@@ -1088,14 +1110,14 @@ function ScheduleView({ user, periodName, availability }: { user: User; periodNa
 
 function ScheduleRow({ day, time, subject, place }: { day: string; time: string; subject: string; place: string }) { return <div className="schedule-row"><div className="schedule-day"><strong>{day}</strong><span>{time}</span></div><div className="schedule-main"><strong>{subject}</strong><span>{place}</span></div><StatusPill status="Activo" /></div> }
 
-function PortalSessions({ sessions, activeRole, periodName, accessToken, onChange }: { sessions: PortalSession[]; activeRole: PortalRole; periodName: string; accessToken:string; onChange:(sessions:PortalSession[])=>void }) {
+function PortalSessions({ sessions, activeRole, periodName, accessToken, onChange, onAssignActivity }: { sessions: PortalSession[]; activeRole: PortalRole; periodName: string; accessToken:string; onChange:(sessions:PortalSession[])=>void; onAssignActivity:(sessionId:number)=>void }) {
   const [filter,setFilter]=useState('Todas');const [query,setQuery]=useState('');const [error,setError]=useState('')
   const statuses=['Todas',...new Set(sessions.map(session=>session.status))]
   const filtered=sessions.filter(session=>(filter==='Todas'||session.status===filter)&&`${session.subject} ${session.place} ${session.modality}`.toLowerCase().includes(query.trim().toLowerCase()))
   const upcoming=sessions.filter(session=>['Programada','Confirmada','Reprogramada','En Proceso'].includes(session.status)).length
   const completed=sessions.filter(session=>['Realizada','Finalizada'].includes(session.status)).length
   const complete=async(session:PortalSession)=>{if(!session.requestId)return;if(!window.confirm(`¿Marcar como realizada la tutoría de ${session.subject}?`))return;try{await markAssignedRequestAttended(accessToken,session.requestId);onChange(sessions.map(item=>item.id===session.id?{...item,status:'Realizada'}:item));setError('')}catch(e){setError(e instanceof ApiError?e.message:'No se pudo cerrar la tutoría como realizada.')}}
-  return <><PageHeader eyebrow="Mi espacio / Mis sesiones" title="Mis sesiones" description={activeRole==='Tutor'?'Consulta tu agenda y registra la atención cuando finalice cada tutoría.':'Revisa tus sesiones del periodo académico activo.'}/><section className="metrics-grid sessions-summary"><MetricCard label="En agenda" value={String(upcoming)} detail={`Periodo ${periodName}`} icon={<CalendarDays size={20}/>} tone="blue"/><MetricCard label="Realizadas" value={String(completed)} detail="Atenciones completadas" icon={<Check size={20}/>} tone="green"/><MetricCard label="Total" value={String(sessions.length)} detail="Sesiones registradas" icon={<Clock3 size={20}/>} tone="purple"/></section>{error&&<div className="error-message">{error}</div>}<section className="panel sessions-panel"><div className="sessions-toolbar"><label className="sessions-search"><Search size={18}/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar sesiones" aria-label="Buscar sesiones por asignatura, lugar o modalidad"/></label><label className="sessions-filter-label">Estado<select value={filter} onChange={event=>setFilter(event.target.value)}>{statuses.map(status=><option key={status}>{status}</option>)}</select></label><span className="sessions-result-count">{filtered.length} de {sessions.length}</span></div><div className="session-card-list">{filtered.map(session=><details className="session-card compact-session-card" key={session.id}><summary className="compact-session-summary"><span className="session-card-date"><strong>{new Date(`${session.date}T12:00:00`).getDate()}</strong><span>{new Intl.DateTimeFormat('es-CO',{month:'short'}).format(new Date(`${session.date}T12:00:00`))}</span></span><span className="compact-session-main"><span className="session-reference">Sesión #{String(session.id).padStart(4,'0')}</span><strong>{session.subject}</strong><small><Clock3 size={14}/>{session.startTime}–{session.endTime}</small></span><RequestStatus status={session.status}/><span className="compact-session-toggle">Ver detalles</span></summary><div className="compact-session-details"><span><CalendarDays size={15}/>{formatDate(session.date)}</span><span><Building2 size={15}/>{session.place||'Sin espacio asignado'}</span><span><CalendarClock size={15}/>{session.modality}</span>{activeRole==='Tutor'&&session.requestId&&['Confirmada','Programada','Reprogramada','En Proceso'].includes(session.status)&&<button className="secondary-button small-button session-complete-action" onClick={()=>void complete(session)}><Check size={16}/> Marcar realizada</button>}</div></details>)}{!filtered.length&&<div className="sessions-empty"><CalendarDays size={28}/><strong>{sessions.length?'No hay sesiones que coincidan con los filtros.':'Aún no tienes sesiones registradas.'}</strong><span>{sessions.length?'Ajusta la búsqueda o el estado seleccionado.':'Cuando se asigne una tutoría o monitoría aparecerá aquí.'}</span></div>}</div></section></>
+  return <><PageHeader eyebrow="Mi espacio / Mis sesiones" title="Mis sesiones" description={activeRole==='Tutor'?'Consulta tu agenda y registra la atención cuando finalice cada tutoría.':'Revisa tus sesiones del periodo académico activo.'}/><section className="metrics-grid sessions-summary"><MetricCard label="En agenda" value={String(upcoming)} detail={`Periodo ${periodName}`} icon={<CalendarDays size={20}/>} tone="blue"/><MetricCard label="Realizadas" value={String(completed)} detail="Atenciones completadas" icon={<Check size={20}/>} tone="green"/><MetricCard label="Total" value={String(sessions.length)} detail="Sesiones registradas" icon={<Clock3 size={20}/>} tone="purple"/></section>{error&&<div className="error-message">{error}</div>}<section className="panel sessions-panel"><div className="sessions-toolbar"><label className="sessions-search"><Search size={18}/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar sesiones" aria-label="Buscar sesiones por asignatura, lugar o modalidad"/></label><label className="sessions-filter-label">Estado<select value={filter} onChange={event=>setFilter(event.target.value)}>{statuses.map(status=><option key={status}>{status}</option>)}</select></label><span className="sessions-result-count">{filtered.length} de {sessions.length}</span></div><div className="session-card-list">{filtered.map(session=><details className="session-card compact-session-card" key={session.id}><summary className="compact-session-summary"><span className="session-card-date"><strong>{new Date(`${session.date}T12:00:00`).getDate()}</strong><span>{new Intl.DateTimeFormat('es-CO',{month:'short'}).format(new Date(`${session.date}T12:00:00`))}</span></span><span className="compact-session-main"><span className="session-reference">Sesión #{String(session.id).padStart(4,'0')}</span><strong>{session.subject}</strong><small><Clock3 size={14}/>{session.startTime}–{session.endTime}</small></span><RequestStatus status={session.status}/><span className="compact-session-toggle">Ver detalles</span></summary><div className="compact-session-details"><span><CalendarDays size={15}/>{formatDate(session.date)}</span><span><Building2 size={15}/>{session.place||'Sin espacio asignado'}</span><span><CalendarClock size={15}/>{session.modality}</span>{activeRole==='Tutor'&&session.requestId&&['Confirmada','Programada','Reprogramada','En Proceso'].includes(session.status)&&<button className="secondary-button small-button session-complete-action" onClick={()=>void complete(session)}><Check size={16}/> Marcar realizada</button>}{activeRole==='Tutor'&&['Realizada','Finalizada'].includes(session.status)&&<button type="button" className="secondary-button small-button" onClick={()=>onAssignActivity(session.id)}><ClipboardIcon /> Asignar actividad</button>}</div></details>)}{!filtered.length&&<div className="sessions-empty"><CalendarDays size={28}/><strong>{sessions.length?'No hay sesiones que coincidan con los filtros.':'Aún no tienes sesiones registradas.'}</strong><span>{sessions.length?'Ajusta la búsqueda o el estado seleccionado.':'Cuando se asigne una tutoría o monitoría aparecerá aquí.'}</span></div>}</div></section></>
 }
 function TutorReports({accessToken,sessions:portalSessions}:{accessToken:string;sessions:PortalSession[]}){
   const [sessions,setSessions]=useState<TutorReportableSession[]>([]);const [active,setActive]=useState<(TutorReportableSession&Partial<TutorReportRecord>)|null>(null);const [viewOnly,setViewOnly]=useState(false);const [attendees,setAttendees]=useState<number[]>([]);const [satIds,setSatIds]=useState<number[]>([]);const [satText,setSatText]=useState<Record<number,string>>({});const [error,setError]=useState('');const [success,setSuccess]=useState('');const [busy,setBusy]=useState(false)

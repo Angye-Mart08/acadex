@@ -116,7 +116,6 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
 .login-input.password-field input { padding-right: 0; }
 .login-input.password-field button { position: static; display: grid; flex: 0 0 auto; place-items: center; padding: 5px; color: #75847c; transform: none; }
 .form-row a { color: var(--brand-green); }
-.check-label input { accent-color: var(--brand-green); }
 .primary-button { border-color: var(--brand-green); background: var(--brand-green); box-shadow: 0 7px 18px rgba(0,88,80,.17); }
 .primary-button:hover { border-color: var(--brand-green-deep); background: var(--brand-green-deep); box-shadow: 0 10px 20px rgba(0,88,80,.22); }
 .login-button { min-height: 50px; border-radius: 10px; }
@@ -285,7 +284,6 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
 .role-profile-fieldset textarea, .settings-form textarea { min-height: 76px; resize: vertical; }
 .subject-check-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 7px; max-height: 190px; overflow: auto; padding: 2px; }
 .subject-check-grid .role-option { min-width: 0; align-items: flex-start; border-color: #e5ece7; border-radius: 7px; padding: 8px; font-size: 10px; line-height: 1.4; }
-.subject-check-grid .role-option input { width: auto; flex: 0 0 auto; margin-top: 2px; }
 .subject-dropdown { position: relative; min-width: 0; }
 .subject-dropdown summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; border: 1px solid #dfe7e2; border-radius: 8px; padding: 9px 11px; color: #465d51; background: #fff; cursor: pointer; font-size: 12px; list-style: none; }
 .subject-dropdown summary::-webkit-details-marker { display: none; }
@@ -295,16 +293,14 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
 .subject-dropdown-options { position: absolute; z-index: 15; top: 100%; left: 0; display: grid; gap: 2px; width: 100%; max-height: 220px; overflow: auto; border: 1px solid #dfe7e2; border-top: 0; border-radius: 0 0 8px 8px; padding: 5px; background: #fff; box-shadow: 0 12px 24px rgba(28,58,47,.13); }
 .subject-dropdown-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; border-radius: 6px; padding: 8px; color: #53675d; cursor: pointer; font-size: 11px; line-height: 1.4; }
 .subject-dropdown-option:hover { background: #f1f6f2; }
-.subject-dropdown-option input { width: 15px; height: 15px; flex: 0 0 15px; margin: 1px 0 0; accent-color: var(--brand-green); }
 .subject-dropdown-option span { display: flex; gap: 6px; min-width: 0; }
 .subject-dropdown-option strong { color: var(--brand-green); white-space: nowrap; }
 .subject-dropdown-empty { padding: 10px; color: #526057; font-size: 11px; }
 .portal-form { gap: 14px; }
-.portal-form input, .portal-form select, .portal-form textarea { width: 100%; min-width: 0; min-height: 40px; border: 1px solid #dfe7e2; border-radius: 8px; padding: 9px 11px; color: #263e34; background: #fff; font-size: 12px; }
+.portal-form input:where(:not([type='checkbox'], [type='radio'])), .portal-form select, .portal-form textarea { width: 100%; min-width: 0; min-height: 40px; border: 1px solid #dfe7e2; border-radius: 8px; padding: 9px 11px; color: #263e34; background: #fff; font-size: 12px; }
 .portal-form textarea { min-height: 84px; }
   form.modal-form:has(input[name='building']) > label:has(input[name='location']) { display: none; }
 .role-options .role-option { justify-content: flex-start; }
-.role-options .role-option input[type='checkbox'] { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; }
 .modal-backdrop { overflow-y: auto; place-items: center; padding: clamp(16px, 4vh, 36px) 18px; }
 .modal { display: flex; flex-direction: column; width: min(100%, 500px); max-height: min(88dvh, 820px); overflow: hidden; padding: clamp(18px, 2.2vw, 24px); }
 .modal-wide { width: min(100%, 740px); }
@@ -313,7 +309,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(
 .modal-form { gap: 15px; }
 .modal-form .form-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .modal-form label { color: #40564b; font-size: 12px; font-weight: 650; }
-.modal-form input, .modal-form select, .modal-form textarea { min-height: 39px; border-radius: 8px; font-size: 12px; }
+.modal-form input:where(:not([type='checkbox'], [type='radio'])), .modal-form select, .modal-form textarea { min-height: 39px; border-radius: 8px; font-size: 12px; }
 .modal-form textarea { min-height: 84px; }
 .modal-form .form-field-hint { display: block; margin-top: 7px; line-height: 1.45; }
 .modal-actions { position: sticky; bottom: -1px; z-index: 2; margin: 4px -2px -2px; border-top: 1px solid #e8eee9; padding: 12px 2px 2px; background: #fff; }

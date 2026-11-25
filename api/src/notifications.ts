@@ -6,14 +6,14 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
-export async function publishNotifications(userIds:number[],input:{category:'Solicitud'|'Sesion'|'Informe'|'Sistema';title:string;message:string;entityType?:string;entityId?:number}){
+export async function publishNotifications(userIds:number[],input:{category:'Solicitud'|'Sesion'|'Informe'|'Sistema';title:string;message:string;entityType?:string;entityId?:number},transaction?:Pick<typeof pool,'execute'>){
   const ids=[...new Set(userIds.map(Number).filter(id=>Number.isInteger(id)&&id>0))]
   if(!ids.length)return
   try{
     const placeholders=ids.map(()=>'(?,?,?,?,?,?,FALSE)').join(',')
     const values=ids.flatMap(id=>[id,input.category,input.title,input.message,input.entityType??null,input.entityId??null])
-    await pool.execute(`INSERT INTO Notificacion(id_usuario,categoria,titulo,mensaje,entidad_tipo,entidad_id,leida) VALUES ${placeholders}`,values)
-  }catch(error){console.error('No se pudo registrar notificación:',errorMessage(error))}
+    await (transaction ?? pool).execute(`INSERT INTO Notificacion(id_usuario,categoria,titulo,mensaje,entidad_tipo,entidad_id,leida) VALUES ${placeholders}`,values)
+  }catch(error){if(transaction)throw error;console.error('No se pudo registrar notificación:',errorMessage(error))}
 }
 
 export async function publishRoleNotification(role:string,input:{category:'Solicitud'|'Sesion'|'Informe'|'Sistema';title:string;message:string;entityType?:string;entityId?:number}){

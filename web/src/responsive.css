@@ -134,11 +134,24 @@ input, select, textarea,
   white-space: normal; overflow: visible; overflow-wrap: anywhere;
 }
 .subject-dropdown-option span { flex-wrap: wrap; }
-/* The enclosing label provides the full touch target for small native checkmarks. */
-.check-label, .role-options .role-option, .subject-check-grid .role-option,
-.subject-dropdown-option { min-height: var(--touch-target); min-width: var(--touch-target); cursor: pointer; }
-.role-options .role-option, .subject-check-grid .role-option { display: flex; }
-input[type='checkbox'], input[type='radio'] { flex-shrink: 0; }
+/* Keep the native checkbox compact and give its label the full touch target. */
+label:has(> input[type='checkbox']) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: .5rem;
+  min-height: var(--touch-target);
+  cursor: pointer;
+}
+input[type='checkbox'] {
+  inline-size: 1rem;
+  block-size: 1rem;
+  flex: 0 0 1rem;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--brand-green);
+}
+input[type='radio'] { flex-shrink: 0; }
 .role-options, .subject-check-grid, .subject-dropdown-options { gap: .5rem; }
 .actions-inline { gap: .5rem; }
 .login-input.password-field button { margin-right: -.5rem; }
