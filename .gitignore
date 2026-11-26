@@ -25,3 +25,6 @@ Thumbs.db
 
 # Archivos cargados por los reportes locales
 api/uploads/
+
+# Respaldos locales de bases con datos personales
+database/backups/

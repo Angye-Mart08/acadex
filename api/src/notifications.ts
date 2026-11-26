@@ -45,14 +45,27 @@ const monthSchema=z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/,'El mes debe tener 
 const monthlyDraftSchema=z.object({month:monthSchema,title:z.string().trim().min(3).max(200),introduction:z.string().trim().max(3000),achievements:z.string().trim().max(3000),challenges:z.string().trim().max(3000),recommendations:z.string().trim().max(3000)}).strict()
 
 export async function getMonthlyTutorReport(session:any,monthValue:string){
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','El informe mensual está disponible para tutores.')
+  const reportRole=session.activeRole
+  if(!['Tutor','Monitor'].includes(reportRole))throw new DataError(403,'FORBIDDEN','El informe mensual está disponible para tutores y monitores.')
   const month=monthSchema.parse(monthValue)
-  const [profile]=await pool.query("SELECT CONCAT(u.nombres,' ',u.apellidos) AS tutor,u.documento AS tutorDocument,t.horas_semanales AS weeklyHours FROM Usuario u JOIN Tutor t ON t.id_usuario=u.id_usuario AND t.estado='Activo' WHERE u.id_usuario=? AND u.estado='Activo'",[session.user.id])
-  if(!profile.length)throw new DataError(403,'TUTOR_PROFILE_REQUIRED','No se encontró un perfil activo de tutor.')
-  const [sessions]=await pool.query(`SELECT s.id_sesion AS id,so.id_solicitud AS requestId,a.codigo AS subjectCode,a.nombre AS subject,DATE_FORMAT(COALESCE(d.fecha_monitoria,s.fecha),'%Y-%m-%d') AS date,TIME_FORMAT(COALESCE(d.hora_inicio_real,s.hora_inicio),'%H:%i') AS startTime,TIME_FORMAT(COALESCE(d.hora_fin_real,s.hora_fin),'%H:%i') AS endTime,COALESCE(d.lugar,esp.nombre,'Sin espacio asignado') AS place,s.modalidad AS modality,s.estado AS sessionStatus,i.id_informe AS reportId,i.estado AS reportStatus,i.titulo AS reportTitle,i.contenido AS reportContent,i.actividades_desarrolladas AS activities,i.logros AS achievements,i.dificultades AS difficulties,i.recomendaciones AS reportRecommendations,COALESCE(d.cantidad_asistentes,0) AS attendees,COALESCE(d.cantidad_sat,0) AS satCount,COALESCE(d.descripcion,'') AS description,COALESCE(d.recuperada,FALSE) AS recovered,
+  const profileQuery=reportRole==='Tutor'
+    ? pool.query("SELECT CONCAT(u.nombres,' ',u.apellidos) AS tutor,u.documento AS tutorDocument,t.horas_semanales AS weeklyHours,NULL AS resolution,'No registrado' AS program,'No registrado' AS faculty FROM Usuario u JOIN Tutor t ON t.id_usuario=u.id_usuario AND t.estado='Activo' WHERE u.id_usuario=? AND u.estado='Activo'",[session.user.id])
+    : pool.query(`SELECT CONCAT(u.nombres,' ',u.apellidos) AS tutor,u.documento AS tutorDocument,m.horas_semanales AS weeklyHours,m.resolucion AS resolution,
+        COALESCE(program.nombre,'No registrado') AS program,COALESCE(faculty.nombre,'No registrado') AS faculty
+      FROM Usuario u JOIN Monitor m ON m.id_usuario=u.id_usuario AND m.estado='Activo'
+      LEFT JOIN Estudiante e ON e.id_usuario=u.id_usuario AND e.estado='Activo'
+      LEFT JOIN EstudiantePrograma ep ON ep.id_estudiante=e.id_estudiante AND ep.principal=1 AND ep.estado='Activo'
+      LEFT JOIN Programa program ON program.id_programa=ep.id_programa
+      LEFT JOIN Facultad faculty ON faculty.id_facultad=program.id_facultad
+      WHERE u.id_usuario=? AND u.estado='Activo'`,[session.user.id])
+  const [profile]=await profileQuery
+  if(!profile.length)throw new DataError(403,'REPORT_PROFILE_REQUIRED','No se encontró un perfil activo para generar el informe.')
+  const [sessions]=await pool.query(`SELECT s.id_sesion AS id,so.id_solicitud AS requestId,a.codigo AS subjectCode,a.nombre AS subject,DATE_FORMAT(COALESCE(d.fecha_monitoria,s.fecha),'%Y-%m-%d') AS date,TIME_FORMAT(COALESCE(d.hora_inicio_real,s.hora_inicio),'%H:%i') AS startTime,TIME_FORMAT(COALESCE(d.hora_fin_real,s.hora_fin),'%H:%i') AS endTime,COALESCE(d.lugar,esp.nombre,'Sin espacio asignado') AS place,s.modalidad AS modality,s.estado AS sessionStatus,p.nombre AS period,
+      COALESCE((SELECT GROUP_CONCAT(DISTINCT CONCAT(tu.nombres,' ',tu.apellidos) ORDER BY tu.apellidos SEPARATOR ', ') FROM AsignacionAcademica ta JOIN Rol tr ON tr.id_rol=ta.id_rol AND tr.nombre='Tutor' JOIN Usuario tu ON tu.id_usuario=ta.id_usuario AND tu.estado='Activo' WHERE ta.id_asignatura=aa.id_asignatura AND ta.id_periodo=aa.id_periodo AND ta.estado='Activa'),'No registrado') AS professorTutor,
+      i.id_informe AS reportId,i.estado AS reportStatus,i.titulo AS reportTitle,i.contenido AS reportContent,i.actividades_desarrolladas AS activities,i.logros AS achievements,i.dificultades AS difficulties,i.recomendaciones AS reportRecommendations,COALESCE(d.cantidad_asistentes,0) AS attendees,COALESCE(d.cantidad_sat,0) AS satCount,COALESCE(d.descripcion,'') AS description,COALESCE(d.recuperada,FALSE) AS recovered,
       (SELECT COUNT(*) FROM AdjuntoInformeTutor at WHERE at.id_informe=i.id_informe) AS attachmentCount
-    FROM Sesion s JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN Asignatura a ON a.id_asignatura=so.id_asignatura JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol LEFT JOIN Informe i ON i.id_sesion=s.id_sesion LEFT JOIN InformeTutorDetalle d ON d.id_informe=i.id_informe LEFT JOIN AsignacionEspacio ae ON ae.id_asignacion_espacio=s.id_asignacion_espacio LEFT JOIN Espacio esp ON esp.id_espacio=ae.id_espacio
-    WHERE aa.id_usuario=? AND r.nombre='Tutor' AND DATE_FORMAT(COALESCE(d.fecha_monitoria,s.fecha),'%Y-%m')=? AND s.estado IN ('Realizada','Finalizada') AND i.id_informe IS NOT NULL ORDER BY COALESCE(d.fecha_monitoria,s.fecha),s.hora_inicio`,[session.user.id,month])
+    FROM Sesion s JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN Asignatura a ON a.id_asignatura=so.id_asignatura JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol JOIN PeriodoAcademico p ON p.id_periodo=aa.id_periodo LEFT JOIN Informe i ON i.id_sesion=s.id_sesion LEFT JOIN InformeTutorDetalle d ON d.id_informe=i.id_informe LEFT JOIN AsignacionEspacio ae ON ae.id_asignacion_espacio=s.id_asignacion_espacio LEFT JOIN Espacio esp ON esp.id_espacio=ae.id_espacio
+    WHERE aa.id_usuario=? AND r.nombre=? AND DATE_FORMAT(COALESCE(d.fecha_monitoria,s.fecha),'%Y-%m')=? AND s.estado IN ('Realizada','Finalizada') AND i.id_informe IS NOT NULL ORDER BY COALESCE(d.fecha_monitoria,s.fecha),s.hora_inicio`,[session.user.id,reportRole,month])
   for(const row of sessions){let legacy:any=row.reportContent;try{if(typeof legacy==='string')legacy=JSON.parse(legacy)}catch{legacy={}};if(!legacy||typeof legacy!=='object')legacy={};row.attendees=Number(row.attendees||legacy.attendanceCount||0);row.satCount=Number(row.satCount||legacy.satCount||0);row.description=row.description||legacy.description||'';row.activities=row.activities||legacy.activities||'';row.achievements=row.achievements||legacy.achievements||'';row.difficulties=row.difficulties||legacy.difficulties||'';row.reportRecommendations=row.reportRecommendations||legacy.recommendations||'';delete row.reportContent}
   const reportIds=sessions.map(row=>Number(row.reportId)).filter(id=>id>0)
   const attachments=reportIds.length?(await pool.query(`SELECT id_adjunto AS id,id_informe AS reportId,categoria AS category,nombre_archivo AS name,tipo_archivo AS mimeType,tamano_archivo AS size FROM AdjuntoInformeTutor WHERE id_informe IN (${reportIds.map(()=>'?').join(',')}) ORDER BY id_adjunto` ,reportIds))[0]:[]
@@ -61,11 +74,13 @@ export async function getMonthlyTutorReport(session:any,monthValue:string){
   let draft=null
   if(drafts.length){let content=drafts[0].content;try{if(typeof content==='string')content=JSON.parse(content)}catch{};draft={...drafts[0],content}}
   const totals=sessions.reduce((sum,row)=>{const [startHour,startMinute]=String(row.startTime).split(':').map(Number);const [endHour,endMinute]=String(row.endTime).split(':').map(Number);return {...sum,sessions:sum.sessions+1,attendees:sum.attendees+Number(row.attendees),sat:sum.sat+Number(row.satCount),minutes:sum.minutes+(endHour*60+endMinute)-(startHour*60+startMinute)}},{sessions:0,attendees:0,sat:0,minutes:0})
-  return {month,tutor:profile[0].tutor,tutorDocument:profile[0].tutorDocument,weeklyHours:Number(profile[0].weeklyHours??0),totals,sessions,draft}
+  const periods=[...new Set(sessions.map((row:any)=>String(row.period??'')).filter(Boolean))]
+  const professors=[...new Set(sessions.map((row:any)=>String(row.professorTutor??'')).filter((name:string)=>name&&name!=='No registrado'))]
+  return {month,tutor:profile[0].tutor,tutorDocument:profile[0].tutorDocument,weeklyHours:Number(profile[0].weeklyHours??0),resolution:profile[0].resolution,program:profile[0].program,faculty:profile[0].faculty,period:periods.join(', ')||'No registrado',professorTutor:professors.join(', ')||'No registrado',totals,sessions,draft}
 }
 
 export async function saveMonthlyTutorDraft(session:any,payload:unknown){
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','El informe mensual está disponible para tutores.')
+  if(!['Tutor','Monitor'].includes(session.activeRole))throw new DataError(403,'FORBIDDEN','El informe mensual está disponible para tutores y monitores.')
   const input=monthlyDraftSchema.parse(payload)
   const [result]=await pool.execute(`INSERT INTO InformeMensualTutor(id_usuario,periodo_mes,titulo,contenido,estado) VALUES(?,?,?,?,'Borrador') ON DUPLICATE KEY UPDATE titulo=IF(estado='Borrador',VALUES(titulo),titulo),contenido=IF(estado='Borrador',VALUES(contenido),contenido),actualizado_en=IF(estado='Borrador',CURRENT_TIMESTAMP,actualizado_en)`,[session.user.id,input.month,input.title,JSON.stringify({introduction:input.introduction,achievements:input.achievements,challenges:input.challenges,recommendations:input.recommendations})])
   const [rows]=await pool.query('SELECT id_informe_mensual AS id,estado AS status FROM InformeMensualTutor WHERE id_usuario=? AND periodo_mes=?',[session.user.id,input.month])
