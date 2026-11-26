@@ -281,3 +281,140 @@ input[type='radio'] { flex-shrink: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Shared page rhythm and responsive patterns across admin and personal portals. */
+.page-content {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: clamp(1rem, 1.8vw, 1.5rem);
+}
+.page-content > * { margin-block: 0 !important; }
+.page-content > .page-header { width: 100%; gap: clamp(1rem, 2vw, 1.75rem); }
+.page-header h1 { font-size: clamp(1.5rem, 2.2vw, 2rem); line-height: 1.2; }
+.page-header p { max-width: 68ch; line-height: 1.55; }
+.panel, .metric-card, .report-card { min-width: 0; }
+.panel-heading { align-items: flex-start; gap: .875rem; }
+.panel-heading > div { min-width: 0; flex: 1 1 16rem; }
+.panel-heading :is(h2,h3) { overflow-wrap: anywhere; }
+.dashboard-grid, .configuration-grid, .admin-chart-grid, .admin-report-tables { gap: clamp(.75rem, 1.5vw, 1.25rem); }
+.actions-inline, .action-group, .configuration-header-actions { min-width: 0; flex-wrap: wrap; }
+.table-panel, .table-scroll { min-width: 0; max-width: 100%; }
+.table-scroll { overscroll-behavior-x: contain; }
+.table-scroll td { overflow-wrap: anywhere; }
+.page-content :is(button, .secondary-button, .primary-button) { max-width: 100%; }
+
+/* The period list becomes compact rows on phones instead of a clipped scroller. */
+.academic-periods-panel .panel-heading { align-items: center; }
+.academic-periods-panel { max-width: none; }
+.academic-periods-panel .table-scroll { overflow-x: visible; }
+.academic-periods-table table { width: 100%; min-width: 0; table-layout: fixed; }
+.academic-periods-table th:first-child { width: 20%; }
+.academic-periods-table th:nth-child(2) { width: 38%; }
+.academic-periods-table th:nth-child(3) { width: 18%; }
+.academic-periods-table th:last-child { width: 24%; }
+.period-actions { justify-content: flex-end; flex-wrap: nowrap; }
+.period-actions .row-action { white-space: nowrap; }
+
+/* Student availability discovery. */
+.staff-schedule-filter-panel { width: 100%; max-width: none; padding: clamp(1rem, 2vw, 1.5rem); }
+.staff-schedule-filters { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .875rem; align-items: end; }
+.staff-schedule-filters label { display: grid; gap: .4rem; min-width: 0; color: #40564b; font-size: .75rem; font-weight: 700; }
+.staff-schedule-filters .staff-schedule-search { grid-column: span 2; }
+.staff-schedule-filters :is(input,select) { width: 100%; min-width: 0; min-height: var(--touch-target); border: 1px solid #dfe7e2; border-radius: .55rem; padding: .6rem .7rem; color: #263e34; background: #fff; }
+.staff-schedule-results-meta { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: 1rem; padding-top: .75rem; border-top: 1px solid #edf1ee; color: #68796f; font-size: .8rem; }
+.staff-schedule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: clamp(.75rem, 1.5vw, 1.25rem); }
+.staff-schedule-card { display: grid; align-content: start; gap: .875rem; padding: clamp(1rem, 1.8vw, 1.375rem); }
+.staff-schedule-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
+.staff-schedule-kind { display: inline-flex; align-items: center; min-height: 1.75rem; border-radius: 99px; padding: .25rem .65rem; color: #07584e; background: #e9f4ef; font-size: .72rem; font-weight: 750; }
+.staff-schedule-kind.monitor { color: #7d6220; background: #f6f1df; }
+.staff-schedule-period { color: #728178; font-size: .72rem; }
+.staff-schedule-card h2 { margin: 0; color: #234638; font: 750 1.05rem 'Manrope',sans-serif; line-height: 1.35; overflow-wrap: anywhere; }
+.staff-schedule-name { margin: -.5rem 0 0; color: #596b61; font-size: .875rem; }
+.staff-schedule-details { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .625rem; padding: .875rem 0; border-block: 1px solid #edf1ee; }
+.staff-schedule-details span { display: flex; align-items: flex-start; gap: .45rem; min-width: 0; color: #50645a; font-size: .76rem; line-height: 1.4; overflow-wrap: anywhere; }
+.staff-schedule-details svg { flex: 0 0 1rem; color: var(--brand-green); }
+.staff-schedule-card > button { justify-self: start; display: inline-flex; align-items: center; gap: .4rem; }
+.staff-schedule-empty { grid-column: 1 / -1; display: grid; justify-items: center; gap: .6rem; padding: 2rem 1rem; text-align: center; color: #68796f; }
+.staff-schedule-empty svg { color: var(--brand-green); }
+.staff-schedule-empty strong { color: #304c3f; }
+
+/* Wider, grouped request form with consistent spacing and clear steps. */
+.student-request-panel { width: 100%; max-width: 66rem; padding: clamp(1rem, 2.2vw, 1.75rem); }
+.student-request-form { width: 100%; max-width: none !important; gap: clamp(.875rem, 1.5vw, 1.25rem); }
+.student-request-section-heading { display: flex; align-items: flex-start; gap: .75rem; padding-top: .5rem; border-top: 1px solid #edf1ee; }
+.student-request-section-heading > span { display: grid; flex: 0 0 2rem; height: 2rem; place-items: center; border-radius: 50%; color: var(--brand-green); background: #e9f4ef; font-size: .75rem; font-weight: 800; }
+.student-request-section-heading h3 { margin: .1rem 0 .2rem; color: #304c3f; font: 750 .95rem 'Manrope',sans-serif; }
+.student-request-section-heading p { margin: 0; color: #718078; font-size: .78rem; line-height: 1.45; }
+.student-request-form .form-columns { grid-template-columns: repeat(2,minmax(0,1fr)); gap: .875rem; }
+.request-assignment-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .875rem; padding: .875rem; border: 1px solid #e4ece7; border-radius: .75rem; background: #f8faf8; }
+.request-assignment-fields > label { min-width: 0; }
+.student-request-form > .primary-button { justify-self: start; min-height: 2.9rem; padding-inline: 1.1rem; }
+.monthly-report-editor, .monthly-report-preview { width: 100%; max-width: none; }
+.monthly-report-editor .portal-form { width: 100%; max-width: none; }
+
+/* Keep action controls apart and identifiers intact at every viewport size. */
+.action-button-group, .action-group, .actions-inline, .report-actions,
+.configuration-header-actions, .space-actions, .assigned-request-tags,
+.assigned-request-top {
+  display: flex;
+  align-items: center;
+  gap: .625rem;
+  flex-wrap: wrap;
+}
+.assigned-request-top { justify-content: space-between; }
+.request-id, .session-reference, .session-reference *, .request-reference,
+.credential-code, .space-code, .notification-count {
+  flex: 0 0 auto;
+  min-width: max-content;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+.request-id {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  min-height: 1.7rem;
+  padding: .25rem .55rem;
+  line-height: 1.2;
+}
+.request-cell { min-width: 0; }
+.request-cell > div:last-child { min-width: 0; overflow-wrap: anywhere; }
+.request-action-stack { display: grid; gap: .4rem; min-width: 0; }
+.request-compact-action { max-width: 100%; white-space: normal; }
+.report-actions { justify-content: flex-end; }
+.period-actions { gap: .625rem; }
+
+@media (max-width: 62.5rem) {
+  .staff-schedule-filters { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .staff-schedule-filters .staff-schedule-search { grid-column: span 3; }
+}
+@media (max-width: 43.75rem) {
+  .page-content { gap: 1rem; padding-inline: clamp(.75rem, 4vw, 1.25rem); }
+  .page-content > .page-header { gap: .75rem; }
+  .page-header .primary-button, .page-header .secondary-button { width: 100%; justify-content: center; }
+  .panel-heading { align-items: flex-start; }
+  .academic-periods-panel .panel-heading { align-items: stretch; }
+  .academic-periods-panel .panel-heading > .primary-button { width: 100%; justify-content: center; }
+  .academic-periods-table table, .academic-periods-table tbody, .academic-periods-table tr, .academic-periods-table td { display: block; width: 100%; }
+  .academic-periods-table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; clip-path: inset(50%); }
+  .academic-periods-table tbody { display: grid; gap: .75rem; }
+  .academic-periods-table tr { border: 1px solid #e5ece7; border-radius: .7rem; padding: .65rem .8rem; background: #fff; }
+  .academic-periods-table td { display: grid; grid-template-columns: minmax(5.5rem, .65fr) minmax(0,1fr); align-items: center; gap: .6rem; border: 0; padding: .45rem 0; text-align: left; }
+  .academic-periods-table td::before { content: attr(data-label); color: #78867f; font-size: .7rem; font-weight: 750; }
+  .academic-periods-table td:last-child { border-top: 1px solid #edf1ee; margin-top: .25rem; padding-top: .65rem; }
+  .academic-periods-table td:last-child .period-actions { justify-content: flex-start; }
+  .assigned-request-top { align-items: flex-start; }
+  .assigned-request-tags { justify-content: flex-start; }
+  .request-id { max-width: 100%; }
+  .request-cell { align-items: flex-start; }
+  .monthly-report-editor .panel-heading { align-items: flex-start; }
+  .staff-schedule-filters { grid-template-columns: repeat(2,minmax(0,1fr)); gap: .7rem; }
+  .staff-schedule-filters .staff-schedule-search { grid-column: span 2; }
+  .staff-schedule-details { grid-template-columns: minmax(0,1fr); }
+  .student-request-form .form-columns, .request-assignment-fields { grid-template-columns: minmax(0,1fr); }
+  .staff-schedule-results-meta { align-items: flex-start; flex-wrap: wrap; }
+}

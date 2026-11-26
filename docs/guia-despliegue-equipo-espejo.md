@@ -104,6 +104,28 @@ docker compose -p acadex logs -f api
 
 El SQL inicial se carga solo cuando se crea por primera vez el volumen `database_data`. Los cambios posteriores al archivo SQL no reemplazan la base existente; las migraciones se ejecutan por la API. No uses `docker compose down -v` para resolver errores: elimina el volumen y los datos locales.
 
+### Actualizar los datos en un volumen existente
+
+Para aplicar un volcado sobre una base ya inicializada, primero genera un respaldo fechado en `database/backups/` y luego importa el archivo revisado del proyecto. La carpeta de respaldos está excluida de Git porque los archivos pueden contener datos personales y hashes de credenciales.
+
+```powershell
+New-Item -ItemType Directory -Path 'database/backups' -Force | Out-Null
+$dbBackupFile = Join-Path 'database/backups' ('pre-import-{0}.sql' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$dbBackup = docker compose -p acadex exec -T db sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-dump --single-transaction --routines --triggers --hex-blob gestion_monitorias_tutorias'
+if ($LASTEXITCODE -ne 0) { throw 'No se pudo respaldar MariaDB.' }
+$dbBackup | Set-Content -LiteralPath $dbBackupFile -Encoding utf8
+
+$dbSql = Get-Content -Raw -Encoding utf8 'database/gestion_monitorias_tutorias.sql'
+$dbSql | docker compose -p acadex exec -T db sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -uroot'
+if ($LASTEXITCODE -ne 0) { throw 'Falló la importación; conserva el respaldo y revisa los logs.' }
+
+docker compose -p acadex up -d --build --wait --wait-timeout 180
+docker compose -p acadex ps
+docker compose -p acadex exec -T web wget -qO- http://127.0.0.1/health
+```
+
+El volcado del proyecto usa nombres de tabla con la capitalización que espera la API en Linux. Sus sentencias `REPLACE INTO` sustituyen filas que colisionen con claves primarias o únicas y conservan las que no aparecen en el archivo; revisa el contenido antes de importar. Las migraciones incluidas se aplican al arrancar la API. En la [guía de base de datos](../database/README.md) se describen el esquema y la integración de informes de monitoría.
+
 ### Revisar MariaDB
 
 ```powershell

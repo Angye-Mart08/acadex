@@ -38,8 +38,10 @@ Los catálogos `Programa` y `Asignatura` tienen CRUD administrativo. Un programa
 - `AsignacionEspacio`: espacio asignado a un bloque disponible.
 - `Sesion`: encuentro programado de tutoría o monitoría.
 - `Asistencia`, `Seguimiento` y `Compromiso`.
-- `EntregaActividad` y `Evidencia`.
-- `Informe`: informe asociado a una sesión.
+- `ActividadTutor`: actividad asignada por tutor o monitor a estudiantes asistentes de una sesión, con vencimiento, archivo de instrucciones y entrega/comentario del estudiante.
+- `EntregaActividad` y `Evidencia` conservan las entregas y evidencias de los flujos académicos correspondientes.
+- `Informe`: informe asociado a una sesión, con detalle estructurado en `InformeTutorDetalle`, anexos en `AdjuntoInformeTutor` e historial en `HistorialInforme`.
+- `ReporteMonitoria`: reporte legado de monitoría que se integra al flujo común de `Informe`.
 
 ## Relaciones relevantes
 
@@ -49,8 +51,22 @@ Usuario ── 1:1 ── Estudiante / Tutor / Monitor / Administrador
 Estudiante ──< Solicitud >── Asignatura
 Solicitud ──< Sesion ──< Asistencia
 Sesion ──< Seguimiento ──< Compromiso ──< EntregaActividad
+Sesion ── 1:1 ── Informe ── 1:1 ── InformeTutorDetalle
+Informe ──< AdjuntoInformeTutor
 Disponibilidad ──< AsignacionEspacio >── Espacio
+Tutoría/monitoría ──< ActividadTutor >── Estudiante
 ```
+
+El endpoint `GET /student/staff-schedules` combina horarios semanales activos de
+`Disponibilidad` (Tutor) y `HorarioMonitor` (Monitor), junto con asignatura,
+periodo y espacio. No crea una tabla nueva: la vista del estudiante filtra los
+resultados por responsable, asignatura, día, modalidad y franja horaria.
+
+Las actividades compartidas usan `ActividadTutor`. El alta se limita a una
+sesión realizada y a estudiantes con asistencia registrada; cada estudiante
+puede consultar las instrucciones y enviar su entrega/comentario. Las
+migraciones `011`, `012` y `013` crean la entidad, agregan el comentario de
+entrega y relacionan la actividad con la sesión.
 
 ## Correspondencia con el frontend
 
@@ -61,8 +77,8 @@ Disponibilidad ──< AsignacionEspacio >── Espacio
 | Gestión de espacios | `Espacio` |
 | Gestión de solicitudes | `Solicitud`, `Estudiante`, `Asignatura`, `TipoSolicitud` |
 | Portal tutor | `Tutor`, `Disponibilidad`, `Sesion`, `Informe` |
-| Portal monitor | `Monitor`, `HorarioMonitor`, `Solicitud`, `Sesion` |
-| Portal estudiante | `Estudiante`, `Solicitud`, `Sesion`, `Seguimiento` |
+| Portal monitor | `Monitor`, `HorarioMonitor`, `Solicitud`, `Sesion`, `Informe`, `InformeTutorDetalle`, `InformeMensualTutor`, `ActividadTutor` |
+| Portal estudiante | `Estudiante`, `Disponibilidad`, `HorarioMonitor`, `Asignatura`, `Espacio`, `Solicitud`, `Sesion`, `Seguimiento`, `ActividadTutor` |
 
 ## Estado de integración
 
@@ -135,6 +151,17 @@ En una reauditoría de solo lectura posterior (15 de octubre de 2026), el conteo
 ## Datos de reportes de tutoría
 
 `Informe` conserva el encabezado y estado de revisión. `InformeTutorDetalle` relaciona cada reporte con su sesión e incluye fecha y horario reales, lugar, descripción, número de asistentes y SAT, listas JSON de estudiantes y marca/identificador de recuperación. `AdjuntoInformeTutor` registra categoría, nombre, tipo, ruta local y tamaño; el archivo físico se guarda en el directorio de cargas de la API. Las claves foráneas vinculan el detalle y los adjuntos al informe.
+
+## Integración de informes de monitoría
+
+`database/migrations/014_informes_monitor.sql` integra cada `ReporteMonitoria`
+activo que aún no tenga un informe en el flujo común. Crea el encabezado en
+`Informe`, traduce los datos de sesión, asistencia, SAT y lugar a
+`InformeTutorDetalle`, y agrega el evento inicial en `HistorialInforme`. Las
+comprobaciones `NOT EXISTS` evitan duplicar filas si la API vuelve a aplicar la
+migración. Los informes mensuales de Monitor comparten `InformeMensualTutor`,
+identificados por usuario y mes; la identidad del rol se obtiene de
+`AsignacionAcademica`.
 
 ## Notificacion
 

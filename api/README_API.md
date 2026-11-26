@@ -290,7 +290,7 @@ Las rutas `/tutor/recoveries` programan una recuperación para sesiones propias 
 
 `GET /tutor/reportable-sessions` lista sesiones realizadas y recuperaciones finalizadas sin reporte. `POST /tutor/reports` guarda o actualiza un borrador por sesión, valida fecha/hora, asistentes y SAT, y registra hasta cuatro adjuntos PDF, Word o imágenes (4 MB por archivo, 12 MB total). Los adjuntos se guardan en disco dentro de `api/uploads/tutor-reports/`; metadatos y datos estructurados se guardan en MariaDB. `POST /tutor/reports/{id}/submit` envía el reporte y bloquea su edición.
 
-La migración `database/migrations/002_reportes_tutor.sql` crea `InformeTutorDetalle` y `AdjuntoInformeTutor`. Se aplica de forma idempotente al iniciar la API y requiere que las credenciales bootstrap tengan permisos DDL en la base ya configurada. El módulo mensual genera una salida provisional; la exportación con plantilla institucional queda pendiente de recibir el formato oficial.
+La migración `database/migrations/002_reportes_tutor.sql` crea `InformeTutorDetalle` y `AdjuntoInformeTutor`. Se aplica al iniciar la API y requiere que las credenciales bootstrap tengan permisos DDL en la base ya configurada. La migración `014_informes_monitor.sql` integra los reportes activos de monitoría que todavía no estén en `Informe`, `InformeTutorDetalle` e `HistorialInforme`, sin duplicarlos al volver a iniciar.
 
 Todos los roles pueden cambiar su contraseña desde Configuración. El proceso solicita un código al correo registrado, valida ese código en una operación separada y solo entonces permite guardar la contraseña nueva. La API ofrece `POST /auth/account/password-code/request`, `/verify` y `/change`; los dos últimos requieren una sesión autenticada y el cambio revoca las demás sesiones activas.
 
@@ -300,7 +300,23 @@ Después de cinco intentos fallidos, cualquier rol puede elegir entre pedir ayud
 
 Los reportes de tutoría se almacenan como borradores editables y pasan a `Enviado` al remitirse a administración. La carga se limita por archivo y por reporte; los metadatos quedan en MariaDB y los binarios en `api/uploads/tutor-reports/`, que se ignora en Git. El despliegue debe respaldar esa carpeta o moverla a un almacenamiento persistente compartido.
 
-La exportación institucional editable queda pendiente hasta recibir la plantilla oficial. No usar informes de demostración como documentos oficiales.
+Los informes mensuales se exportan como `.doc` compatible con Word y organizan los campos de acuerdo con el formato institucional. El Monitor incluye datos de resolución, programa, facultad y profesor tutor; actividades, atención estudiantil, observaciones, declaración, firmas y anexos; las sesiones consolidadas comienzan en una sección final. `api/templates/plantilla_informe_monitor_unitropico.docx` se conserva como referencia de estructura; la descarga se genera desde la interfaz y no modifica el archivo original. Los informes de demostración no son documentos oficiales.
+
+## Portal del monitor
+
+El Monitor comparte con Tutor los módulos de agenda, reportes, informes mensuales y actividades, con autorización por rol y propiedad de los registros:
+
+- `GET /availability` consulta los bloques propios; `POST/PATCH/DELETE /monitor/availability[/{id}]` crea, actualiza o desactiva un horario. Se valida periodo activo, espacio vigente, rango horario y ausencia de cruces.
+- `GET /monitor/recoverable-sessions` y `/monitor/recoveries` consultan sesiones elegibles y recuperaciones; `POST /monitor/recoveries` programa, `DELETE /monitor/recoveries/{id}` cancela una pendiente y `POST /monitor/recoveries/{id}/complete` la marca realizada.
+- `GET /monitor/reportable-sessions` lista las sesiones propias que pueden reportarse. `POST /monitor/reports` crea un borrador; `GET/PATCH/DELETE /monitor/reports/{id}` consulta, edita o elimina el borrador propio; `POST /monitor/reports/{id}/submit` lo remite; `GET /monitor/reports/{id}/attachments/{attachmentId}` descarga un anexo autorizado.
+- `GET /monitor/monthly-report?month=AAAA-MM` consolida los informes individuales y devuelve el borrador mensual; `PUT /monitor/monthly-report` guarda o actualiza los campos `month`, `title`, `introduction`, `achievements`, `challenges` y `recommendations`. El guardado se bloquea cuando el informe mensual ya fue enviado.
+- `GET /monitor/activity-sessions` y `/monitor/activity-sessions/{id}/attendees` limitan la asignación de actividades a sesiones propias realizadas y asistentes con asistencia registrada. La creación usa `POST /activities`; estudiantes consultan y entregan desde `/activities` y `/activities/{id}/submission`.
+
+La interfaz de horarios del Monitor permite alta, edición y retiro de bloques. La asignación de actividades abre un formulario modal con sesión, asistentes, instrucciones, vencimiento y archivo; las actividades asignadas se listan en un panel separado.
+
+## Horarios para estudiantes
+
+`GET /student/staff-schedules` (rol Estudiante) combina bloques activos de Tutor y Monitor en el periodo vigente. La vista ofrece búsqueda por asignatura, responsable o espacio, y filtros de tipo, día, modalidad y franja horaria; no añade tablas al esquema.
 
 La consulta de solicitudes autenticada también entrega `cancellationReason` al estudiante propietario para presentar la explicación de la cancelación en **Mis solicitudes**.
 
@@ -311,12 +327,12 @@ Rutas nuevas autenticadas:
 - `GET /notifications`: lista hasta 50 notificaciones del usuario y devuelve el contador `unread`.
 - `PATCH /notifications/{id}/read`: marca como leída únicamente una notificación perteneciente al usuario autenticado.
 - `POST /notifications/read-all`: marca como leídas todas las notificaciones de esa cuenta.
-- `GET /tutor/monthly-report?month=AAAA-MM`: para rol Tutor, consolida sesiones realizadas, métricas, reportes y metadatos de anexos; devuelve el borrador existente si lo hay.
-- `PUT /tutor/monthly-report`: crea o actualiza el borrador del mes. Los campos son `month`, `title`, `introduction`, `achievements`, `challenges` y `recommendations`. No se permite editar un informe en estado Enviado.
+- `GET /tutor/monthly-report?month=AAAA-MM` y `GET /monitor/monthly-report?month=AAAA-MM`: para el rol correspondiente, consolidan sesiones realizadas, métricas, reportes y metadatos de anexos; devuelven el borrador existente si lo hay.
+- `PUT /tutor/monthly-report` y `PUT /monitor/monthly-report`: crean o actualizan el borrador del mes. Los campos son `month`, `title`, `introduction`, `achievements`, `challenges` y `recommendations`. No se permite editar un informe en estado Enviado.
 
 Se notifican nuevas solicitudes estudiantiles o administrativas, asignaciones, confirmaciones, cancelaciones con justificación, cambios de estado y reportes diarios enviados a administración. Las notificaciones son por destinatario, tienen marca de lectura y se consultan cada 30 segundos en la interfaz. Los errores al persistirlas se registran sin revertir la operación que ya se realizó.
 
-`database/migrations/003_notificaciones_informe_mensual.sql` crea de forma idempotente `Notificacion` e `InformeMensualTutor` al iniciar la API. La interfaz mensual permite guardar y previsualizar el consolidado, descargar un documento Word compatible `.doc` e imprimirlo como PDF. El formato se declara provisional hasta incorporar la plantilla institucional. La API pasó `npm run typecheck` y `npm run validate`; el frontend pasó `npm run build`; el health check local respondió con MariaDB conectado.
+`database/migrations/003_notificaciones_informe_mensual.sql` crea `Notificacion` e `InformeMensualTutor` al iniciar la API. Tutor y Monitor pueden guardar y previsualizar el consolidado y descargar un documento `.doc` compatible con Word. La exportación de monitor organiza los datos adicionales de su perfil y las sesiones consolidadas en una sección final, siguiendo la estructura de `plantilla_informe_monitor_unitropico.docx`.
 
 ## Mejoras de tutor: recuperaciones, solicitudes, sesiones y CRUD de reportes
 

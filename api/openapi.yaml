@@ -25,6 +25,31 @@ tags:
   - name: Espacios
   - name: Solicitudes
 paths:
+  /monitor/dashboard:
+    get:
+      tags: [Portal personal]
+      summary: Consultar resumen del monitor autenticado
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Indicadores y actividad del periodo activo. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /monitor/activity-sessions:
+    get:
+      tags: [Portal personal]
+      summary: Listar sesiones de monitoría realizadas para asignar actividades
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Sesiones del monitor autenticado. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /monitor/activity-sessions/{id}/attendees:
+    get:
+      tags: [Portal personal]
+      summary: Listar asistentes de una sesión de monitoría
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }]
+      responses:
+        '200': { description: Estudiantes asistentes disponibles para asignar actividades. }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /tutor/activity-sessions:
     get:
       tags: [Portal personal]
@@ -1309,6 +1334,35 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+  /student/staff-schedules:
+    get:
+      tags: [Portal personal]
+      summary: Consultar horarios semanales activos de tutores y monitores
+      description: Devuelve disponibilidades del periodo activo con responsable, asignatura, modalidad y espacio. El estudiante aplica filtros de búsqueda en el portal.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Horarios semanales públicos para usuarios autenticados con rol Estudiante.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, staffRole, staff, subject, period, day, startTime, endTime, modality, place]
+                  properties:
+                    id: { type: integer }
+                    staffRole: { type: string, enum: [Tutor, Monitor] }
+                    staff: { type: string }
+                    subject: { type: string }
+                    period: { type: string }
+                    day: { type: string }
+                    startTime: { type: string, example: '09:00' }
+                    endTime: { type: string, example: '10:00' }
+                    modality: { type: string, enum: [Presencial, Virtual, Híbrida] }
+                    place: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /requests/eligible-staff:
     get:
       tags: [Solicitudes]
@@ -1521,6 +1575,59 @@ paths:
       parameters: [{ $ref: '#/components/parameters/RequestId' }]
       responses:
         '204': { description: Bloque desactivado conservando el historial. }
+  /monitor/availability:
+    post:
+      tags: [Portal personal]
+      summary: Crear un bloque de disponibilidad semanal de monitoría
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [day, startTime, endTime, modality]
+              properties:
+                day: { type: string, enum: [Lunes, Martes, Miércoles, Jueves, Viernes, Sábado, Domingo] }
+                startTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+                endTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+                modality: { type: string, enum: [Presencial, Virtual, Híbrida] }
+                spaceId: { type: [integer, 'null'], minimum: 1 }
+      responses:
+        '201': { description: Bloque creado en el periodo activo. }
+        '409': { description: Cruce con otro bloque o ausencia de periodo activo. }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /monitor/availability/{id}:
+    patch:
+      tags: [Portal personal]
+      summary: Editar un bloque propio de monitoría
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [day, startTime, endTime, modality]
+              properties:
+                day: { type: string, enum: [Lunes, Martes, Miércoles, Jueves, Viernes, Sábado, Domingo] }
+                startTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+                endTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+                modality: { type: string, enum: [Presencial, Virtual, Híbrida] }
+                spaceId: { type: [integer, 'null'], minimum: 1 }
+      responses:
+        '200': { description: Horario actualizado. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Cruce con otro bloque activo. }
+    delete:
+      tags: [Portal personal]
+      summary: Retirar un bloque propio de monitoría
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      responses:
+        '204': { description: Bloque desactivado conservando el historial. }
+        '404': { $ref: '#/components/responses/NotFound' }
   /tutor/recoveries:
     get:
       tags: [Portal personal]
@@ -1547,6 +1654,56 @@ paths:
                 description: { type: string, minLength: 3, maxLength: 1000 }
       responses:
         '201': { description: Recuperación programada. }
+  /monitor/recoveries:
+    get:
+      tags: [Portal personal]
+      summary: Consultar recuperaciones de monitoría
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Recuperaciones propias del monitor. }
+    post:
+      tags: [Portal personal]
+      summary: Programar recuperación asociada a una monitoría original
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [originalSessionId, date, startTime, endTime, description]
+              properties:
+                originalSessionId: { type: integer, minimum: 1 }
+                date: { type: string, format: date }
+                startTime: { type: string, format: time }
+                endTime: { type: string, format: time }
+                description: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        '201': { description: Recuperación programada. }
+  /monitor/recoveries/{id}:
+    delete:
+      tags: [Portal personal]
+      summary: Cancelar recuperación de monitoría aún programada
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      responses:
+        '204': { description: Recuperación cancelada. }
+  /monitor/recoveries/{id}/complete:
+    post:
+      tags: [Portal personal]
+      summary: Marcar recuperación de monitoría como realizada
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      responses:
+        '204': { description: Recuperación finalizada y disponible para reporte. }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /monitor/recoverable-sessions:
+    get:
+      tags: [Portal personal]
+      summary: Listar sesiones de monitoría canceladas o no asistidas
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Sesiones propias elegibles para recuperar. }
   /tutor/recoveries/{id}:
     delete:
       tags: [Portal personal]
@@ -1688,6 +1845,123 @@ paths:
           content:
             application/octet-stream: { schema: { type: string, format: binary } }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /monitor/reportable-sessions:
+    get:
+      tags: [Portal personal]
+      summary: Consultar monitorías finalizadas propias y el estado de sus informes
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Sesiones del monitor con informe asociado o pendientes de registro. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /monitor/reports:
+    post:
+      tags: [Portal personal]
+      summary: Crear el informe de una monitoría finalizada
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TutorReportInput' }
+      responses:
+        '201': { description: Informe guardado y adjuntos almacenados. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /monitor/reports/{id}:
+    get:
+      tags: [Portal personal]
+      summary: Consultar un informe propio de monitoría
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      responses:
+        '200': { description: Datos del informe y nombres de los adjuntos. }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Portal personal]
+      summary: Actualizar un informe propio de monitoría
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TutorReportInput' }
+      responses:
+        '200': { description: Informe actualizado. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Portal personal]
+      summary: Anular un informe propio de monitoría
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      responses:
+        '200': { description: Informe anulado y archivos asociados retirados. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /monitor/reports/{id}/submit:
+    post:
+      tags: [Portal personal]
+      summary: Enviar informe de monitoría a administración
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/RequestId' }]
+      responses:
+        '200': { description: Informe enviado y bloqueado para edición. }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /monitor/reports/{id}/attachments/{attachmentId}:
+    get:
+      tags: [Portal personal]
+      summary: Descargar evidencia adjunta a un informe de monitoría
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/RequestId' }
+        - name: attachmentId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Archivo de evidencia.
+          content:
+            application/octet-stream: { schema: { type: string, format: binary } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /monitor/monthly-report:
+    get:
+      tags: [Portal personal]
+      summary: Consolidar datos de informes de monitoría para un mes
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: month
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+      responses:
+        '200': { description: Perfil, indicadores y detalle mensual para exportación. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    put:
+      tags: [Portal personal]
+      summary: Guardar o actualizar el borrador mensual de monitoría
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [month, title, introduction, achievements, challenges, recommendations]
+              properties:
+                month: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+                title: { type: string, minLength: 3, maxLength: 200 }
+                introduction: { type: string, maxLength: 3000 }
+                achievements: { type: string, maxLength: 3000 }
+                challenges: { type: string, maxLength: 3000 }
+                recommendations: { type: string, maxLength: 3000 }
+      responses:
+        '200': { description: Borrador mensual guardado. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: El informe mensual ya fue enviado y está bloqueado. }
 
   /notifications:
     get:
@@ -1941,6 +2215,27 @@ components:
               name: { type: string, minLength: 1, maxLength: 150 }
               mime: { type: string, minLength: 3, maxLength: 100 }
               dataBase64: { type: string, minLength: 1, format: byte }
+    MonitorReportAttachment:
+      type: object
+      additionalProperties: false
+      required: [name, mime, dataBase64]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 180 }
+        mime: { type: string, minLength: 3, maxLength: 120 }
+        dataBase64: { type: string, contentEncoding: base64, description: Archivo de hasta 4 MB antes de codificar }
+    MonitorReportInput:
+      type: object
+      additionalProperties: false
+      required: [sessionId, activity, attendance, startTime, endTime]
+      properties:
+        sessionId: { type: integer, minimum: 1 }
+        activity: { type: string, minLength: 3, maxLength: 5000 }
+        attendance: { type: string, enum: [Si, No] }
+        startTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+        endTime: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$' }
+        observations: { type: string, maxLength: 1000, default: '' }
+        attendanceList: { $ref: '#/components/schemas/MonitorReportAttachment' }
+        material: { $ref: '#/components/schemas/MonitorReportAttachment' }
     Role:
       type: string
       enum: [Administrador, Tutor, Monitor, Estudiante]

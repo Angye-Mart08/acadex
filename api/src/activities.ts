@@ -48,7 +48,7 @@ const tutorSession = `
   JOIN AsignacionAcademica aa ON aa.id_asignacion = s.id_asignacion
   JOIN Rol r ON r.id_rol = aa.id_rol
   JOIN Solicitud so ON so.id_solicitud = s.id_solicitud`
-const completedTutorSession = "aa.id_usuario = ? AND r.nombre = 'Tutor' AND s.estado IN ('Realizada', 'Finalizada')"
+const completedTutorSession = (role: 'Tutor' | 'Monitor') => 'aa.id_usuario = ? AND r.nombre = ? AND s.estado IN (\'Realizada\', \'Finalizada\')'
 
 const activityParticipants = `
   FROM ActividadTutor a
@@ -57,28 +57,28 @@ const activityParticipants = `
   JOIN Usuario tutor ON tutor.id_usuario = a.id_tutor`
 
 function participantFilter(session: AuthenticatedSession) {
-  return session.activeRole === 'Tutor' ? 'a.id_tutor = ?' : 'e.id_usuario = ?'
+  return session.activeRole === 'Tutor' || session.activeRole === 'Monitor' ? 'a.id_tutor = ?' : 'e.id_usuario = ?'
 }
 
-export async function listActivitySessions(tutorId: number) {
+export async function listActivitySessions(tutorId: number, role: 'Tutor'|'Monitor'='Tutor') {
   const [rows] = await pool.query(`
     SELECT s.id_sesion AS id, a.nombre AS subject, DATE_FORMAT(s.fecha, '%Y-%m-%d') AS date,
       TIME_FORMAT(s.hora_inicio, '%H:%i') AS startTime
     ${tutorSession}
     JOIN Asignatura a ON a.id_asignatura = so.id_asignatura
-    WHERE ${completedTutorSession}
-    ORDER BY s.fecha DESC, s.hora_inicio DESC, s.id_sesion DESC`, [tutorId])
+    WHERE ${completedTutorSession(role)}
+    ORDER BY s.fecha DESC, s.hora_inicio DESC, s.id_sesion DESC`, [tutorId,role])
   return rows
 }
 
-export async function listActivityStudents(tutorId: number, sessionId: number) {
+export async function listActivityStudents(tutorId: number, sessionId: number, role: 'Tutor'|'Monitor'='Tutor') {
   const [rows] = await pool.query(`
     SELECT e.id_estudiante AS id, CONCAT(u.nombres, ' ', u.apellidos) AS name, e.codigo_estudiantil AS code
     ${tutorSession}
     JOIN Estudiante e ON e.estado = 'Activo'
     JOIN Usuario u ON u.id_usuario = e.id_usuario AND u.estado = 'Activo'
-    WHERE ${completedTutorSession} AND s.id_sesion = ? AND ${recordedAttendance}
-    ORDER BY name, id`, [tutorId, sessionId])
+    WHERE ${completedTutorSession(role)} AND s.id_sesion = ? AND ${recordedAttendance}
+    ORDER BY name, id`, [tutorId,role, sessionId])
   return rows
 }
 
@@ -116,7 +116,7 @@ export async function listActivities(session: AuthenticatedSession) {
   return rows
 }
 
-export async function createActivity(tutorId: number, body: unknown) {
+export async function createActivity(tutorId: number, body: unknown, role: 'Tutor'|'Monitor'='Tutor') {
   const input = activitySchema.parse(body)
   if (input.dueAt <= Math.floor(Date.now() / 1000)) {
     throw new DataError(422, 'INVALID_DEADLINE', 'Selecciona una fecha límite futura.')
@@ -128,11 +128,11 @@ export async function createActivity(tutorId: number, body: unknown) {
       ${tutorSession}
       JOIN Estudiante e ON e.estado = 'Activo'
       JOIN Usuario u ON u.id_usuario = e.id_usuario AND u.estado = 'Activo'
-      WHERE ${completedTutorSession} AND s.id_sesion = ?
+      WHERE ${completedTutorSession(role)} AND s.id_sesion = ?
         AND e.id_estudiante IN (?) AND ${recordedAttendance}
-      ORDER BY e.id_estudiante FOR UPDATE`, [tutorId, input.sessionId, input.studentIds])
+      ORDER BY e.id_estudiante FOR UPDATE`, [tutorId, role, input.sessionId, input.studentIds])
     if (students.length !== input.studentIds.length) {
-      throw new DataError(422, 'INVALID_ACTIVITY_ATTENDEES', 'Selecciona estudiantes con asistencia registrada en una de tus tutorías realizadas.')
+      throw new DataError(422, 'INVALID_ACTIVITY_ATTENDEES', 'Selecciona estudiantes con asistencia registrada en una de tus sesiones realizadas.')
     }
     const ids: number[] = []
     for (const student of students) {

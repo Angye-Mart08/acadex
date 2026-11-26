@@ -429,7 +429,7 @@ export async function listPortalSessions(session: any) {
 export async function listPortalAvailability(session: any) {
   if (session.activeRole === 'Monitor') {
     const [rows] = await pool.query(
-      `SELECT hm.id_horario_monitor AS id, hm.dia_semana AS day,
+      `SELECT hm.id_horario_monitor AS id, hm.id_espacio AS spaceId, hm.id_periodo AS periodId, hm.dia_semana AS day,
               TIME_FORMAT(hm.hora_inicio, '%H:%i') AS startTime,
               TIME_FORMAT(hm.hora_fin, '%H:%i') AS endTime,
               'Horario de monitoría' AS subject,
@@ -474,6 +474,50 @@ export async function listPortalAvailability(session: any) {
       ORDER BY FIELD(d.dia_semana, 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'), d.hora_inicio`,
     [session.user.id],
   )
+  return rows
+}
+
+export async function listStudentStaffSchedules(session: any) {
+  if (session.activeRole !== 'Estudiante') throw new DataError(403, 'FORBIDDEN', 'Esta consulta está disponible para estudiantes.')
+  const [rows] = await pool.query(`
+    SELECT d.id_disponibilidad AS id, 'Tutor' AS staffRole,
+           CONCAT(u.nombres,' ',u.apellidos) AS staff,
+           a.nombre AS subject, p.nombre AS period, d.dia_semana AS day,
+           TIME_FORMAT(d.hora_inicio,'%H:%i') AS startTime,
+           TIME_FORMAT(d.hora_fin,'%H:%i') AS endTime,
+           d.modalidad AS modality, COALESCE(e.nombre,'Por definir') AS place
+      FROM Disponibilidad d
+      JOIN AsignacionAcademica aa ON aa.id_asignacion=d.id_asignacion
+      JOIN Rol r ON r.id_rol=aa.id_rol AND r.nombre='Tutor'
+      JOIN Usuario u ON u.id_usuario=aa.id_usuario AND u.estado='Activo'
+      JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.id_rol=r.id_rol AND ur.estado='Activo'
+      JOIN Asignatura a ON a.id_asignatura=aa.id_asignatura
+      JOIN PeriodoAcademico p ON p.id_periodo=aa.id_periodo AND p.estado='Activo'
+      LEFT JOIN AsignacionEspacio ae ON ae.id_disponibilidad=d.id_disponibilidad AND ae.estado='Activo'
+        AND ae.fecha_inicio<=CURRENT_DATE AND (ae.fecha_fin IS NULL OR ae.fecha_fin>=CURRENT_DATE)
+      LEFT JOIN Espacio e ON e.id_espacio=ae.id_espacio
+     WHERE aa.estado='Activa' AND d.estado='Activo'
+    UNION ALL
+    SELECT hm.id_horario_monitor AS id, 'Monitor' AS staffRole,
+           CONCAT(u.nombres,' ',u.apellidos) AS staff,
+           GROUP_CONCAT(DISTINCT a.nombre ORDER BY a.nombre SEPARATOR ', ') AS subject,
+           p.nombre AS period, hm.dia_semana AS day,
+           TIME_FORMAT(hm.hora_inicio,'%H:%i') AS startTime,
+           TIME_FORMAT(hm.hora_fin,'%H:%i') AS endTime,
+           hm.modalidad AS modality, COALESCE(e.nombre,'Por definir') AS place
+      FROM HorarioMonitor hm
+      JOIN PeriodoAcademico p ON p.id_periodo=hm.id_periodo AND p.estado='Activo'
+      JOIN Usuario u ON u.id_usuario=hm.id_usuario AND u.estado='Activo'
+      JOIN Rol r ON r.nombre='Monitor'
+      JOIN UsuarioRol ur ON ur.id_usuario=u.id_usuario AND ur.id_rol=r.id_rol AND ur.estado='Activo'
+      JOIN AsignacionAcademica aa ON aa.id_usuario=u.id_usuario AND aa.id_periodo=hm.id_periodo
+        AND aa.id_rol=r.id_rol AND aa.estado='Activa'
+      JOIN Asignatura a ON a.id_asignatura=aa.id_asignatura
+      LEFT JOIN Espacio e ON e.id_espacio=hm.id_espacio
+     WHERE hm.estado='Activo'
+     GROUP BY hm.id_horario_monitor, u.nombres, u.apellidos, p.nombre, hm.dia_semana,
+              hm.hora_inicio, hm.hora_fin, hm.modalidad, e.nombre
+     ORDER BY FIELD(day,'Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'), startTime, staff`)
   return rows
 }
 
@@ -528,16 +572,67 @@ export async function deleteTutorAvailability(session: any, id: number) {
   if (!result.affectedRows) throw new DataError(404, 'AVAILABILITY_NOT_FOUND', 'El bloque no existe, ya fue eliminado o no te pertenece.')
 }
 
+const monitorAvailabilityInput = z.object({
+  day: z.enum(['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  modality: z.enum(['Presencial', 'Virtual', 'Híbrida']),
+  spaceId: z.preprocess((value) => value === '' || value === '0' || value === 0 || value === undefined || value === null ? null : value, z.coerce.number().int().positive().nullable()),
+}).refine((value) => value.endTime > value.startTime, { path: ['endTime'], message: 'La hora final debe ser posterior a la inicial.' })
+
+export async function createMonitorAvailability(session: any, payload: unknown) {
+  if (session.activeRole !== 'Monitor') throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para monitores.')
+  const input = monitorAvailabilityInput.parse(payload)
+  const [periods] = await pool.query("SELECT id_periodo AS id FROM PeriodoAcademico WHERE estado='Activo' ORDER BY fecha_inicio DESC LIMIT 1")
+  if (!periods.length) throw new DataError(409, 'ACTIVE_PERIOD_REQUIRED', 'No hay un periodo académico activo para guardar el horario.')
+  if (input.spaceId) {
+    const [spaces] = await pool.query("SELECT id_espacio FROM Espacio WHERE id_espacio=? AND estado='Activo'", [input.spaceId])
+    if (!spaces.length) throw new DataError(422, 'SPACE_NOT_FOUND', 'El espacio seleccionado no está disponible.')
+  }
+  const [overlap] = await pool.query(`SELECT id_horario_monitor FROM HorarioMonitor WHERE id_usuario=? AND id_periodo=? AND estado='Activo'
+    AND dia_semana=? AND hora_inicio<? AND hora_fin>?`, [session.user.id, periods[0].id, input.day, input.endTime, input.startTime])
+  if (overlap.length) throw new DataError(409, 'AVAILABILITY_OVERLAP', 'El bloque se cruza con otro horario activo.')
+  const minutes = Number(input.endTime.slice(0, 2)) * 60 + Number(input.endTime.slice(3)) - Number(input.startTime.slice(0, 2)) * 60 - Number(input.startTime.slice(3))
+  const [result] = await pool.execute("INSERT INTO HorarioMonitor (id_usuario,id_periodo,dia_semana,hora_inicio,hora_fin,duracion_minutos,modalidad,id_espacio,estado) VALUES (?,?,?,?,?,?,?,?, 'Activo')", [session.user.id, periods[0].id, input.day, input.startTime, input.endTime, minutes, input.modality, input.spaceId])
+  return { id: Number(result.insertId) }
+}
+
+export async function updateMonitorAvailability(session: any, id: number, payload: unknown) {
+  if (session.activeRole !== 'Monitor') throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para monitores.')
+  const input = monitorAvailabilityInput.parse(payload)
+  const [owned] = await pool.query("SELECT id_horario_monitor AS id,id_periodo AS periodId FROM HorarioMonitor WHERE id_horario_monitor=? AND id_usuario=? AND estado='Activo'", [id, session.user.id])
+  if (!owned.length) throw new DataError(404, 'AVAILABILITY_NOT_FOUND', 'El horario no existe o no te pertenece.')
+  if (input.spaceId) {
+    const [spaces] = await pool.query("SELECT id_espacio FROM Espacio WHERE id_espacio=? AND estado='Activo'", [input.spaceId])
+    if (!spaces.length) throw new DataError(422, 'SPACE_NOT_FOUND', 'El espacio seleccionado no está disponible.')
+  }
+  const [overlap] = await pool.query(`SELECT id_horario_monitor FROM HorarioMonitor WHERE id_usuario=? AND id_periodo=? AND estado='Activo'
+    AND id_horario_monitor<>? AND dia_semana=? AND hora_inicio<? AND hora_fin>?`, [session.user.id, owned[0].periodId, id, input.day, input.endTime, input.startTime])
+  if (overlap.length) throw new DataError(409, 'AVAILABILITY_OVERLAP', 'El bloque se cruza con otro horario activo.')
+  const minutes = Number(input.endTime.slice(0, 2)) * 60 + Number(input.endTime.slice(3)) - Number(input.startTime.slice(0, 2)) * 60 - Number(input.startTime.slice(3))
+  await pool.execute('UPDATE HorarioMonitor SET dia_semana=?,hora_inicio=?,hora_fin=?,duracion_minutos=?,modalidad=?,id_espacio=? WHERE id_horario_monitor=? AND id_usuario=?', [input.day, input.startTime, input.endTime, minutes, input.modality, input.spaceId, id, session.user.id])
+  return { id }
+}
+
+export async function deleteMonitorAvailability(session: any, id: number) {
+  if (session.activeRole !== 'Monitor') throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para monitores.')
+  const [result] = await pool.execute("UPDATE HorarioMonitor SET estado='Inactivo' WHERE id_horario_monitor=? AND id_usuario=? AND estado='Activo'", [id, session.user.id])
+  if (!result.affectedRows) throw new DataError(404, 'AVAILABILITY_NOT_FOUND', 'El horario no existe, ya fue retirado o no te pertenece.')
+}
+
 export async function tutorDashboard(session: any) {
-  if (session.activeRole !== 'Tutor') throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para tutores.')
+  const reportRole=session.activeRole
+  if (!['Tutor','Monitor'].includes(reportRole)) throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para tutores y monitores.')
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const currentTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date())
   const [rows] = await pool.query(`SELECT
-    (SELECT COUNT(*) FROM Solicitud so JOIN Sesion s ON s.id_solicitud=so.id_solicitud JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre='Tutor' AND s.estado IN ('Programada','Confirmada','Reprogramada','En Proceso')) AS upcoming,
-    (SELECT COUNT(*) FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre='Tutor' AND s.estado IN ('Realizada','Finalizada')) AS completed,
-    (SELECT COUNT(*) FROM Solicitud so JOIN Sesion s ON s.id_solicitud=so.id_solicitud JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre='Tutor' AND so.estado='Asignada') AS openRequests,
-    (SELECT COUNT(*) FROM Informe i JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre='Tutor' AND i.estado IN ('Borrador','Devuelto')) AS pendingReports`, [session.user.id,session.user.id,session.user.id,session.user.id])
+    (SELECT COUNT(*) FROM Solicitud so JOIN Sesion s ON s.id_solicitud=so.id_solicitud JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre=? AND (s.fecha>? OR (s.fecha=? AND s.hora_fin>?)) AND s.estado IN ('Programada','Confirmada','Reprogramada','En Proceso')) AS upcoming,
+    (SELECT COUNT(*) FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre=? AND s.estado IN ('Realizada','Finalizada')) AS completed,
+    (SELECT COUNT(*) FROM Solicitud so JOIN Sesion s ON s.id_solicitud=so.id_solicitud JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre=? AND so.estado='Asignada') AS openRequests,
+    (SELECT COUNT(*) FROM Informe i JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE aa.id_usuario=? AND r.nombre=? AND i.estado IN ('Borrador','Devuelto')) AS pendingReports`, [session.user.id,reportRole,today,today,currentTime,session.user.id,reportRole,session.user.id,reportRole,session.user.id,reportRole])
   const [upcoming] = await pool.query(`SELECT s.id_sesion AS id,a.nombre AS subject,DATE_FORMAT(s.fecha,'%Y-%m-%d') AS date,TIME_FORMAT(s.hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(s.hora_fin,'%H:%i') AS endTime,s.estado AS status,COALESCE(esp.nombre,'Sin espacio asignado') AS place
     FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN Asignatura a ON a.id_asignatura=so.id_asignatura LEFT JOIN AsignacionEspacio ae ON ae.id_asignacion_espacio=s.id_asignacion_espacio LEFT JOIN Espacio esp ON esp.id_espacio=ae.id_espacio
-    WHERE aa.id_usuario=? AND r.nombre='Tutor' AND s.fecha>=CURRENT_DATE AND s.estado IN ('Programada','Confirmada','Reprogramada','En Proceso') ORDER BY s.fecha,s.hora_inicio LIMIT 5`, [session.user.id])
+    WHERE aa.id_usuario=? AND r.nombre=? AND (s.fecha>? OR (s.fecha=? AND s.hora_fin>?)) AND s.estado IN ('Programada','Confirmada','Reprogramada','En Proceso') ORDER BY s.fecha,s.hora_inicio LIMIT 5`, [session.user.id,reportRole,today,today,currentTime])
   return { metrics: rows[0], upcoming }
 }
 
@@ -549,44 +644,47 @@ export async function listTutorAssignments(session: any) {
   return rows
 }
 
-const tutorRecoverySchema = z.object({ originalSessionId: z.coerce.number().int().positive(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), description: z.string().trim().min(3).max(1000) }).refine((value) => value.endTime > value.startTime, { path: ['endTime'], message: 'La hora final debe ser posterior a la inicial.' }).refine((value) => value.date >= new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()), { path: ['date'], message: 'La recuperación no puede programarse en una fecha pasada.' })
+const tutorRecoverySchema = z.object({ originalSessionId: z.coerce.number().int().positive(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), description: z.string().trim().min(3).max(1000) }).refine((value) => value.endTime > value.startTime, { path: ['endTime'], message: 'La hora final debe ser posterior a la inicial.' }).refine((value) => value.date >= new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()), { path: ['date'], message: 'La recuperación no puede programarse en una fecha pasada.' }).refine((value) => {
+  const current = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date())
+  return `${value.date} ${value.startTime}` > current
+}, { path: ['startTime'], message: 'La recuperación debe programarse para una hora futura en Colombia.' })
 
-export async function listTutorRecoveries(session: any) {
-  if (session.activeRole !== 'Tutor') throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para tutores.')
+export async function listTutorRecoveries(session: any, role: 'Tutor'|'Monitor' = 'Tutor') {
+  if (session.activeRole !== role) throw new DataError(403, 'FORBIDDEN', 'Esta operación no está disponible para este rol.')
   const [rows] = await pool.query(`SELECT rm.id_recuperacion AS id, rm.id_sesion_original AS originalSessionId, DATE_FORMAT(rm.fecha_recuperacion,'%Y-%m-%d') AS date, TIME_FORMAT(rm.hora_inicio,'%H:%i') AS startTime, TIME_FORMAT(rm.hora_fin,'%H:%i') AS endTime, rm.descripcion AS description, rm.estado AS status, a.nombre AS subject
     FROM RecuperacionMonitoria rm JOIN Sesion s ON s.id_sesion=rm.id_sesion_original JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN Asignatura a ON a.id_asignatura=so.id_asignatura
-    WHERE rm.id_usuario=? AND r.nombre='Tutor' ORDER BY rm.fecha_recuperacion DESC,rm.hora_inicio`, [session.user.id])
+    WHERE rm.id_usuario=? AND r.nombre=? ORDER BY rm.fecha_recuperacion DESC,rm.hora_inicio`, [session.user.id, role])
   return rows
 }
 
-export async function listTutorRecoverableSessions(session: any) {
-  if (session.activeRole !== 'Tutor') throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para tutores.')
+export async function listTutorRecoverableSessions(session: any, role: 'Tutor'|'Monitor' = 'Tutor') {
+  if (session.activeRole !== role) throw new DataError(403, 'FORBIDDEN', 'Esta operación no está disponible para este rol.')
   const [rows] = await pool.query(`SELECT s.id_sesion AS id,s.id_solicitud AS requestId,a.nombre AS subject,DATE_FORMAT(s.fecha,'%Y-%m-%d') AS date,TIME_FORMAT(s.hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(s.hora_fin,'%H:%i') AS endTime,s.estado AS status,COALESCE((SELECT cm.motivo FROM CancelacionMonitoria cm WHERE cm.id_sesion=s.id_sesion AND cm.estado='Activo' ORDER BY cm.fecha_cancelacion DESC LIMIT 1),'') AS cancellationReason
     FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN Asignatura a ON a.id_asignatura=so.id_asignatura
-    WHERE aa.id_usuario=? AND r.nombre='Tutor' AND s.estado IN ('Cancelada','No Asistida')
+    WHERE aa.id_usuario=? AND r.nombre=? AND s.estado IN ('Cancelada','No Asistida')
       AND NOT EXISTS (SELECT 1 FROM RecuperacionMonitoria rm WHERE rm.id_sesion_original=s.id_sesion AND rm.estado IN ('Programada','Realizada'))
-    ORDER BY s.fecha DESC,s.hora_inicio DESC`, [session.user.id])
+    ORDER BY s.fecha DESC,s.hora_inicio DESC`, [session.user.id, role])
   return rows
 }
 
-export async function createTutorRecovery(session: any, payload: unknown) {
-  if (session.activeRole !== 'Tutor') throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para tutores.')
+export async function createTutorRecovery(session: any, payload: unknown, role: 'Tutor'|'Monitor' = 'Tutor') {
+  if (session.activeRole !== role) throw new DataError(403, 'FORBIDDEN', 'Esta operación no está disponible para este rol.')
   const input = tutorRecoverySchema.parse(payload)
-  const [original] = await pool.query(`SELECT s.id_sesion FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE s.id_sesion=? AND aa.id_usuario=? AND r.nombre='Tutor' AND s.estado IN ('Cancelada','No Asistida') AND NOT EXISTS (SELECT 1 FROM RecuperacionMonitoria rm WHERE rm.id_sesion_original=s.id_sesion AND rm.estado IN ('Programada','Realizada'))`, [input.originalSessionId, session.user.id])
+  const [original] = await pool.query(`SELECT s.id_sesion FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE s.id_sesion=? AND aa.id_usuario=? AND r.nombre=? AND s.estado IN ('Cancelada','No Asistida') AND NOT EXISTS (SELECT 1 FROM RecuperacionMonitoria rm WHERE rm.id_sesion_original=s.id_sesion AND rm.estado IN ('Programada','Realizada'))`, [input.originalSessionId, session.user.id, role])
   if (!original.length) throw new DataError(404, 'ORIGINAL_SESSION_NOT_FOUND', 'Selecciona una sesión propia que requiera recuperación.')
   const [result] = await pool.execute("INSERT INTO RecuperacionMonitoria (id_sesion_original,id_usuario,fecha_recuperacion,hora_inicio,hora_fin,descripcion,estado) VALUES (?,?,?,?,?,?,'Programada')", [input.originalSessionId,session.user.id,input.date,input.startTime,input.endTime,input.description])
   return { id: Number(result.insertId) }
 }
 
-export async function cancelTutorRecovery(session: any, id: number) {
-  if (session.activeRole !== 'Tutor') throw new DataError(403, 'FORBIDDEN', 'Esta operación solo está disponible para tutores.')
-  const [result] = await pool.execute("UPDATE RecuperacionMonitoria SET estado='Cancelada' WHERE id_recuperacion=? AND id_usuario=? AND estado='Programada'", [id,session.user.id])
+export async function cancelTutorRecovery(session: any, id: number, role: 'Tutor'|'Monitor' = 'Tutor') {
+  if (session.activeRole !== role) throw new DataError(403, 'FORBIDDEN', 'Esta operación no está disponible para este rol.')
+  const [result] = await pool.execute("UPDATE RecuperacionMonitoria rm JOIN Sesion s ON s.id_sesion=rm.id_sesion_original JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol SET rm.estado='Cancelada' WHERE rm.id_recuperacion=? AND rm.id_usuario=? AND rm.estado='Programada' AND r.nombre=?", [id,session.user.id,role])
   if (!result.affectedRows) throw new DataError(404, 'RECOVERY_NOT_FOUND', 'La recuperación no existe, ya finalizó o no te pertenece.')
 }
 
-export async function completeTutorRecovery(session:any,id:number) {
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores.')
-  const [result]=await pool.execute("UPDATE RecuperacionMonitoria SET estado='Realizada' WHERE id_recuperacion=? AND id_usuario=? AND estado='Programada' AND (fecha_recuperacion<CURRENT_DATE OR (fecha_recuperacion=CURRENT_DATE AND hora_fin<=CURRENT_TIME))",[id,session.user.id])
+export async function completeTutorRecovery(session:any,id:number,role:'Tutor'|'Monitor'='Tutor') {
+  if(session.activeRole!==role)throw new DataError(403,'FORBIDDEN','Esta operación no está disponible para este rol.')
+  const [result]=await pool.execute("UPDATE RecuperacionMonitoria rm JOIN Sesion s ON s.id_sesion=rm.id_sesion_original JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol SET rm.estado='Realizada' WHERE rm.id_recuperacion=? AND rm.id_usuario=? AND rm.estado='Programada' AND r.nombre=? AND (rm.fecha_recuperacion<CURRENT_DATE OR (rm.fecha_recuperacion=CURRENT_DATE AND rm.hora_fin<=CURRENT_TIME))",[id,session.user.id,role])
   if(!result.affectedRows)throw new DataError(409,'RECOVERY_NOT_READY','Solo puedes marcar como realizada una recuperación propia cuando ya haya finalizado su horario.')
 }
 
@@ -596,24 +694,26 @@ const tutorReportSchema=z.object({sessionId:z.coerce.number().int().positive(),r
 async function removeTutorReportFiles(paths:string[]){const root=path.resolve(fileURLToPath(new URL('../../api/uploads/tutor-reports/',import.meta.url)));for(const value of paths){const filename=path.basename(String(value));const target=path.resolve(root,filename);if(!target.startsWith(`${root}${path.sep}`))continue;try{await unlink(target)}catch(error){if(mysqlErrorCode(error)!=='ENOENT')console.error('No se pudo retirar un adjunto reemplazado:',errorMessage(error))}}}
 
 export async function listTutorReportableSessions(session:any) {
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores.')
+  const reportRole=session.activeRole
+  if(!['Tutor','Monitor'].includes(reportRole))throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores y monitores.')
   const [rows]=await pool.query(`SELECT s.id_sesion AS id,s.id_solicitud AS requestId,so.id_estudiante AS studentId,CONCAT(ue.nombres,' ',ue.apellidos) AS student,a.nombre AS subject,DATE_FORMAT(s.fecha,'%Y-%m-%d') AS date,TIME_FORMAT(s.hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(s.hora_fin,'%H:%i') AS endTime,s.modalidad AS modality,s.estado AS status,COALESCE(esp.nombre,'') AS place,i.id_informe AS reportId,i.estado AS reportStatus,i.titulo AS reportTitle,FALSE AS isRecovery,NULL AS recoveryId
     FROM Sesion s JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN Estudiante e ON e.id_estudiante=so.id_estudiante JOIN Usuario ue ON ue.id_usuario=e.id_usuario JOIN Asignatura a ON a.id_asignatura=so.id_asignatura JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol LEFT JOIN AsignacionEspacio ae ON ae.id_asignacion_espacio=s.id_asignacion_espacio LEFT JOIN Espacio esp ON esp.id_espacio=ae.id_espacio LEFT JOIN Informe i ON i.id_sesion=s.id_sesion
-    WHERE aa.id_usuario=? AND r.nombre='Tutor' AND s.fecha<=CURRENT_DATE AND s.estado IN ('Realizada','Finalizada') ORDER BY s.fecha DESC,s.hora_inicio DESC`,[session.user.id])
+    WHERE aa.id_usuario=? AND r.nombre=? AND s.fecha<=CURRENT_DATE AND s.estado IN ('Realizada','Finalizada') ORDER BY s.fecha DESC,s.hora_inicio DESC`,[session.user.id,reportRole])
   const [recoveries]=await pool.query(`SELECT s.id_sesion AS id,s.id_solicitud AS requestId,so.id_estudiante AS studentId,CONCAT(ue.nombres,' ',ue.apellidos) AS student,a.nombre AS subject,DATE_FORMAT(rm.fecha_recuperacion,'%Y-%m-%d') AS date,TIME_FORMAT(rm.hora_inicio,'%H:%i') AS startTime,TIME_FORMAT(rm.hora_fin,'%H:%i') AS endTime,s.modalidad AS modality,'Realizada' AS status,COALESCE(esp.nombre,'') AS place,i.id_informe AS reportId,i.estado AS reportStatus,i.titulo AS reportTitle,TRUE AS isRecovery,rm.id_recuperacion AS recoveryId
     FROM RecuperacionMonitoria rm JOIN Sesion s ON s.id_sesion=rm.id_sesion_original JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN Estudiante e ON e.id_estudiante=so.id_estudiante JOIN Usuario ue ON ue.id_usuario=e.id_usuario JOIN Asignatura a ON a.id_asignatura=so.id_asignatura JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol LEFT JOIN AsignacionEspacio ae ON ae.id_asignacion_espacio=s.id_asignacion_espacio LEFT JOIN Espacio esp ON esp.id_espacio=ae.id_espacio LEFT JOIN Informe i ON i.id_sesion=s.id_sesion LEFT JOIN InformeTutorDetalle d ON d.id_informe=i.id_informe
-    WHERE aa.id_usuario=? AND rm.id_usuario=? AND r.nombre='Tutor' AND rm.estado='Realizada' AND rm.fecha_recuperacion<=CURRENT_DATE AND (i.id_informe IS NULL OR d.id_recuperacion=rm.id_recuperacion) ORDER BY rm.fecha_recuperacion DESC,rm.hora_inicio DESC`,[session.user.id,session.user.id])
+    WHERE aa.id_usuario=? AND rm.id_usuario=? AND r.nombre=? AND rm.estado='Realizada' AND rm.fecha_recuperacion<=CURRENT_DATE AND (i.id_informe IS NULL OR d.id_recuperacion=rm.id_recuperacion) ORDER BY rm.fecha_recuperacion DESC,rm.hora_inicio DESC`,[session.user.id,session.user.id,reportRole])
   return [...rows,...recoveries]
 }
 
 export async function saveTutorReport(session:any,payload:unknown) {
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores.')
+  const reportRole=session.activeRole
+  if(!['Tutor','Monitor'].includes(reportRole))throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores y monitores.')
   const input=tutorReportSchema.parse(payload)
   if(input.endTime<=input.startTime)throw new DataError(422,'INVALID_REPORT_TIME','La hora final debe ser posterior a la inicial.')
   if(input.attachments.some(a=>!['application/pdf','image/png','image/jpeg','image/webp','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(a.mime)))throw new DataError(422,'INVALID_ATTACHMENT_TYPE','Adjunta PDF, Word o imágenes PNG, JPG y WEBP.')
   const binary=input.attachments.map(item=>({...item,buffer:Buffer.from(item.dataBase64,'base64')}))
   if(binary.some(item=>!item.buffer.length||item.buffer.length>4*1024*1024)||binary.reduce((n,item)=>n+item.buffer.length,0)>12*1024*1024)throw new DataError(413,'ATTACHMENT_TOO_LARGE','Cada archivo puede tener hasta 4 MB y el conjunto hasta 12 MB.')
-  const [sessions]=await pool.query(`SELECT s.id_sesion,DATE_FORMAT(s.fecha,'%Y-%m-%d') AS fecha,s.estado,s.id_solicitud FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE s.id_sesion=? AND aa.id_usuario=? AND r.nombre='Tutor'`,[input.sessionId,session.user.id])
+  const [sessions]=await pool.query(`SELECT s.id_sesion,DATE_FORMAT(s.fecha,'%Y-%m-%d') AS fecha,s.estado,s.id_solicitud FROM Sesion s JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE s.id_sesion=? AND aa.id_usuario=? AND r.nombre=?`,[input.sessionId,session.user.id,reportRole])
   if(!sessions.length)throw new DataError(404,'SESSION_NOT_FOUND','La sesión no existe o no pertenece a tu cuenta.')
   let reportDate=String(sessions[0].fecha).slice(0,10)
   if(input.recoveryId){const [recovery]=await pool.query("SELECT id_recuperacion,DATE_FORMAT(fecha_recuperacion,'%Y-%m-%d') AS fecha_recuperacion FROM RecuperacionMonitoria WHERE id_recuperacion=? AND id_sesion_original=? AND id_usuario=? AND estado='Realizada'",[input.recoveryId,input.sessionId,session.user.id]);if(!recovery.length)throw new DataError(404,'RECOVERY_NOT_FOUND','La recuperación no existe o no está marcada como realizada.');reportDate=String(recovery[0].fecha_recuperacion)}else if(!['Realizada','Finalizada'].includes(sessions[0].estado))throw new DataError(409,'SESSION_NOT_COMPLETED','Solo puedes reportar una tutoría marcada como realizada.')
@@ -642,10 +742,11 @@ export async function saveTutorReport(session:any,payload:unknown) {
 }
 
 export async function getTutorReport(session:any,reportId:number){
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores.')
+  const reportRole=session.activeRole
+  if(!['Tutor','Monitor'].includes(reportRole))throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores y monitores.')
   const [rows]=await pool.query(`SELECT i.id_informe AS id,i.id_sesion AS sessionId,i.id_usuario AS tutorId,i.titulo AS title,i.contenido AS content,i.actividades_desarrolladas AS activities,i.logros AS achievements,i.dificultades AS difficulties,i.recomendaciones AS recommendations,i.estado AS status,DATE_FORMAT(COALESCE(d.fecha_monitoria,s.fecha),'%Y-%m-%d') AS date,TIME_FORMAT(COALESCE(d.hora_inicio_real,s.hora_inicio),'%H:%i') AS startTime,TIME_FORMAT(COALESCE(d.hora_fin_real,s.hora_fin),'%H:%i') AS endTime,COALESCE(d.lugar,esp.nombre,'') AS place,COALESCE(d.descripcion,'') AS description,COALESCE(d.cantidad_asistentes,0) AS attendanceCount,COALESCE(d.cantidad_sat,0) AS satCount,d.estudiantes_asistieron AS attendees,d.detalle_sat AS satDetails,COALESCE(d.recuperada,FALSE) AS recovered,d.id_recuperacion AS recoveryId,a.nombre AS subject,CONCAT(u.nombres,' ',u.apellidos) AS student
     FROM Informe i JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol LEFT JOIN InformeTutorDetalle d ON d.id_informe=i.id_informe JOIN Solicitud so ON so.id_solicitud=s.id_solicitud JOIN Asignatura a ON a.id_asignatura=so.id_asignatura JOIN Estudiante e ON e.id_estudiante=so.id_estudiante JOIN Usuario u ON u.id_usuario=e.id_usuario LEFT JOIN AsignacionEspacio ae ON ae.id_asignacion_espacio=s.id_asignacion_espacio LEFT JOIN Espacio esp ON esp.id_espacio=ae.id_espacio
-    WHERE i.id_informe=? AND aa.id_usuario=? AND r.nombre='Tutor'`,[reportId,session.user.id])
+    WHERE i.id_informe=? AND aa.id_usuario=? AND r.nombre=?`,[reportId,session.user.id,reportRole])
   if(!rows.length)throw new DataError(404,'REPORT_NOT_FOUND','El reporte no existe o no pertenece a tu cuenta.')
   const report=rows[0];const parse=(value:any)=>{if(typeof value!=='string')return value;try{return JSON.parse(value)}catch{return value}}
   const [attachments]=await pool.query('SELECT id_adjunto AS id,categoria AS category,nombre_archivo AS name,tipo_archivo AS mimeType,tamano_archivo AS size FROM AdjuntoInformeTutor WHERE id_informe=? ORDER BY id_adjunto',[reportId])
@@ -654,8 +755,9 @@ export async function getTutorReport(session:any,reportId:number){
 }
 
 export async function getTutorReportAttachment(session:any,reportId:number,attachmentId:number){
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores.')
-  const [rows]=await pool.query(`SELECT at.ruta_archivo AS storedPath,at.nombre_archivo AS name FROM AdjuntoInformeTutor at JOIN Informe i ON i.id_informe=at.id_informe JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE at.id_adjunto=? AND i.id_informe=? AND aa.id_usuario=? AND r.nombre='Tutor'`,[attachmentId,reportId,session.user.id])
+  const reportRole=session.activeRole
+  if(!['Tutor','Monitor'].includes(reportRole))throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores y monitores.')
+  const [rows]=await pool.query(`SELECT at.ruta_archivo AS storedPath,at.nombre_archivo AS name FROM AdjuntoInformeTutor at JOIN Informe i ON i.id_informe=at.id_informe JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE at.id_adjunto=? AND i.id_informe=? AND aa.id_usuario=? AND r.nombre=?`,[attachmentId,reportId,session.user.id,reportRole])
   if(!rows.length)throw new DataError(404,'ATTACHMENT_NOT_FOUND','El adjunto no existe o no pertenece a tu reporte.')
   const root=path.resolve(fileURLToPath(new URL('../../api/uploads/tutor-reports/',import.meta.url)));const filePath=path.resolve(root,path.basename(rows[0].storedPath))
   if(!filePath.startsWith(`${root}${path.sep}`))throw new DataError(404,'ATTACHMENT_NOT_FOUND','No se encontró el archivo adjunto.')
@@ -664,8 +766,9 @@ export async function getTutorReportAttachment(session:any,reportId:number,attac
 }
 
 export async function updateTutorReport(session:any,reportId:number,payload:unknown){
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores.')
-  const [rows]=await pool.query("SELECT i.id_sesion AS sessionId,i.estado FROM Informe i JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE i.id_informe=? AND aa.id_usuario=? AND r.nombre='Tutor'",[reportId,session.user.id])
+  const reportRole=session.activeRole
+  if(!['Tutor','Monitor'].includes(reportRole))throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores y monitores.')
+  const [rows]=await pool.query("SELECT i.id_sesion AS sessionId,i.estado FROM Informe i JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE i.id_informe=? AND aa.id_usuario=? AND r.nombre=?",[reportId,session.user.id,reportRole])
   if(!rows.length)throw new DataError(404,'REPORT_NOT_FOUND','El reporte no existe o no pertenece a tu cuenta.')
   if(!['Borrador','Devuelto'].includes(rows[0].estado))throw new DataError(409,'REPORT_LOCKED','Solo puedes editar reportes en borrador o devueltos.')
   const input=tutorReportSchema.parse(payload)
@@ -674,15 +777,17 @@ export async function updateTutorReport(session:any,reportId:number,payload:unkn
 }
 
 export async function deleteTutorReport(session:any,reportId:number){
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores.')
+  const reportRole=session.activeRole
+  if(!['Tutor','Monitor'].includes(reportRole))throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores y monitores.')
   const connection=await pool.getConnection();let paths:string[]=[]
-  try{await connection.beginTransaction();const [rows]=await connection.query("SELECT i.estado FROM Informe i JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE i.id_informe=? AND aa.id_usuario=? AND r.nombre='Tutor' FOR UPDATE",[reportId,session.user.id]);if(!rows.length)throw new DataError(404,'REPORT_NOT_FOUND','El reporte no existe o no pertenece a tu cuenta.');if(rows[0].estado!=='Borrador')throw new DataError(409,'REPORT_LOCKED','Solo puedes eliminar un borrador que todavía no fue enviado a revisión.');const [files]=await connection.query('SELECT ruta_archivo AS path FROM AdjuntoInformeTutor WHERE id_informe=?',[reportId]);paths=files.map((row:any)=>row.path);await connection.execute('DELETE FROM HistorialInforme WHERE id_informe=?',[reportId]);await connection.execute('DELETE FROM Informe WHERE id_informe=?',[reportId]);await connection.commit()}catch(error){await connection.rollback();throw error}finally{connection.release()}
+  try{await connection.beginTransaction();const [rows]=await connection.query("SELECT i.estado FROM Informe i JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol WHERE i.id_informe=? AND aa.id_usuario=? AND r.nombre=? FOR UPDATE",[reportId,session.user.id,reportRole]);if(!rows.length)throw new DataError(404,'REPORT_NOT_FOUND','El reporte no existe o no pertenece a tu cuenta.');if(rows[0].estado!=='Borrador')throw new DataError(409,'REPORT_LOCKED','Solo puedes eliminar un borrador que todavía no fue enviado a revisión.');const [files]=await connection.query('SELECT ruta_archivo AS path FROM AdjuntoInformeTutor WHERE id_informe=?',[reportId]);paths=files.map((row:any)=>row.path);await connection.execute('DELETE FROM HistorialInforme WHERE id_informe=?',[reportId]);await connection.execute('DELETE FROM Informe WHERE id_informe=?',[reportId]);await connection.commit()}catch(error){await connection.rollback();throw error}finally{connection.release()}
   await removeTutorReportFiles(paths);return {id:reportId,deleted:true}
 }
 
 export async function submitTutorReport(session:any,reportId:number) {
-  if(session.activeRole!=='Tutor')throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores.')
-  const [result]=await pool.execute(`UPDATE Informe i JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol JOIN InformeTutorDetalle d ON d.id_informe=i.id_informe SET i.estado='Enviado',i.fecha_envio=NOW() WHERE i.id_informe=? AND aa.id_usuario=? AND r.nombre='Tutor' AND i.estado IN ('Borrador','Devuelto') AND d.descripcion<>''`,[reportId,session.user.id])
+  const reportRole=session.activeRole
+  if(!['Tutor','Monitor'].includes(reportRole))throw new DataError(403,'FORBIDDEN','Esta operación solo está disponible para tutores y monitores.')
+  const [result]=await pool.execute(`UPDATE Informe i JOIN Sesion s ON s.id_sesion=i.id_sesion JOIN AsignacionAcademica aa ON aa.id_asignacion=s.id_asignacion JOIN Rol r ON r.id_rol=aa.id_rol JOIN InformeTutorDetalle d ON d.id_informe=i.id_informe SET i.estado='Enviado',i.fecha_envio=NOW() WHERE i.id_informe=? AND aa.id_usuario=? AND r.nombre=? AND i.estado IN ('Borrador','Devuelto') AND d.descripcion<>''`,[reportId,session.user.id,reportRole])
   if(!result.affectedRows)throw new DataError(409,'REPORT_NOT_READY','Completa y guarda el reporte antes de enviarlo.')
   await pool.execute("INSERT INTO HistorialInforme(id_informe,id_usuario,accion,observacion) VALUES(?,?,'Enviado','Reporte remitido a administración.')",[reportId,session.user.id])
   await publishRoleNotification('Administrador', { category: 'Informe', title: 'Nuevo reporte de tutoría', message: 'Un tutor envió un reporte de sesión para revisión.', entityType: 'informe', entityId: reportId })

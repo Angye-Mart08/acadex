@@ -19,9 +19,11 @@ npm run dev
 ```
 
 En el primer arranque, la cuenta definida en `DATABASE_BOOTSTRAP_USER` crea la
-base `gestion_monitorias_tutorias`, el usuario de aplicación y las 36 tablas
-del esquema con los datos iniciales. En arranques posteriores se detectan las
-tablas esenciales y no se ejecuta nuevamente el instalador.
+base `gestion_monitorias_tutorias` y el usuario de aplicación. El SQL principal
+instala las 46 tablas del volcado recibido; las migraciones automáticas agregan
+las estructuras propias de la versión actual, para un total esperado de 47
+tablas. En arranques posteriores se detectan las tablas esenciales y no se
+ejecuta nuevamente el instalador.
 
 El archivo SQL también puede ejecutarse manualmente desde una terminal de
 MariaDB si se requiere una instalación controlada:
@@ -30,11 +32,14 @@ MariaDB si se requiere una instalación controlada:
 SOURCE C:/Users/brayh/acadex/database/gestion_monitorias_tutorias.sql;
 ```
 
-Este script no elimina la base de datos. La API además sustituye el nombre de
-la base en memoria cuando se usa otro `DATABASE_NAME` para una prueba aislada.
+Este script no elimina ni recrea la base de datos o sus tablas. Sus sentencias
+`REPLACE INTO` sí sustituyen las filas que entren en conflicto con una clave
+primaria o única. La API además sustituye el nombre de la base en memoria
+cuando se usa otro `DATABASE_NAME` para una prueba aislada.
 
-Las migraciones `002` a `009` se aplican automáticamente al iniciar la API. La
-migración `008_historial_solicitudes_cambio_clave.sql` crea un historial durable
+Las migraciones `002` a `014` se aplican automáticamente al iniciar la API,
+excepto `001_integridad_datos.sql`, que requiere la revisión previa descrita más
+adelante. La migración `008_historial_solicitudes_cambio_clave.sql` crea un historial durable
 de solicitudes, conserva las pendientes existentes y actualiza su estado a
 **Completada** cuando una contraseña se restablece.
 
@@ -104,9 +109,17 @@ FROM Solicitud
 ORDER BY id_solicitud DESC;
 ```
 
-El resultado esperado de la instalación local actual es 36 tablas. La cantidad
-de registros puede cambiar cuando se utilice el software; esa es precisamente
-la forma de verificar que las operaciones se están persistiendo.
+El resultado esperado de la instalación local actual, después de aplicar las
+migraciones de la API, es 47 tablas. La cantidad de registros puede cambiar
+cuando se utilice el software; esa es precisamente la forma de verificar que
+las operaciones se están persistiendo.
+
+El archivo principal proviene del volcado `db.sql` suministrado y adapta la
+capitalización de las tablas a la que usa la aplicación en Linux. Sus sentencias
+`REPLACE INTO` sustituyen filas que colisionen con claves primarias o únicas; no
+eliminan las filas que no estén en el volcado. Docker ejecuta este archivo al
+inicializar un volumen vacío; para una base ya instalada, el volcado debe
+aplicarse de forma explícita después de crear un respaldo.
 
 ## Control y observación directa del CRUD en MariaDB
 
@@ -120,7 +133,7 @@ Ejecuta el script de inspección oficial:
 npm run db:inspect
 ```
 
-Este comando se conecta al motor MariaDB en `127.0.0.1:3306`, enumera las 36 tablas del esquema y muestra tablas formateadas con los últimos registros de:
+Este comando se conecta al motor MariaDB en `127.0.0.1:3306`, enumera las 47 tablas del esquema y muestra tablas formateadas con los últimos registros de:
 - **`Usuario`**: ID, código, nombre, correo institucional, estado y roles asignados.
 - **`Espacio`**: ID, código, nombre, tipo, capacidad y estado.
 - **`Solicitud`**: ID, estudiante, asignatura, modalidad, prioridad, estado y fecha de radicación.
@@ -218,6 +231,10 @@ La API rechaza nombres personales con dígitos y entradas no enteras en campos n
 Al iniciar la API se aplica idempotentemente `migrations/002_reportes_tutor.sql` mediante las credenciales bootstrap del `.env`. La migración agrega `InformeTutorDetalle` para el horario real, lugar, conteos, asistentes, SAT y marca de recuperación, y `AdjuntoInformeTutor` para los metadatos de los archivos. El contenido de usuario se conserva; la base no se sobrescribe. En una instalación existente el usuario bootstrap debe tener permisos de `CREATE` y `ALTER`.
 
 Los adjuntos binarios del formulario se guardan en `api/uploads/tutor-reports/` y no se suben a Git. Debe conservarse esta carpeta junto con la copia de seguridad de MariaDB si se requiere retener evidencias. En un despliegue multiinstancia conviene trasladar los archivos a almacenamiento compartido y guardar allí sus identificadores.
+
+## Migración de informes de monitoría
+
+La migración `014_informes_monitor.sql` integra reportes activos de `ReporteMonitoria` al flujo compartido de informes: crea un `Informe` por sesión, agrega el detalle en `InformeTutorDetalle` y registra la creación en `HistorialInforme`. Cada inserción comprueba que el registro relacionado aún no exista, de modo que reiniciar la API no duplica informes ni detalles. Los informes y adjuntos posteriores usan las mismas tablas y reglas de propiedad que los de tutor.
 
 La verificación local posterior a la migración encontró 38 tablas InnoDB, 57 claves foráneas, 27 restricciones `UNIQUE`, 9 restricciones `CHECK` y cero referencias huérfanas. La auditoría también reportó filas de demostración por revisar: 4 credenciales que no parecen bcrypt, 5 códigos de estudiante discrepantes, una persona con más de una asignación activa por rol y una sesión con asignatura/periodo distinto al de la solicitud. La auditoría es de solo lectura y no se corrigieron estos datos. El script aún indica reglas `CHECK` recomendadas ausentes; contrastar su catálogo antes de afirmar que todas las validaciones físicas están instaladas.
 

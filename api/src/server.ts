@@ -5,7 +5,7 @@ import { z, ZodError } from 'zod'
 import { AuthError, cancelRoleSelection, changeAccountPasswordWithCode, changeActiveRole, changeLockedOutPassword, currentUserFromToken, login, requestAccountPasswordCode, requestPasswordChange, revokeSession, selectRole, verifyAccountPasswordCode, verifyLockoutPasswordCode } from './auth.js'
 import { checkDatabaseConnection, initializeDatabase } from './db.js'
 import { config } from './config.js'
-import { DataError, cancelTutorRecovery, completeTutorRecovery, createRequest, createTutorAvailability, createTutorRecovery, dashboard, deleteTutorAvailability, deleteTutorReport, getTutorReport, getTutorReportAttachment, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listSubjects, listTutorAssignments, listTutorRecoverableSessions, listTutorRecoveries, listTutorReportableSessions, saveTutorReport, submitTutorReport, tutorDashboard, updateTutorAvailability, updateTutorReport } from './data.js'
+import { DataError, cancelTutorRecovery, completeTutorRecovery, createMonitorAvailability, createRequest, createTutorAvailability, createTutorRecovery, dashboard, deleteMonitorAvailability, deleteTutorAvailability, deleteTutorReport, getTutorReport, getTutorReportAttachment, listPeriods, listPortalAvailability, listPortalSessions, listRequests, listStudentStaffSchedules, listSubjects, listTutorAssignments, listTutorRecoverableSessions, listTutorRecoveries, listTutorReportableSessions, saveTutorReport, submitTutorReport, tutorDashboard, updateMonitorAvailability, updateTutorAvailability, updateTutorReport } from './data.js'
 import { adminCatalogs, adminDashboard, adminDbStatus, adminReport, assignAdminRequest, assignStudentRequest, changePassword, createAdminFaculty, createAdminPeriod, createAdminProgram, createAdminRequest, createAdminSpace, createAdminSubject, createAdminUser, decideTutorRequest, deleteAdminFaculty, deleteAdminPeriod, deleteAdminProgram, deleteAdminRequest, deleteAdminSpace, deleteAdminSubject, deleteAdminUser, exportTemporaryCredentials, listAdminFaculties, listAdminPeriods, listAdminPrograms, listAdminRequestSlots, listAdminRequestStaff, listAdminRequests, listAdminSpaces, listAdminSubjects, listAdminUsers, listCredentials, listPasswordChangeRequests, listSettings, listStudentRequestStaff, listSuspendedAccounts, resetCredential, unlockSuspendedAccount, updateAdminFaculty, updateAdminPeriod, updateAdminProgram, updateAdminRequest, updateAssignedRequestStatus, updateAdminSpace, updateAdminSubject, updateAdminUser, updateSettings } from './admin.js'
 import { getMonthlyTutorReport, listNotifications, markAllNotificationsRead, markNotificationRead, saveMonthlyTutorDraft } from './notifications.js'
 import { createActivity, getActivityFile, listActivities, listActivitySessions, listActivityStudents, submitActivity } from './activities.js'
@@ -80,11 +80,17 @@ router.get('/tutor/activity-sessions', requireSession, requireRole('Tutor'), asy
 router.get('/tutor/activity-sessions/:id/attendees', requireSession, requireRole('Tutor'), async (req, res, next) => {
   try { res.json(await listActivityStudents(req.session.user.id, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
 })
-router.get('/activities', requireSession, requireRole('Tutor', 'Estudiante'), async (req, res, next) => {
+router.get('/monitor/activity-sessions', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await listActivitySessions(req.session.user.id, 'Monitor')) } catch (error) { next(error) }
+})
+router.get('/monitor/activity-sessions/:id/attendees', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await listActivityStudents(req.session.user.id, idParamSchema.parse(req.params.id), 'Monitor')) } catch (error) { next(error) }
+})
+router.get('/activities', requireSession, requireRole('Tutor', 'Monitor', 'Estudiante'), async (req, res, next) => {
   try { res.json(await listActivities(req.session)) } catch (error) { next(error) }
 })
-router.post('/activities', requireSession, requireRole('Tutor'), async (req, res, next) => {
-  try { res.status(201).json(await createActivity(req.session.user.id, req.body)) } catch (error) { next(error) }
+router.post('/activities', requireSession, requireRole('Tutor', 'Monitor'), async (req, res, next) => {
+  try { res.status(201).json(await createActivity(req.session.user.id, req.body, req.session.activeRole as 'Tutor'|'Monitor')) } catch (error) { next(error) }
 })
 router.post('/activities/:id/submission', requireSession, requireRole('Estudiante'), async (req, res, next) => {
   try {
@@ -92,7 +98,7 @@ router.post('/activities/:id/submission', requireSession, requireRole('Estudiant
     res.status(204).send()
   } catch (error) { next(error) }
 })
-router.get('/activities/:id/files/:kind', requireSession, requireRole('Tutor', 'Estudiante'), async (req, res, next) => {
+router.get('/activities/:id/files/:kind', requireSession, requireRole('Tutor', 'Monitor', 'Estudiante'), async (req, res, next) => {
   try {
     const kind = z.enum(['adjunto', 'entrega']).parse(req.params.kind)
     const file = await getActivityFile(req.session, idParamSchema.parse(req.params.id), kind)
@@ -215,7 +221,14 @@ router.get('/availability', requireSession, async (req, res, next) => {
   try { res.json(await listPortalAvailability(req.session)) } catch (error) { next(error) }
 })
 
+router.get('/student/staff-schedules', requireSession, requireRole('Estudiante'), async (req, res, next) => {
+  try { res.json(await listStudentStaffSchedules(req.session)) } catch (error) { next(error) }
+})
+
 router.get('/tutor/dashboard', requireSession, requireRole('Tutor'), async (req, res, next) => {
+  try { res.json(await tutorDashboard(req.session)) } catch (error) { next(error) }
+})
+router.get('/monitor/dashboard', requireSession, requireRole('Monitor'), async (req, res, next) => {
   try { res.json(await tutorDashboard(req.session)) } catch (error) { next(error) }
 })
 router.get('/tutor/assignments', requireSession, requireRole('Tutor'), async (req, res, next) => {
@@ -229,6 +242,30 @@ router.patch('/tutor/availability/:id', requireSession, requireRole('Tutor'), as
 })
 router.delete('/tutor/availability/:id', requireSession, requireRole('Tutor'), async (req, res, next) => {
   try { await deleteTutorAvailability(req.session, idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+router.post('/monitor/availability', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.status(201).json(await createMonitorAvailability(req.session, req.body)) } catch (error) { next(error) }
+})
+router.patch('/monitor/availability/:id', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await updateMonitorAvailability(req.session, idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+router.delete('/monitor/availability/:id', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { await deleteMonitorAvailability(req.session, idParamSchema.parse(req.params.id)); res.status(204).send() } catch (error) { next(error) }
+})
+router.get('/monitor/recoveries', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await listTutorRecoveries(req.session, 'Monitor')) } catch (error) { next(error) }
+})
+router.get('/monitor/recoverable-sessions', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await listTutorRecoverableSessions(req.session, 'Monitor')) } catch (error) { next(error) }
+})
+router.post('/monitor/recoveries', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.status(201).json(await createTutorRecovery(req.session, req.body, 'Monitor')) } catch (error) { next(error) }
+})
+router.delete('/monitor/recoveries/:id', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { await cancelTutorRecovery(req.session, idParamSchema.parse(req.params.id), 'Monitor'); res.status(204).send() } catch (error) { next(error) }
+})
+router.post('/monitor/recoveries/:id/complete', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { await completeTutorRecovery(req.session, idParamSchema.parse(req.params.id), 'Monitor'); res.status(204).send() } catch (error) { next(error) }
 })
 router.get('/tutor/recoveries', requireSession, requireRole('Tutor'), async (req, res, next) => {
   try { res.json(await listTutorRecoveries(req.session)) } catch (error) { next(error) }
@@ -265,6 +302,34 @@ router.delete('/tutor/reports/:id', requireSession, requireRole('Tutor'), async 
 })
 router.post('/tutor/reports/:id/submit', requireSession, requireRole('Tutor'), async (req, res, next) => {
   try { res.json(await submitTutorReport(req.session, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+})
+
+router.get('/monitor/reportable-sessions', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await listTutorReportableSessions(req.session)) } catch (error) { next(error) }
+})
+router.post('/monitor/reports', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.status(201).json(await saveTutorReport(req.session, req.body)) } catch (error) { next(error) }
+})
+router.get('/monitor/reports/:id', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await getTutorReport(req.session, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+})
+router.get('/monitor/reports/:id/attachments/:attachmentId', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { const file=await getTutorReportAttachment(req.session,idParamSchema.parse(req.params.id),idParamSchema.parse(req.params.attachmentId));res.download(file.path,file.name,error=>{if(error)next(error)}) } catch (error) { next(error) }
+})
+router.patch('/monitor/reports/:id', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await updateTutorReport(req.session, idParamSchema.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+router.delete('/monitor/reports/:id', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await deleteTutorReport(req.session, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+})
+router.post('/monitor/reports/:id/submit', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await submitTutorReport(req.session, idParamSchema.parse(req.params.id))) } catch (error) { next(error) }
+})
+router.get('/monitor/monthly-report', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await getMonthlyTutorReport(req.session, z.string().parse(req.query.month))) } catch (error) { next(error) }
+})
+router.put('/monitor/monthly-report', requireSession, requireRole('Monitor'), async (req, res, next) => {
+  try { res.json(await saveMonthlyTutorDraft(req.session, req.body)) } catch (error) { next(error) }
 })
 
 router.get('/sessions', requireSession, async (req, res, next) => {
